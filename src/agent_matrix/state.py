@@ -8,13 +8,23 @@ from .timeutil import now_iso
 
 
 @contextmanager
-def exclusive_lock(root: Path):
+def exclusive_lock(root: Path, wait=None):
+    """Project-wide lock. `wait` seconds to queue behind another run (default: env
+    AGENT_MATRIX_LOCK_WAIT or 0). Frequent checks keep 0 and simply skip a busy tick;
+    scheduled jobs and model-run commands wait, so a collision never drops them."""
+    import os, time
+    wait = float(os.environ.get("AGENT_MATRIX_LOCK_WAIT", "0")) if wait is None else wait
     root.mkdir(parents=True, exist_ok=True)
     with (root / "matrix.lock").open("a") as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise MatrixBusy("已有实例正在执行；本次未运行。") from exc
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                if time.monotonic() >= deadline:
+                    raise MatrixBusy("已有实例正在执行；本次未运行。") from exc
+                time.sleep(1)
         try:
             yield
         finally:

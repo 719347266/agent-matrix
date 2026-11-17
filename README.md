@@ -93,6 +93,17 @@ cp config.example.yaml config.yaml
 
 `config.yaml`（账号与表格 ID）、`state/`（逐字稿、聊天候选、收据）、`logs/`、生成的文档和验收记录都已加入 `.gitignore`，不进版本库。消息只发给本人。聊天只在本地过滤，只有筛下来的少量句子才会交给模型。
 
+## 本地监控（macOS 菜单栏）
+
+```bash
+./macapp/build.sh        # 编译安装到 ~/Applications/事项中心监控.app，开机自动启动
+```
+
+- 菜单栏图标：✓ 正常，⚠ 有地方要注意，✕ 出错了。
+- 点开能看到：今天发给你的每条消息和时间、各环节最后一次运行时间、排队数量、飞书推送连接状态。按钮可以打开监控页面、打开看板、立即检查、发测试消息、重启监听。
+- 每发出一条飞书消息、每出一次错，都会弹一个 macOS 通知。
+- 数据来自 `python -m agent_matrix.monitor --json`，发送和报错记录在本地的 `state/activity.db`，只读、不联网、不调用模型。
+
 ## 许可：禁止商业使用
 
 本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE.md)。

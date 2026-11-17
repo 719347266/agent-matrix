@@ -201,12 +201,14 @@ def main(argv=None):
     path = args.config.resolve(); root = path.parent
     try:
         config = load(path)
-        with exclusive_lock(root / "state"):
+        with exclusive_lock(root / "state", wait=0 if args.command == "check" else 90):
             state = State(root / "state/state.db")
             try:
                 now = datetime.now(TZ)
                 if args.command == "check":
                     result = check(config, state, now)
+                    from . import activity
+                    activity.beat(root, "聊天检查", f"候选 {result.get('candidates', 0)} 条")
                     print(js(result)); return 0 if result["run_model"] else 2
                 if args.command == "prepare":
                     print(js({"ok": True, **prepare(config, state, root, now)})); return 0
@@ -221,6 +223,8 @@ def main(argv=None):
     except MatrixBusy:
         print(js({"ok": True, "run_model": False, "reason": "busy"})); return 2
     except (MatrixError, OSError, ValueError) as exc:
+        from . import activity
+        activity.log(root, "error", f"聊天 {args.command} 出错", detail=str(exc), status="failed")
         print(js({"ok": False, "error": str(exc) if isinstance(exc, MatrixError) else f"处理失败（{type(exc).__name__}）"})); return 1
 
 

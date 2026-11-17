@@ -432,13 +432,16 @@ def main(argv=None):
     path = args.config.resolve()
     try:
         config = load(path)
-        with exclusive_lock(path.parent / "state"):
+        with exclusive_lock(path.parent / "state", wait=0 if args.command != "text" else 45):
             state = State(path.parent / "state/state.db")
             try:
                 client = Feishu(config, path.parent)
                 client.verify_owner(client.auth()); require_owned(config, state)
                 if args.command in {"poll", "check"}:
-                    print(js(poll(config, client, state)))
+                    result = poll(config, client, state)
+                    from . import activity
+                    activity.beat(path.parent, "回复轮询", f"处理 {result.get('handled', 0)} 条")
+                    print(js(result))
                     return 2
                 if not args.text:
                     raise MatrixError("缺少 --text。")
@@ -456,6 +459,8 @@ def main(argv=None):
         return 2 if args.command != "text" else 1
     except (MatrixError, OSError, ValueError) as exc:
         message = str(exc) if isinstance(exc, MatrixError) else f"处理失败（{type(exc).__name__}）"
+        from . import activity
+        activity.log(path.parent, "error", f"回复处理（{args.command}）出错", detail=message, status="failed")
         print(js({"ok": False, "error": message}) if args.command != "text" else message)
         return 1
 

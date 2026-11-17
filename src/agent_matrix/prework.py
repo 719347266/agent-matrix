@@ -526,7 +526,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     path = args.config.resolve(); config = load(path)
     try:
-        with exclusive_lock(path.parent/"state"):
+        with exclusive_lock(path.parent/"state", wait=0 if args.command == "check" else 90):
             state = State(path.parent/"state/state.db")
             try:
                 queue = WorkQueue(state)
@@ -555,11 +555,18 @@ def main(argv=None):
                         else: queue.defer(args.record_id,args.version,datetime.now(TZ),args.reason)
                         result = {"ok": True}
                 print(js(result))
+                from . import activity
+                if args.command == "check":
+                    activity.beat(path.parent, "代做检查", f"可做 {len(result.get('ready', []))} 件")
+                elif args.command in {"publish", "block"}:
+                    activity.log(path.parent, "prework", ("交付：" if args.command == "publish" else "卡住：") + str(result.get("title") or args.record_id))
                 return 2 if args.command == "check" and not result.get("run_model") else 0
             finally: state.close()
     except MatrixBusy:
         print(js({"ok": True, "run_model": False, "reason": "busy"})); return 2
     except (MatrixError, OSError, ValueError) as exc:
+        from . import activity
+        activity.log(path.parent, "error", f"代做 {args.command} 出错", detail=str(exc), status="failed")
         print(js({"ok": False, "error": str(exc) if isinstance(exc, MatrixError) else "预做文件或结果格式异常，已停止。"})); return 1
 
 

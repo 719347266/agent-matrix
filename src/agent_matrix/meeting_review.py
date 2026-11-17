@@ -267,7 +267,7 @@ def main(argv=None):
     args=p.parse_args(argv); path=args.config.resolve()
     try:
         config=load(path); review=Review.model_validate_json(args.review.read_text())
-        with exclusive_lock(path.parent/"state"):
+        with exclusive_lock(path.parent/"state",wait=90):
             state=State(path.parent/"state/state.db")
             try:
                 row=MeetingQueue(state).get(review.meeting_id)

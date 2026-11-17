@@ -123,12 +123,26 @@ class Feishu:
         argv = ["im", "+messages-send", "--user-id", self.config.owner_open_id, "--msg-type", "interactive",
                 "--content", json.dumps(card, ensure_ascii=False), "--idempotency-key", key,
                 "--as", "bot", "--format", "json"]
+        return self._send_logged(argv, card, key)
+
+    def _send_logged(self, argv, content, key):
+        """Every message to the owner goes through here, so the local monitor sees all of them."""
+        from . import activity
+        title = activity.preview(content)
         try:
-            self._exec([*argv, "--dry-run"])
-        except FeishuError as exc:
-            exc.not_sent = True
+            try:
+                self._exec([*argv, "--dry-run"])
+            except FeishuError as exc:
+                exc.not_sent = True
+                raise
+            receipt = require_message_receipt(self._exec(argv))
+        except Exception as exc:
+            activity.log(self.root, "send", title, detail=str(exc), status="failed", ref=key)
             raise
-        return require_message_receipt(self._exec(argv))
+        from .delivery import message_id
+        activity.log(self.root, "send", title, detail=str(content)[:400] if not isinstance(content, dict) else "",
+                     status="ok", ref=message_id(receipt) or key)
+        return receipt
 
     def send_self(self, text, key):
         if not self.can_message_self:
@@ -140,9 +154,4 @@ class Feishu:
         kind = "--markdown" if re.search(r"\]\(https?://", text) else "--text"
         argv = ["im", "+messages-send", "--user-id", self.config.owner_open_id,
                 kind, text, "--idempotency-key", key, "--as", "bot", "--format", "json"]
-        try:
-            self._exec([*argv, "--dry-run"])
-        except FeishuError as exc:
-            exc.not_sent = True
-            raise
-        return require_message_receipt(self._exec(argv))
+        return self._send_logged(argv, text, key)

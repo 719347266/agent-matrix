@@ -85,3 +85,23 @@ class ListenerReplyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LockTests(unittest.TestCase):
+    def test_waiting_run_gets_the_lock_once_the_other_finishes(self):
+        import threading, time as t
+        from agent_matrix.state import exclusive_lock
+        from agent_matrix.models import MatrixBusy
+        root = Path(tempfile.mkdtemp())
+        with exclusive_lock(root):
+            with self.assertRaises(MatrixBusy):
+                with exclusive_lock(root, wait=0):
+                    pass
+        hold = threading.Event()
+        def holder():
+            with exclusive_lock(root):
+                hold.set(); t.sleep(1.5)
+        threading.Thread(target=holder).start(); hold.wait()
+        start = t.monotonic()
+        with exclusive_lock(root, wait=10):
+            self.assertGreater(t.monotonic() - start, 1)

@@ -33,9 +33,17 @@ def main(argv=None):
         command += ["--config", str(args.config.resolve())]
         if args.preview:
             command.append("--preview")
+        import os
+        # Fixed-time jobs (06:00 / 08:30 / 21:00) queue behind a running check instead of failing.
+        previous = os.environ.get("AGENT_MATRIX_LOCK_WAIT")
+        os.environ["AGENT_MATRIX_LOCK_WAIT"] = previous or "180"
         output, errors = io.StringIO(), io.StringIO()
-        with redirect_stdout(output), redirect_stderr(errors):
-            code = run_cli(command)
+        try:
+            with redirect_stdout(output), redirect_stderr(errors):
+                code = run_cli(command)
+        finally:
+            if previous is None:
+                os.environ.pop("AGENT_MATRIX_LOCK_WAIT", None)
         if code:
             # CLI errors are already sanitized; never expose raw subprocess data.
             try:
@@ -54,11 +62,15 @@ def main(argv=None):
                        f"新增 {result.get('created_count', 0)} 项。")
         else:
             message = "早间简报已处理，送达回执已记录。" if args.job == "morning" else "明日计划已处理，送达回执已记录。"
+        from . import activity
+        activity.log(args.config.resolve().parent, "run", {"recurring": "周期事项", "morning": "早报", "evening": "明日计划"}[args.job], detail=message)
         complete(message)
         return 0
     except Exception as exc:
         # Fail the host run rather than marking an unknown delivery successful.
         message = str(exc) if isinstance(exc, MatrixError) else f"定时运行失败（{type(exc).__name__}）"
+        from . import activity
+        activity.log(args.config.resolve().parent, "error", f"定时任务 {args.job} 出错", detail=message, status="failed")
         print(message, file=sys.stderr)
         return 1
 

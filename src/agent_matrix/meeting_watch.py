@@ -307,7 +307,7 @@ def main(argv=None):
             save(path,config)
             print(js({"ok":True,"started_at":config.meeting_watch_started_at,"processing_allowed":config.transcripts_to_llm_allowed}))
             return 0
-        with exclusive_lock(path.parent/"state"):
+        with exclusive_lock(path.parent/"state",wait=0 if args.command=="check" else 90):
             state=State(path.parent/"state/state.db")
             try:
                 queue=MeetingQueue(state)
@@ -328,6 +328,9 @@ def main(argv=None):
                     else:
                         result=prepare(config,client,queue,args.meeting_id)
                 print(js(result))
+                if args.command=="check":
+                    from . import activity
+                    activity.beat(path.parent,"会议检查",f"待处理 {len(result.get('ready',[]))} 场")
                 return 2 if args.command=="check" and not result["run_model"] else 0
             finally:
                 state.close()
@@ -335,6 +338,8 @@ def main(argv=None):
         print(js({"ok":True,"run_model":False,"reason":"busy"}))
         return 2
     except (MatrixError,OSError,ValueError) as exc:
+        from . import activity
+        activity.log(path.parent,"error",f"会议 {args.command} 出错",detail=str(exc),status="failed")
         print(js({"ok":False,"error":str(exc) if isinstance(exc,MatrixError) else "本地会议队列异常，本轮停止。"}),file=sys.stderr)
         return 1
 

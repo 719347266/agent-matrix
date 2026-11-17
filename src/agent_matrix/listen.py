@@ -116,6 +116,8 @@ class Listener:
             state.set("listen:status", dict(self.status))
         finally:
             state.close()
+        from . import activity
+        activity.beat(self.root, "实时监听", " / ".join(f"{k.split('.')[0]}:{v}" for k, v in self.status.items()))
 
     # ---- event handlers -------------------------------------------------------
     def on_message(self, config, client, state, event):
@@ -165,6 +167,8 @@ class Listener:
             self.retry.append((time.time() + 15, key, event))
         except Exception as exc:  # one bad event must not stop the listener
             log("event failed", key, type(exc).__name__, str(exc)[:200])
+            from . import activity
+            activity.log(self.root, "error", f"实时事件处理出错：{key}", detail=str(exc), status="failed")
 
     # ---- timers -----------------------------------------------------------------
     def every(self, name, seconds):
@@ -208,6 +212,8 @@ class Listener:
                 self.last[name] = 0  # try again on the next loop
             except Exception as exc:
                 log("timer failed", name, type(exc).__name__, str(exc)[:200])
+                from . import activity
+                activity.log(self.root, "error", f"监听定时任务出错：{name}", detail=str(exc), status="failed")
 
     def run(self):
         config = load(self.path)
