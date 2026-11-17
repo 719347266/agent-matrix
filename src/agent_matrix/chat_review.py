@@ -170,8 +170,16 @@ def publish(config, client, state, review):
     kept = validate(config, review, client.root)
     gateway = Gateway(client, state)
     created = []
+    from .merge import find_same, merge_into
+    rows, merged = gateway.rows(), []
     for a, m in kept:
         key = "chat:" + a.message_id + ":" + sha1(re.sub(r"\s+", "", a.title).encode()).hexdigest()[:10]
+        target, _, _ = find_same(rows, a.title)
+        if target is not None:
+            merge_into(gateway, target, title=a.title, source="聊天「" + m["chat_name"][:10] + "」",
+                       detail=f"{m['sender_name']}：{m['text'][:120]}", key=key + ":merge", now=datetime.now(TZ))
+            merged.append(target.get("编号"))
+            continue
         created.append(gateway.create(task_fields(config, a, m), key, "chat-review")["record_id_list"][0])
     state.db.execute("UPDATE chat_candidates SET status='done' WHERE batch=?", (review.batch_id,))
     state.db.commit()
@@ -187,8 +195,13 @@ def publish(config, client, state, review):
         parts = " / ".join(k + " " + " ".join(v) for k, v in groups.items())
         first = next(iter(groups.values()))[0].lstrip("#")
         text = f"聊天 · 新增 {len(shown)} 件：{parts}\n回复：展开 {first} 看原话"
+        if merged:
+            text += "\n另有 " + "、".join(f"#{n}" for n in merged) + " 收到新进展，已并入"
         key = "chat-review-" + sha256(review.batch_id.encode()).hexdigest()[:24]
         message_id = send_once(state, key, lambda: client.send_self(text, key)).get("message_id")
+    from . import activity
+    activity.log(client.root, "detect", f"聊天提取完成：看了 {len(_batch(client.root, review.batch_id)['messages'])} 条，" +
+                 (f"新增 {len(created)} 件" if created else "没有新待办"))
     return {"ok": True, "batch_id": review.batch_id, "created": len(created), "shown": len(shown), "message_id": message_id}
 
 

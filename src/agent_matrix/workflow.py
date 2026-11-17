@@ -17,7 +17,7 @@ from .schema import field, date, select
 
 STATUSES = ['待确认', '未开始', '进行中', '卡住', '待验收', '完成', '取消']
 EXTRA = [field('顺延历史'), date('完成时间'), field('排除本人提醒', 'checkbox'),
-         field('补充材料'), field('拍板结果')]
+         field('补充材料'), field('拍板结果'), select('交付情况', ['有交付', '无交付', '待补交付'])]
 FIELDS = list(dict.fromkeys([*SOURCE_FIELDS, '编号', '执行方', '进度', '卡点', '完成标准',
     '交付物链接', '验收结果', '退回意见', '父事项', '顺延次数', '去重键', '来源链接',
     '预做凭据', '更新时间', '创建时间', '能否AI预做', '类型', '关联任务链接', *[x['name'] for x in EXTRA]]))
@@ -47,7 +47,7 @@ def normalize(key, value):
         return moment.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M')
     if key in {'截止日', '首次截止日'}:
         return day(value).isoformat()
-    if key in {'执行方', '状态', '验收结果', '优先级', '类型', '来源', '方向', '预做策略'}:
+    if key in {'执行方', '状态', '验收结果', '优先级', '类型', '来源', '方向', '预做策略', '交付情况'}:
         return [value] if isinstance(value, str) else value
     if key in {'顺延次数', '延期次数'}:
         return int(value)

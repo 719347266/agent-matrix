@@ -263,19 +263,29 @@ def describe(r, target, by_number):
     return f'#{n} {title}', hint, color, url if st == '待验收' else None
 
 
-def _row_item(r_line, button_url=None):
+def _row_item(r_line, button_url=None, cmd=None, cmd_label=None):
+    """One row: bold title, grey hint; on the right an「打开」link and/or a one-tap action.
+
+    The action button sends {"cmd": "16 过"} back through the card callback; the listener runs it
+    exactly like a typed reply, so clicking and typing behave the same."""
     head, hint, color, _ = r_line
     text = [{'tag': 'markdown', 'content': f'**{head}**'}]
     if hint:
         text.append({'tag': 'markdown', 'content': f"<font color='{color}'>{hint}</font>", 'text_size': 'notation'})
-    if not button_url:
+    buttons = []
+    if button_url:
+        buttons.append({'tag': 'button', 'text': {'tag': 'plain_text', 'content': '打开'}, 'type': 'default', 'size': 'small',
+                        'behaviors': [{'type': 'open_url', 'default_url': button_url}]})
+    if cmd:
+        buttons.append({'tag': 'button', 'text': {'tag': 'plain_text', 'content': '✓ ' + (cmd_label or '完成')},
+                        'type': 'primary', 'size': 'small', 'behaviors': [{'type': 'callback', 'value': {'cmd': cmd}}]})
+    if not buttons:
         return {'tag': 'column_set', 'flex_mode': 'none', 'columns': [
             {'tag': 'column', 'width': 'weighted', 'weight': 1, 'vertical_spacing': '2px', 'elements': text}]}
     return {'tag': 'column_set', 'flex_mode': 'none', 'horizontal_spacing': '8px', 'columns': [
         {'tag': 'column', 'width': 'weighted', 'weight': 4, 'vertical_spacing': '2px', 'elements': text},
-        {'tag': 'column', 'width': 'auto', 'vertical_align': 'center', 'elements': [
-            {'tag': 'button', 'text': {'tag': 'plain_text', 'content': '打开'}, 'type': 'primary', 'size': 'small',
-             'behaviors': [{'type': 'open_url', 'default_url': button_url}]}]}]}
+        {'tag': 'column', 'width': 'auto', 'vertical_align': 'center', 'direction': 'horizontal',
+         'horizontal_spacing': '4px', 'elements': buttons}]}
 
 
 def _block(title, color, items, more=0, *, fill=None):
@@ -341,10 +351,13 @@ def build_card(config, rows, events, target, edition, *, catchup=False, rolls=()
                              [{'tag': 'markdown', 'content': lines + (f"\n<font color='grey'>还有 {more} 场</font>" if more > 0 else '')}]))
     if mine:
         blocks.append(_block(('明天你要做' if edition == 'evening' else '今天你要做') + f' · {len(mine)} 件', 'blue',
-                             [_row_item(describe(r, target, by_number)) for r in mine[:4]], max(0, len(mine) - 4), fill='blue-50'))
+                             [_row_item(describe(r, target, by_number), None if st(r) == '卡住' else describe(r, target, by_number)[3],
+                                        cmd=None if st(r) == '卡住' else f"{number(r['编号'])} 完成", cmd_label='完成')
+                              for r in mine[:4]], max(0, len(mine) - 4), fill='blue-50'))
     if review:
         blocks.append(_block(f'AI 做好了，等你看 · {len(review)} 件', 'blue',
-                             [_row_item(describe(r, target, by_number), describe(r, target, by_number)[3]) for r in review[:5]],
+                             [_row_item(describe(r, target, by_number), describe(r, target, by_number)[3],
+                                        cmd=f"{number(r['编号'])} 过", cmd_label='通过') for r in review[:5]],
                              max(0, len(review) - 5)))
     if decide:
         blocks.append(_block(f'需要你定 · {len(decide)} 件', 'violet',

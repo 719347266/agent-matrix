@@ -35,7 +35,8 @@ from .state import State, exclusive_lock
 from .timeutil import TZ
 
 EVENTS = [("im.message.receive_v1", "bot"), ("vc.meeting.participant_meeting_ended_v1", "user"),
-          ("vc.note.generated_v1", "user"), ("task.task.update_user_access_v2", "user")]
+          ("vc.note.generated_v1", "user"), ("task.task.update_user_access_v2", "user"),
+          ("card.action.trigger", "bot")]
 
 
 def log(*parts):
@@ -53,7 +54,8 @@ class Consumer(threading.Thread):
         delay = 10
         while True:
             env = dict(os.environ, LARKSUITE_CLI_NO_UPDATE_NOTIFIER="1", LARKSUITE_CLI_NO_SKILLS_NOTIFIER="1")
-            proc = subprocess.Popen([self.binary, "event", "consume", self.key, "--as", self.identity],
+            from .feishu import resolve_lark
+            proc = subprocess.Popen([resolve_lark(self.binary), "event", "consume", self.key, "--as", self.identity],
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, env=env)  # stdin stays open: EOF would end the stream
             errors = []
@@ -78,6 +80,10 @@ class Consumer(threading.Thread):
             text = "".join(errors)
             if "not subscribed in console" in text:
                 self.status[self.key] = "not_subscribed"
+                import re as _re
+                link = _re.search(r"https://open\.feishu\.cn/page/launcher[^\s\"]+", text)
+                if link:
+                    self.status["link:" + self.key] = link.group(0)  # kept locally, shown by the monitor
                 time.sleep(600)
                 continue
             if "ready event_key" in text and proc.returncode == 0:
@@ -113,7 +119,8 @@ class Listener:
         state = State(self.root / "state/state.db")
         try:
             state.set("listen:heartbeat", datetime.now(TZ).isoformat())
-            state.set("listen:status", dict(self.status))
+            state.set("listen:status", {k: v for k, v in self.status.items() if not k.startswith("link:")})
+            state.set("listen:links", {k[5:]: v for k, v in self.status.items() if k.startswith("link:")})
         finally:
             state.close()
         from . import activity
@@ -145,6 +152,29 @@ class Listener:
         state.set("inbox:seen:" + mid, True)
         return "handled" if reply else "not_a_command"
 
+    def on_card(self, config, client, state, event):
+        """A「✓ 完成」/「✓ 通过」button on a card: run its command like a typed reply, then confirm."""
+        from .reply import handle
+        from .delivery import send_once
+        from hashlib import sha256
+        if event.get("operator_id") != config.owner_open_id or event.get("action_tag") != "button":
+            return "ignored"
+        try:
+            value = json.loads(event.get("action_value") or "{}")
+        except ValueError:
+            value = {}
+        cmd = value.get("cmd") if isinstance(value, dict) else None
+        eid = event.get("event_id") or ""
+        if not cmd or not eid:
+            return "no_command"
+        if state.get("card:seen:" + eid):
+            return "seen"
+        reply = handle(config, client, state, cmd, source="card", message_ref=eid)
+        if reply:
+            send_once(state, "card-ack:" + eid, lambda: client.send_self(reply, "card-" + sha256(eid.encode()).hexdigest()[:32]))
+        state.set("card:seen:" + eid, True)
+        return "handled"
+
     def on_meeting(self, config, client, state, event):
         from .meeting_watch import MeetingQueue, MeetingSource, ingest
         mid = event.get("meeting_id") or (event.get("note_source") or {}).get("source_entity_id")
@@ -159,7 +189,7 @@ class Listener:
     def dispatch(self, key, event):
         handler = {"im.message.receive_v1": self.on_message, "vc.note.generated_v1": self.on_meeting,
                    "vc.meeting.participant_meeting_ended_v1": self.on_meeting,
-                   "task.task.update_user_access_v2": self.on_task}[key]
+                   "task.task.update_user_access_v2": self.on_task, "card.action.trigger": self.on_card}[key]
         try:
             result = self.locked(lambda c, cl, s: handler(c, cl, s, event))
             log("event", key, "→", json.dumps(result, ensure_ascii=False, default=str)[:160])
@@ -189,8 +219,18 @@ class Listener:
                 if state.get("brief-v1:migration-stage") == "v1_active":
                     out["catch_up"] = catch_up_briefs(config, client, state, now)
                     out["weekly"] = weekly_review.run(config, client, state, now)
+                from . import monitor
+                out["cindy_alert"] = monitor.alert_if_cindy_stalled(self.root, client, state, now)
                 return out
             jobs.append(("minute", minute))
+        if self.every("snapshot", 120):
+            def snapshot(config, client, state):
+                from .workflow import Gateway
+                from . import monitor
+                rows = Gateway(client, state).rows()
+                monitor.save_snapshot(self.root, rows)
+                return {"rows": len(rows)}
+            jobs.append(("snapshot", snapshot))
         if self.every("chats", 600):
             def chat_poll(config, client, state):
                 from .sources import chats
@@ -251,6 +291,9 @@ def main(argv=None):
         finally:
             state.close()
         return 0
+    if sys.stdout is None:  # started without a console (pythonw on Windows): log to a file
+        (path.parent / "logs").mkdir(exist_ok=True)
+        sys.stdout = sys.stderr = open(path.parent / "logs/listen.log", "a", buffering=1, encoding="utf-8")
     Listener(path).run()
 
 

@@ -105,3 +105,90 @@ class LockTests(unittest.TestCase):
         start = t.monotonic()
         with exclusive_lock(root, wait=10):
             self.assertGreater(t.monotonic() - start, 1)
+
+
+class MonitorViewTests(unittest.TestCase):
+    def test_owner_view_groups_and_labels(self):
+        from agent_matrix.monitor import classify
+        now = datetime(2026, 11, 17, 11, 0, tzinfo=TZ)
+        rows = [
+            {"编号": 26, "标题": "备稿", "执行方": "AI", "状态": "待验收"},
+            {"编号": 5, "标题": "改过的文案", "执行方": "AI", "状态": "待验收", "验收结果": "退回"},
+            {"编号": 3, "标题": "找人确认", "执行方": "我", "状态": "卡住", "卡点": "等#26验收备稿"},
+            {"编号": 44, "标题": "备材料", "执行方": "AI", "状态": "卡住", "卡点": "缺数据入口"},
+            {"编号": 1, "标题": "验收测试版", "执行方": "我", "状态": "未开始", "截止日": "2026-11-16T00:00:00+08:00"},
+            {"编号": 40, "标题": "没日期的事", "执行方": "我", "状态": "未开始"},
+            {"编号": 9, "标题": "别人的", "执行方": "别人", "状态": "未开始", "截止日": "2026-11-30T00:00:00+08:00"},
+            {"编号": 7, "标题": "已完成", "执行方": "AI", "状态": "完成"},
+            {"编号": 50, "标题": "写好的方案", "执行方": "我", "状态": "完成", "交付情况": "待补交付", "完成时间": "2026-11-17T10:00:00+08:00"},
+            {"编号": 51, "标题": "打过的电话", "执行方": "我", "状态": "完成", "交付情况": "无交付", "完成时间": "2026-11-17T09:00:00+08:00"},
+            {"编号": 52, "标题": "空选项", "执行方": ["我"], "状态": ["完成"], "交付情况": [], "完成时间": "2026-11-17T08:00:00+08:00"},
+        ]
+        need, moving, backlog, done = classify(rows, now)
+        labels = {x["n"]: x["label"] for x in need + moving}
+        self.assertEqual(labels[26], "待你验收"); self.assertEqual(labels[5], "待你复查")
+        self.assertEqual(labels[44], "卡住"); self.assertIn(44, [x["n"] for x in need])
+        self.assertEqual(labels[3], "等 AI 备稿"); self.assertNotIn(3, [x["n"] for x in need])
+        self.assertEqual(labels[1], "逾期")
+        self.assertEqual([x["n"] for x in backlog], [40])
+        self.assertNotIn(9, labels); self.assertNotIn(7, labels)
+        self.assertEqual([(x["n"], x["label"]) for x in done], [(50, "待补交付"), (51, "无需交付"), (52, "已完成")])
+        self.assertIn((50, "补交付"), [(x["n"], x["label"]) for x in need])
+
+
+class SameThingTests(unittest.TestCase):
+    def rows(self):
+        def r(n, title, st="未开始", **k):
+            return {"record_id": f"rec{n}", "编号": n, "标题": title, "状态": [st], **k}
+        return [r(35, "角色默认动作需要调整为随机，并且在对话过程中需要根据情境调整"),
+                r(36, "角色默认动作需要调整为不一致，并且在对话过程中需要根据情境调"),
+                r(30, "聚光方案撰写"), r(44, "备材料：聚光方案撰写", 父事项=[{"id": "rec30"}]),
+                r(3, "核对标签体系文档并取得确认"), r(31, "撰写标签体系需求文档"),
+                r(8, "刷好评"), r(9, "已经做完的投放方案", st="完成"),
+                r(12, "整理周报", 关联任务链接="https://applink.feishu.cn/client/todo/detail?guid=11111111-2222-3333-4444-555555555555")]
+
+    def test_strong_match_merges_weak_one_only_suggests(self):
+        from agent_matrix.merge import find_same, duplicate_pairs
+        target, score, how = find_same(self.rows(), "角色默认动作需要调整为随机，对话过程中根据情境调整")
+        self.assertEqual(target["编号"], 35)
+        loose, loose_score, _ = find_same(self.rows(), "角色默认动作调整为随机，对话中按情境调整")
+        self.assertIsNone(loose)            # a loose rewording is only suggested, never merged on its own
+        self.assertGreater(loose_score, 0.45)
+        self.assertIsNone(find_same(self.rows(), "刷单")[0])
+        self.assertIsNone(find_same(self.rows(), "投放方案")[0])  # the only similar item is already done
+        by_link = find_same(self.rows(), "完全不同的标题", task_link="https://applink.feishu.cn/client/todo/detail?guid=11111111-2222-3333-4444-555555555555")
+        self.assertEqual((by_link[0]["编号"], by_link[2]), (12, "同一个飞书任务"))
+        pairs = {(p["drop"], p["keep"]) for p in duplicate_pairs(self.rows())}
+        self.assertIn((36, 35), pairs)
+        self.assertNotIn((44, 30), pairs)  # parent and its AI preparation child belong together
+        self.assertNotIn((36, 35), {(p["drop"], p["keep"]) for p in duplicate_pairs(self.rows(), ["35-36"])})
+
+    def test_model_same_as_must_point_at_an_open_matching_item(self):
+        from agent_matrix.meeting_review import _same_target, Action
+        base = dict(text="t", quote="q", timestamp="00:10", reference="00:10 q", commitment_phrase="q", confidence=0.9,
+                    title="写标签体系需求")
+        self.assertEqual(_same_target(self.rows(), Action(**base, same_as=31))["编号"], 31)
+        with self.assertRaises(MatrixError):
+            _same_target(self.rows(), Action(**base, same_as=9))   # finished
+        with self.assertRaises(MatrixError):
+            _same_target(self.rows(), Action(**{**base, "title": "订机票"}, same_as=8))  # nothing in common
+
+    def test_owner_merges_or_marks_distinct(self):
+        from datetime import date, datetime
+        from agent_matrix.reply import Applier, parse
+        from types import SimpleNamespace
+        data = {r["record_id"]: dict(r) for r in self.rows()}
+        store = {}
+        gw = SimpleNamespace(rows=lambda: list(data.values()), client=SimpleNamespace(root=tempfile.mkdtemp()),
+                             update=lambda before, patch, key, source: data[before["record_id"]].update(patch))
+        a = Applier.__new__(Applier)
+        a.config, a.gateway, a.client = CONFIG, gw, None
+        a.state = SimpleNamespace(get=lambda k, d=None: store.get(k, d), set=lambda k, v: store.__setitem__(k, v))
+        a.source, a.ref, a.now = "test", "m", datetime(2026, 11, 17, 12, tzinfo=TZ)
+        out = [line for op in parse("36 合并到 35", date(2026, 11, 17))[0] for line in a.apply(op)]
+        self.assertIn("已并入 #35", out[0])
+        self.assertEqual((data["rec36"]["状态"], data["rec36"]["排除本人提醒"]), (["取消"], True))
+        self.assertIn("角色默认动作需要调整为不一致", data["rec35"]["补充材料"])
+        out = [line for op in parse("31 不重复", date(2026, 11, 17))[0] for line in a.apply(op)]
+        self.assertIn("不是重复", out[0])
+        self.assertIn("3-31", store["merge:distinct"])

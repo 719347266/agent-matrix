@@ -77,7 +77,7 @@ cp config.example.yaml config.yaml
 |---|---|---|
 | 06:00 | 只跑脚本 | `python -m agent_matrix.scheduled recurring` |
 | 工作日 08:30 / 21:00 | 只跑脚本 | `python -m agent_matrix.scheduled morning` / `evening` |
-| 每 2 分钟 | 前置脚本 + 模型 | 前置脚本依次跑 `reply poll`，以及 `meeting_watch`、`prework`、`chat_review` 的 `check`。任一项 run_model 为 true 才唤醒模型，模型按 `prompts/routine.md` 执行 |
+| 每 2 分钟 | 前置脚本 + 模型 | `python -m agent_matrix.precheck`：先处理回复，再跑会议、代做、聊天三项检查；退出码 0 才唤醒模型，模型按 `prompts/routine.md` 执行 |
 
 ## 常用命令
 
@@ -92,6 +92,32 @@ cp config.example.yaml config.yaml
 ## 隐私
 
 `config.yaml`（账号与表格 ID）、`state/`（逐字稿、聊天候选、收据）、`logs/`、生成的文档和验收记录都已加入 `.gitignore`，不进版本库。消息只发给本人。聊天只在本地过滤，只有筛下来的少量句子才会交给模型。
+
+## Windows
+
+需要 Windows 10/11、Python 3.11+、Node.js，以及已登录的 `lark-cli`（`npm install -g @larksuite/cli`，再运行 `lark-cli auth login`）。
+
+```powershell
+git clone https://github.com/MILESMAKMAK/agent-matrix.git
+cd agent-matrix
+powershell -ExecutionPolicy Bypass -File windows\install.ps1
+```
+
+安装脚本会建好 `.venv` 并装上依赖（含托盘所需的 `pystray`、`Pillow`），然后在"任务计划程序"里注册：
+
+| 任务 | 时间 | 作用 |
+|---|---|---|
+| AgentMatrix Listener | 登录时启动，崩溃后 1 分钟自动重启 | 实时监听（同 macOS 的 launchd） |
+| AgentMatrix Tray | 登录时启动 | 任务栏右下角的托盘监控 |
+| AgentMatrix Recurring | 每天 06:00 | 周期事项 |
+| AgentMatrix Morning Brief | 工作日 08:30 | 早报 |
+| AgentMatrix Evening Plan | 工作日 21:00 | 明日计划 |
+
+托盘图标颜色：蓝 = 有事需要你，绿 = 一切正常，橙 = 要注意，红 = 出错了。点开能看"需要你 / 正在进行 / 今天发生了什么"，可以打开完整页面和飞书看板；每发一条消息、每出一次错都会弹系统通知。
+
+首次使用还要按上面"安装"一节，运行一次 `setup`、`brief_migration setup-fields`、`brief_migration apply`。卸载计划任务：`powershell -ExecutionPolicy Bypass -File windows\uninstall.ps1`（不删数据）。
+
+**AI 例行任务（任何系统、任何 AI 宿主都一样）**：让你的 AI 助手每 2 分钟在项目目录运行 `python -m agent_matrix.precheck`。退出码 0 表示有活，按 `prompts/routine.md` 处理；2 表示没事，不用唤醒模型；1 表示检查出错。
 
 ## 本地监控（macOS 菜单栏）
 

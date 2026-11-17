@@ -15,6 +15,7 @@ class ScheduledTests(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch("agent_matrix.scheduled.load", return_value=Config(scheduling_enabled=enabled)), \
              patch("agent_matrix.scheduled.run_cli", side_effect=run) as cli, \
+             patch("agent_matrix.activity.log"), \
              redirect_stdout(out), redirect_stderr(err):
             status = main(argv)
         return status, out.getvalue(), err.getvalue(), cli

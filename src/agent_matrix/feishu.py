@@ -12,6 +12,22 @@ READS = {"+base-get", "+table-list", "+table-get", "+field-list", "+view-list", 
 WRITES = {"+base-create", "+table-create", "+field-create", "+view-create", "+view-set-filter", "+record-batch-create", "+record-batch-update"}
 
 
+def resolve_lark(binary):
+    """On Windows the npm shim is lark-cli.cmd; run the native lark-cli.exe it wraps instead,
+    so JSON arguments never pass through cmd.exe quoting. Elsewhere the name is used as is."""
+    if os.name != "nt":
+        return binary
+    import shutil
+    found = shutil.which(binary)
+    if not found:
+        return binary
+    if found.lower().endswith((".cmd", ".bat", ".ps1")):
+        exe = os.path.join(os.path.dirname(found), "node_modules", "@larksuite", "cli", "bin", "lark-cli.exe")
+        if os.path.isfile(exe):
+            return exe
+    return found
+
+
 def permission_scope(args):
     # Only stable operation/resource IDs, never message text, dates or secrets.
     flags = ("--as", "--base-token", "--table-id", "--calendar-id", "--user-id", "--chat-id", "--meeting-id", "--task-guid")
@@ -43,7 +59,7 @@ class Feishu:
         self.authorized_scopes.discard(scope)
         env = dict(os.environ, LARKSUITE_CLI_NO_UPDATE_NOTIFIER="1", LARKSUITE_CLI_NO_SKILLS_NOTIFIER="1")
         try:
-            r = self.runner([self.config.lark_binary, *args], cwd=self.root, env=env,
+            r = self.runner([resolve_lark(self.config.lark_binary), *args], cwd=self.root, env=env,
                             capture_output=True, text=True, timeout=self.config.timeout_seconds, check=False)
         except subprocess.TimeoutExpired as exc:
             raise FeishuError("timeout") from exc

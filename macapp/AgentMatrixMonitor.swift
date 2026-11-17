@@ -1,37 +1,41 @@
-// Menu bar monitor for agent-matrix. Reads status from `python -m agent_matrix.monitor --json`
-// every 15 s, shows health at a glance, and posts a macOS notification for every message the
-// system sends you and every error. No network access of its own; no model calls.
+// Menu bar monitor for agent-matrix, seen from the owner's side: what needs me, what is moving,
+// what happened today. System problems only appear when there is one, in plain words with the
+// fix as a button. Reads `python -m agent_matrix.monitor --json` every 15 s. No model calls.
 import SwiftUI
 import AppKit
 
-struct SendItem: Identifiable { let id: Int; let time: String; let title: String; let ok: Bool }
-struct Issue: Identifiable { let id = UUID(); let text: String; let level: String }
-struct Component: Identifiable { let id = UUID(); let name: String; let minutesAgo: Double?; let summary: String }
+struct Item: Identifiable { let id = UUID(); let n: Int; let label: String; let tone: String; let title: String; let note: String; let who: String; let due: String; let reply: String; let url: String?; let cmd: String?; let cmdLabel: String }
+
+/// Numbers may arrive as 16 or "16"; never fall back to 0 silently.
+func number(_ v: Any?) -> Int { if let i = v as? Int { return i }; if let s = v as? String, let i = Int(s) { return i }; return -1 }
+struct Line: Identifiable { let id = UUID(); let time: String; let kind: String; let title: String; let ok: Bool }
+struct Problem: Identifiable { let id = UUID(); let level: String; let title: String; let what: String; let done: String; let you: String; let action: String?; let urls: [String] }
 
 @MainActor
 final class Monitor: ObservableObject {
     @Published var level = "unknown"
     @Published var headline = "读取中…"
-    @Published var issues: [Issue] = []
-    @Published var sends: [SendItem] = []
-    @Published var components: [Component] = []
-    @Published var queues: [(String, Int)] = []
-    @Published var streams: [(String, String)] = []
+    @Published var summary = ""
+    @Published var need: [Item] = []
+    @Published var moving: [Item] = []
+    @Published var backlog = 0
+    @Published var done: [Item] = []
+    @Published var timeline: [Line] = []
+    @Published var problems: [Problem] = []
     @Published var updated = ""
     @Published var busy = ""
     var boardURL: String?
     var pagePath: String?
     let root: String
     private var lastSeen: Int
+    private var lastRestart = Date.distantPast
     private var timer: Timer?
 
     init() {
         root = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixRoot") as? String ?? ""
         lastSeen = UserDefaults.standard.integer(forKey: "lastSeenEvent")
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
-            Task { @MainActor in self.refresh() }
-        }
+        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in Task { @MainActor in self.refresh() } }
     }
 
     nonisolated static func python(_ root: String, _ args: [String]) -> Data? {
@@ -57,36 +61,53 @@ final class Monitor: ObservableObject {
         }
     }
 
+    private func items(_ raw: Any?) -> [Item] {
+        (raw as? [[String: Any]] ?? []).map {
+            Item(n: number($0["n"]), label: $0["label"] as? String ?? "", tone: $0["tone"] as? String ?? "gray",
+                 title: $0["title"] as? String ?? "", note: $0["note"] as? String ?? "", who: $0["who"] as? String ?? "",
+                 due: $0["due"] as? String ?? "", reply: $0["reply"] as? String ?? "", url: $0["url"] as? String,
+                 cmd: $0["cmd"] as? String, cmdLabel: $0["cmd_label"] as? String ?? "完成")
+        }
+    }
+
     private func apply(_ data: Data?) {
         guard let data, let s = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            level = "error"; headline = "读不到状态（监控命令失败）"; return
+            level = "error"; headline = "读不到状态"; summary = "监控命令没有返回结果，点 ⋯ → 重启监听"; return
         }
         level = s["level"] as? String ?? "unknown"
         headline = s["headline"] as? String ?? ""
+        summary = s["summary"] as? String ?? ""
         updated = String((s["generated_at"] as? String ?? "").dropFirst(11).prefix(5))
         boardURL = s["board_url"] as? String
         pagePath = s["page"] as? String
-        issues = (s["issues"] as? [[String: Any]] ?? []).map { Issue(text: $0["text"] as? String ?? "", level: $0["level"] as? String ?? "") }
-        sends = (s["sends_today"] as? [[String: Any]] ?? []).map {
-            SendItem(id: $0["id"] as? Int ?? 0, time: $0["time"] as? String ?? "", title: $0["title"] as? String ?? "", ok: $0["ok"] as? Bool ?? false)
-        }.reversed()
-        components = (s["components"] as? [[String: Any]] ?? []).map {
-            Component(name: $0["name"] as? String ?? "", minutesAgo: $0["minutes_ago"] as? Double, summary: $0["summary"] as? String ?? "")
+        need = items(s["need_you"]); moving = items(s["in_progress"]); done = items(s["done_recent"])
+        backlog = s["backlog_count"] as? Int ?? 0
+        timeline = (s["timeline"] as? [[String: Any]] ?? []).map {
+            Line(time: $0["time"] as? String ?? "", kind: $0["kind"] as? String ?? "", title: $0["title"] as? String ?? "", ok: $0["ok"] as? Bool ?? true)
         }
-        queues = ((s["queues"] as? [String: Int]) ?? [:]).sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
-        streams = (s["streams"] as? [[String: Any]] ?? []).map { ($0["name"] as? String ?? "", $0["state"] as? String ?? "") }
-        notifyNew(s["events_today"] as? [[String: Any]] ?? [], latest: s["latest_event_id"] as? Int ?? 0)
+        problems = (s["issues"] as? [[String: Any]] ?? []).map {
+            Problem(level: $0["level"] as? String ?? "", title: $0["title"] as? String ?? "", what: $0["what"] as? String ?? "",
+                    done: $0["done"] as? String ?? "", you: $0["you"] as? String ?? "", action: ($0["action"] as? [String: Any])?["kind"] as? String,
+                    urls: ($0["action"] as? [String: Any])?["urls"] as? [String] ?? [])
+        }
+        // Self-repair: a stopped listener is restarted without asking (at most every 5 minutes).
+        if (s["auto_restart_listener"] as? Bool ?? false) && Date().timeIntervalSince(lastRestart) > 300 {
+            lastRestart = Date(); restartListener(quiet: true)
+        }
+        notifyNew(s["notify"] as? [[String: Any]] ?? [], latest: s["latest_event_id"] as? Int ?? 0)
     }
 
-    /// One macOS notification per new send / error since last time. The very first run only
-    /// remembers where it is, so installing the app does not replay the whole day.
     private func notifyNew(_ events: [[String: Any]], latest: Int) {
-        if lastSeen == 0 { lastSeen = latest; UserDefaults.standard.set(latest, forKey: "lastSeenEvent"); return }
+        if lastSeen == 0 || latest < lastSeen { lastSeen = latest; UserDefaults.standard.set(latest, forKey: "lastSeenEvent"); return }
         let fresh = events.filter { ($0["id"] as? Int ?? 0) > lastSeen }.sorted { ($0["id"] as? Int ?? 0) < ($1["id"] as? Int ?? 0) }
-        for e in fresh.prefix(5) {
+        for e in fresh.prefix(4) {
             let ok = e["ok"] as? Bool ?? true, kind = e["kind"] as? String ?? "", title = e["title"] as? String ?? ""
-            if kind == "send" { post(ok ? "已发到飞书" : "飞书发送失败", title) }
-            else if !ok { post("事项中心出错", title) }
+            switch (kind, ok) {
+            case ("send", true): post("已发到你的飞书", title)
+            case ("send", false): post("飞书消息没发出去", title)
+            case ("prework", _): post("AI 有进展", title)
+            default: if !ok { post("事项中心出了点问题", title) }
+            }
         }
         if latest > lastSeen { lastSeen = latest; UserDefaults.standard.set(latest, forKey: "lastSeenEvent") }
     }
@@ -100,81 +121,170 @@ final class Monitor: ObservableObject {
     }
 
     func run(_ label: String, _ args: [String]) {
-        busy = label + "…"
+        busy = label
         let root = self.root
         Task.detached {
-            _ = Monitor.python(root, args)
-            await MainActor.run { self.busy = ""; self.refresh() }
+            let data = Monitor.python(root, args)
+            // Show what happened (e.g. "#1 → 完成 ✓，交付文件没找到…") for a few seconds.
+            let said = String(data: data ?? Data(), encoding: .utf8)?
+                .split(separator: "\n").first.map(String.init) ?? ""
+            await MainActor.run {
+                self.busy = said.hasPrefix("{") ? "" : said
+                self.refresh()
+            }
+            try? await Task.sleep(for: .seconds(10))
+            await MainActor.run { if self.busy == said { self.busy = "" } }
         }
     }
 
-    func restartListener() {
+    func restartListener(quiet: Bool = false) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = ["kickstart", "-k", "gui/\(getuid())/com.agent-matrix.listen"]
         try? p.run(); p.waitUntilExit()
-        busy = "已重启监听"
+        if !quiet { busy = "正在重启监听…" }
         Task { try? await Task.sleep(for: .seconds(20)); self.busy = ""; self.refresh() }
     }
 
-    var color: Color { level == "ok" ? .green : level == "warn" ? .orange : level == "error" ? .red : .gray }
-    var symbol: String { level == "ok" ? "checkmark.circle" : level == "warn" ? "exclamationmark.triangle" : level == "error" ? "xmark.octagon" : "circle.dashed" }
+    func open(_ s: String?) { if let s, let u = URL(string: s) { NSWorkspace.shared.open(u) } }
+    func perform(_ p: Problem) {
+        switch p.action {
+        case "restart_listener": restartListener()
+        case "subscribe": p.urls.forEach { open($0) }  // links come from the local listener, never from the code
+        default: break
+        }
+    }
+
+    var symbol: String { level == "error" ? "xmark.octagon" : !need.isEmpty ? "tray.full" : level == "warn" ? "exclamationmark.triangle" : "checkmark.circle" }
+}
+
+func toneColor(_ t: String) -> Color {
+    switch t { case "red": return .red; case "orange": return .orange; case "purple": return .purple; case "blue": return .blue; default: return .gray }
+}
+
+struct Badge: View {
+    let text: String; let tone: String
+    var body: some View {
+        Text(text).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(toneColor(tone), in: Capsule())
+    }
+}
+
+struct Row: View {
+    let item: Item; let m: Monitor
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Badge(text: item.label, tone: item.tone).frame(width: 64, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.n >= 0 ? "#\(item.n) \(item.title)" : item.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                let meta = [item.note, item.due].filter { !$0.isEmpty }.joined(separator: " · ")
+                if !meta.isEmpty { Text(meta).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
+                if !item.reply.isEmpty { Text("回复：\(item.reply)").font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1) }
+            }
+            Spacer(minLength: 4)
+            if let u = item.url { Button("打开") { m.open(u) }.buttonStyle(.link).font(.system(size: 11)) }
+            if let c = item.cmd {
+                // Same as replying "16 过" / "1 完成": written to the table, read back, then confirmed on Feishu.
+                Button("✓ " + item.cmdLabel) { m.run("处理中…", ["agent_matrix.reply", "--text", c]) }
+                    .controlSize(.mini)
+            }
+        }
+    }
+}
+
+struct Section<Content: View>: View {
+    let title: String; @ViewBuilder let content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            content
+        }
+    }
 }
 
 struct Panel: View {
     @ObservedObject var m: Monitor
-    func ago(_ v: Double?) -> String { guard let v else { return "从未" }; return v < 1 ? "刚刚" : v < 120 ? "\(Int(v)) 分钟前" : String(format: "%.1f 小时前", v / 60) }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Circle().fill(m.color).frame(width: 10, height: 10)
-                Text(m.headline).font(.headline)
-                Spacer()
-                Text(m.busy.isEmpty ? "更新 \(m.updated)" : m.busy).font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(m.issues.prefix(4)) { i in
-                Text(i.text).font(.caption).foregroundStyle(i.level == "error" ? .red : .orange).fixedSize(horizontal: false, vertical: true)
-            }
-            Divider()
-            Text("今天发给你的消息（\(m.sends.count)）").font(.subheadline.bold())
-            if m.sends.isEmpty { Text("还没有").font(.caption).foregroundStyle(.secondary) }
-            ForEach(m.sends.prefix(6)) { s in
-                HStack(alignment: .top) {
-                    Text(s.time).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Text(s.title).font(.caption).lineLimit(1)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(m.headline).font(.system(size: 15, weight: .semibold))
                     Spacer()
-                    Text(s.ok ? "✓" : "✗ 失败").font(.caption).foregroundStyle(s.ok ? .green : .red)
+                    Menu {
+                        Button("立即检查一次") { m.run("检查中…", ["agent_matrix.reply", "poll"]) }
+                        Button("给我发条测试消息") { m.run("发送中…", ["agent_matrix.monitor", "--test-send"]) }
+                        Button("清掉已处理的提示") { m.run("清理中…", ["agent_matrix.monitor", "--clear-resolved", "--json"]) }
+                        Button("重启监听") { m.restartListener() }
+                        Divider()
+                        Button("退出监控") { NSApp.terminate(nil) }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).fixedSize()
                 }
+                Text(m.busy.isEmpty ? "\(m.summary) · \(m.updated) 更新" : m.busy).font(.system(size: 11))
+                    .foregroundStyle(m.busy.isEmpty ? Color.secondary : Color.accentColor).lineLimit(3)
+            }
+
+            ForEach(m.problems.filter { $0.level == "error" || $0.level == "warn" }) { p in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text((p.level == "setup" ? "⚙︎ " : "⚠︎ ") + p.title).font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(p.level == "error" ? .red : p.level == "setup" ? .primary : .orange)
+                    Text(p.what).font(.system(size: 11))
+                    Text("系统：" + p.done).font(.system(size: 11)).foregroundStyle(.secondary)
+                    HStack {
+                        if !p.you.isEmpty { Text("你：" + p.you).font(.system(size: 11)) }
+                        Spacer()
+                        if p.action == "subscribe" && !p.urls.isEmpty { Button("去订阅") { m.perform(p) }.controlSize(.small) }
+                        if p.action == "restart_listener" { Button("重启监听") { m.perform(p) }.controlSize(.small) }
+                    }
+                }
+                .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            Section(title: "需要你（\(m.need.count)）") {
+                if m.need.isEmpty { Text("没有要你处理的 ✓").font(.system(size: 12)).foregroundStyle(.secondary) }
+                ForEach(m.need.prefix(6)) { Row(item: $0, m: m) }
+                if m.need.count > 6 { Text("还有 \(m.need.count - 6) 件，点「完整页面」").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             Divider()
-            Text("各环节最后一次运行").font(.subheadline.bold())
-            ForEach(m.components) { c in
-                HStack { Text(c.name).font(.caption); Spacer(); Text(ago(c.minutesAgo)).font(.caption).foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 12) {
-                ForEach(m.queues, id: \.0) { q in Text("\(q.0) \(q.1)").font(.caption2).foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 10) {
-                ForEach(m.streams, id: \.0) { s in
-                    Text("\(s.0)·\(s.1)").font(.caption2).foregroundStyle(s.1 == "已连接" ? .green : .orange)
-                }
+            Section(title: "正在进行（\(m.moving.count)）") {
+                if m.moving.isEmpty { Text("暂无").font(.system(size: 12)).foregroundStyle(.secondary) }
+                ForEach(m.moving.prefix(6)) { Row(item: $0, m: m) }
+                if m.moving.count > 6 { Text("还有 \(m.moving.count - 6) 件").font(.system(size: 11)).foregroundStyle(.secondary) }
+                if m.backlog > 0 { Text("另有 \(m.backlog) 件你的待办没定日期或还没到期").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             Divider()
-            HStack {
-                Button("监控页面") { if let p = m.pagePath { NSWorkspace.shared.open(URL(fileURLWithPath: p)) } }
-                Button("飞书看板") { if let u = m.boardURL, let url = URL(string: u) { NSWorkspace.shared.open(url) } }
-                Button("立即检查") { m.run("检查中", ["agent_matrix.reply", "poll"]) }
+            Section(title: "最近完成（\(m.done.count)）") {
+                if m.done.isEmpty { Text("最近 7 天还没有完成的事").font(.system(size: 12)).foregroundStyle(.secondary) }
+                ForEach(m.done.prefix(4)) { Row(item: $0, m: m) }
+            }
+            Divider()
+            Section(title: "今天") {
+                if m.timeline.isEmpty { Text("今天还没有动静").font(.system(size: 12)).foregroundStyle(.secondary) }
+                ForEach(m.timeline.prefix(5)) { l in
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(l.time).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                        Text(l.kind).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(l.title).font(.system(size: 11)).lineLimit(1)
+                        if !l.ok { Text("✗").font(.system(size: 11)).foregroundStyle(.red) }
+                    }
+                }
+            }
+            ForEach(m.problems.filter { $0.level == "setup" }) { p in
+                HStack {
+                    Text("⚙︎ " + p.title).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer()
+                    if !p.urls.isEmpty { Button("去订阅") { m.perform(p) }.controlSize(.mini) }
+                }
             }
             HStack {
-                Button("发条测试消息") { m.run("发送中", ["agent_matrix.monitor", "--test-send"]) }
-                Button("重启监听") { m.restartListener() }
+                Button("完整页面") { if let p = m.pagePath { NSWorkspace.shared.open(URL(fileURLWithPath: p)) } }
+                Button("飞书看板") { m.open(m.boardURL) }
                 Spacer()
-                Button("退出") { NSApp.terminate(nil) }
-            }
+            }.controlSize(.small)
         }
         .padding(14)
-        .frame(width: 360)
+        .frame(width: 380)
     }
 }
 

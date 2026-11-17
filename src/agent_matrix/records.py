@@ -31,7 +31,7 @@ def read_records(client, state, table_name, fields):
             path=Path(directory)/f"page-{page}.ndjson"
             client._exec(["base","+record-list","--base-token",client.config.base_token,"--table-id",table_id,
                           *projection,"--offset",str(offset),"--as","user","--format","ndjson",
-                          "--output",str(path.relative_to(root))],manifest=True)
+                          "--output",path.relative_to(root).as_posix()],manifest=True)
             meta=json.loads(path.with_suffix(".manifest.json").read_text())
             if (meta.get("base_token"),meta.get("table_id"))!=(client.config.base_token,table_id):
                 raise MatrixError("返回数据与请求表格不一致。")

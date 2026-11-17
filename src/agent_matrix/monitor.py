@@ -1,7 +1,16 @@
-"""What the system is doing, for the menu bar app and the local page. Read-only, no model.
+"""What is going on, seen from the owner's side: tasks first, system only when it needs you.
 
-    python -m agent_matrix.monitor --json [--write-html]   # status for the menu bar app
+    python -m agent_matrix.monitor --json [--write-html]   # for the menu bar app / local page
     python -m agent_matrix.monitor --test-send              # send yourself one test message
+
+Sections:
+  需要你     items waiting for the owner: review, re-check after a rejection, decide, give material
+  正在进行   everything in motion with who does it, progress, and a plain status label
+  今天       timeline: detections (meetings / chats / Feishu tasks), replies, messages sent
+  系统问题   only real problems, each with what happened / what the system did / what you do
+
+Self-repair: a stopped listener is restarted by the menu bar app; a stalled Cindy routine is
+reported to the owner on Feishu once (it can only be fixed in Cindy). Nothing calls a model.
 """
 import argparse
 from datetime import datetime, timedelta
@@ -15,15 +24,157 @@ import sqlite3
 from . import activity
 from .timeutil import TZ
 
-COMPONENTS = [("实时监听", 3, "常驻监听程序（每分钟心跳）"), ("回复轮询", 12, "Cindy「飞书回复轮询」（每 5 分钟）"),
-              ("会议检查", 10, "Cindy「会议复盘与提前代做」（每 2 分钟）"), ("代做检查", 10, "同上"),
-              ("聊天检查", 10, "同上")]
-EVENT_NAMES = {"im.message.receive_v1": "私聊回复", "vc.meeting.participant_meeting_ended_v1": "会议结束",
+EVENT_NAMES = {"card.action.trigger": "卡片按钮", "im.message.receive_v1": "私聊回复", "vc.meeting.participant_meeting_ended_v1": "会议结束",
                "vc.note.generated_v1": "逐字稿生成", "task.task.update_user_access_v2": "飞书任务变化"}
-STATE_WORDS = {"live": "已连接", "not_subscribed": "未订阅", "connecting": "连接中", "reconnecting": "重连中"}
-CINDY_SCHEDULES = ["事项中心｜每日周期事项", "事项中心｜工作日早间简报", "事项中心｜工作日明日计划",
-                   "会议复盘与提前代做", "事项中心｜飞书回复轮询"]
+CINDY = {"routine": "会议复盘与提前代做", "poll": "事项中心｜飞书回复轮询",
+         "jobs": ["事项中心｜每日周期事项", "事项中心｜工作日早间简报", "事项中心｜工作日明日计划"]}
+STALE_AI_HOURS = 3
+SNAPSHOT_FIELDS = ["编号", "标题", "执行方", "状态", "进度", "卡点", "截止日", "交付物链接", "验收结果",
+                   "退回意见", "排除本人提醒", "更新时间", "预做结果摘要", "交付情况", "完成时间"]
 
+
+# ---- task snapshot (written by the listener every 2 minutes) --------------------
+
+def save_snapshot(root, rows):
+    from .prework import _draft_url
+    def one(v):
+        if isinstance(v, list) and not v:
+            return None  # an empty select reads back as []
+        return v[0] if isinstance(v, list) and len(v) == 1 and isinstance(v[0], str) else v
+    out = []
+    for r in rows:
+        item = {k: one(r.get(k)) for k in SNAPSHOT_FIELDS}
+        item["交付物链接"] = _draft_url(r.get("交付物链接"))
+        item["record_id"] = r.get("record_id")
+        item["父事项"] = [x.get("id") or x.get("record_id") for x in r.get("父事项") or [] if isinstance(x, dict)]
+        out.append(item)
+    path = Path(root) / "state/tasks.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"at": datetime.now(TZ).isoformat(timespec="seconds"), "rows": out}, ensure_ascii=False, default=str))
+    tmp.replace(path)
+
+
+def _snapshot(root):
+    try:
+        return json.loads((Path(root) / "state/tasks.json").read_text())
+    except (OSError, ValueError):
+        return {"at": None, "rows": []}
+
+
+def _day(value):
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value / 1000, TZ).date()
+        return datetime.fromisoformat(str(value)).date() if value else None
+    except ValueError:
+        return None
+
+
+def _when(value):
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value / 1000, TZ)
+        return datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _flat(r):
+    """Select cells may arrive as "x", ["x"] or []; make them plain values."""
+    out = dict(r)
+    for k in ("状态", "执行方", "交付情况", "验收结果"):
+        v = out.get(k)
+        if isinstance(v, list):
+            out[k] = v[0] if v and isinstance(v[0], str) else None
+    return out
+
+
+def classify(rows, now):
+    """Turn table rows into the owner's view: what needs me, what is moving, and how it is going."""
+    rows = [_flat(r) for r in rows]
+    today = now.date()
+    need, moving, backlog, done = [], [], [], []
+    for r in rows:
+        st, ex = r.get("状态"), r.get("执行方")
+        if r.get("排除本人提醒") or st == "取消" or not r.get("编号"):
+            continue
+        try:
+            n = int(str(r["编号"]).strip())
+        except ValueError:
+            continue
+        if st == "完成":
+            finished = _when(r.get("完成时间"))
+            if not finished or now - finished > timedelta(days=7):
+                continue
+            delivered = r.get("交付情况")
+            item = {"n": n, "title": str(r.get("标题") or "")[:26], "who": {"我": "你", "AI": "AI", "别人": "别人"}.get(ex, ""),
+                    "due": f"{finished:%m-%d %H:%M} 完成", "late": False, "url": r.get("交付物链接"), "at": finished.isoformat(),
+                    "label": {"有交付": "已交付", "无交付": "无需交付", "待补交付": "待补交付"}.get(delivered, "已完成"),
+                    "tone": "orange" if delivered == "待补交付" else "green" if delivered == "有交付" else "gray", "note": ""}
+            done.append(item)
+            if delivered == "待补交付":
+                need.append({**item, "label": "补交付", "note": "做完了，但交付文件还没挂上", "reply": f"{n} + 链接 / {n} 无交付"})
+            continue
+        title = str(r.get("标题") or "")[:26]
+        due = _day(r.get("截止日"))
+        late = (today - due).days if due else None
+        due_text = (f"逾期 {late} 天" if late and late > 0 else "今天到期" if late == 0 else
+                    "明天到期" if late == -1 else f"{due:%m-%d} 到期" if due else "")
+        item = {"n": n, "title": title, "who": {"我": "你", "AI": "AI", "别人": "别人"}.get(ex, "待定"),
+                "due": due_text, "late": bool(late and late > 0), "url": r.get("交付物链接"), "note": ""}
+        if st == "待验收":
+            again = r.get("验收结果") == "退回" or bool(r.get("退回意见"))
+            item.update(label="待你复查" if again else "待你验收", tone="purple" if again else "orange",
+                        note=("按你上次的意见改过了，再看一眼" if again else str(r.get("预做结果摘要") or "")[:30]),
+                        reply=f"{n} 过 / {n} 退 意见", cmd=f"{n} 过", cmd_label="通过")
+            need.append(item)
+        elif st == "待确认":
+            item.update(label="需要你定", tone="orange", reply=f"{n} 我来 / {n} AI做 / {n} 周五 / {n} 不做",
+                        note="谁来做或什么时候做完还没定")
+            need.append(item)
+        elif st == "卡住":
+            blocker = str(r.get("卡点") or "原因没写")
+            if ex == "AI":
+                item.update(label="卡住", tone="red", note=f"AI 缺：{blocker[:24]}", reply=f"{n} + 材料")
+                need.append(item)
+            elif "#" in blocker and ex == "我":
+                # The child AI item is already in "need you"; the parent just waits for it.
+                item.update(label="等 AI 备稿", tone="gray", note=blocker[:28])
+                moving.append(item)
+            else:
+                item.update(label="卡住", tone="red", note=blocker[:28])
+                moving.append(item)
+        else:
+            if ex == "AI":
+                updated = _when(r.get("更新时间"))
+                stale = updated and now - updated > timedelta(hours=STALE_AI_HOURS) and st == "进行中"
+                item.update(label="可能卡住" if stale else "AI 在做", tone="red" if stale else "blue",
+                            note=(f"超过 {STALE_AI_HOURS} 小时没进展，系统会重新排队" if stale else str(r.get("进度") or "")[:24]))
+            elif ex == "别人":
+                if not (late is not None and late >= 0):
+                    continue  # others' work only matters here once it is due
+                item.update(label="等对方", tone="gray", note=str(r.get("进度") or "")[:24])
+            else:
+                if (late is None or late < -1) and st != "进行中":
+                    backlog.append(item)  # not dated or not due soon: counted, not listed
+                    continue
+                if late is not None and late > 0:
+                    label = "逾期"
+                elif st == "进行中":
+                    label = "进行中"
+                else:
+                    label = "今天要做" if late == 0 else "明天要做"
+                item.update(label=label, tone="red" if label == "逾期" else "blue", note="",
+                            cmd=f"{n} 完成", cmd_label="完成")
+            moving.append(item)
+    order = {"red": 0, "purple": 1, "orange": 2, "blue": 3, "gray": 4}
+    need.sort(key=lambda x: (order.get(x["tone"], 5), x["n"]))
+    moving.sort(key=lambda x: (order.get(x["tone"], 5), not x["late"], x["n"]))
+    done.sort(key=lambda x: x["at"], reverse=True)
+    return need, moving, backlog, done
+
+
+# ---- system checks: plain words, what was done, what you do ----------------------
 
 def _ro(path):
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=3)
@@ -41,146 +192,247 @@ def _age(at, now):
         return None
 
 
-def _queues(root):
-    out = {"会议待处理": 0, "聊天候选": 0, "代做排队": 0, "等你验收（代做）": 0}
+def _state(root):
     path = Path(root) / "state/state.db"
     if not path.exists():
-        return out, {}, None, {}
+        return {}, None, None, {}
     db = _ro(path)
     try:
-        q = lambda sql: (db.execute(sql).fetchone() or [0])[0]
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        counts = {}
         if "meeting_queue" in tables:
-            out["会议待处理"] = q("SELECT count(*) FROM meeting_queue WHERE status NOT IN ('done')")
+            counts["meetings_waiting"] = db.execute("SELECT count(*) FROM meeting_queue WHERE status!='done'").fetchone()[0]
         if "chat_candidates" in tables:
-            out["聊天候选"] = q("SELECT count(*) FROM chat_candidates WHERE status='pending'")
-        if "prework_queue" in tables:
-            out["代做排队"] = q("SELECT count(*) FROM prework_queue WHERE status IN ('queued','running')")
-            out["等你验收（代做）"] = q("SELECT count(*) FROM prework_queue WHERE status='prepared'")
-        return out, _kv(db, "listen:status", {}) or {}, _kv(db, "listen:heartbeat"), {
-            "board_url": _kv(db, "brief-v1:board-url")}
+            counts["chat_pending"] = db.execute("SELECT count(*) FROM chat_candidates WHERE status='pending'").fetchone()[0]
+        counts["links"] = _kv(db, "listen:links", {}) or {}
+        counts["distinct"] = _kv(db, "merge:distinct", []) or []
+        return (_kv(db, "listen:status", {}) or {}), _kv(db, "listen:heartbeat"), _kv(db, "brief-v1:board-url"), counts
     finally:
         db.close()
 
 
-def _cindy(now):
-    """Last run of each Cindy routine, read-only from Cindy's own database (optional)."""
+def _cindy_runs():
     files = glob(os.path.expanduser("~/Library/Application Support/Cindy/cindy-*.db"))
+    out = {}
     if not files:
-        return []
-    out = []
+        return out
     try:
         db = _ro(files[0])
-        for name in CINDY_SCHEDULES:
-            row = db.execute("""SELECT s.status, s.cron_expr, r.fired_at, r.finished_at, r.status, r.error_msg
-                FROM schedules s LEFT JOIN schedule_runs r ON r.id = (SELECT id FROM schedule_runs WHERE schedule_id=s.id
-                ORDER BY fired_at DESC LIMIT 1) WHERE s.name=?""", (name,)).fetchone()
-            if not row:
-                continue
-            fired = datetime.fromtimestamp(row[2] / 1000, TZ).isoformat(timespec="seconds") if row[2] else None
-            out.append({"name": name, "enabled": row[0] == "active", "cron": row[1], "last_run": fired,
-                        "last_status": row[4], "error": (row[5] or "")[:160]})
+        for name in [CINDY["routine"], CINDY["poll"], *CINDY["jobs"]]:
+            rows = db.execute("""SELECT r.fired_at, r.status, r.error_msg FROM schedule_runs r JOIN schedules s ON s.id=r.schedule_id
+                                 WHERE s.name=? ORDER BY r.fired_at DESC LIMIT 5""", (name,)).fetchall()
+            enabled = db.execute("SELECT status FROM schedules WHERE name=?", (name,)).fetchone()
+            out[name] = {"enabled": bool(enabled and enabled[0] == "active"),
+                         "runs": [{"at": datetime.fromtimestamp(f / 1000, TZ), "status": s, "error": e or ""} for f, s, e in rows]}
         db.close()
     except sqlite3.Error:
-        return out
+        pass
     return out
 
+
+PLAIN_ERRORS = [("已有实例正在执行", "整点时和别的检查撞车了。已改成排队等待，下次会自动跑。"),
+                ("user_needs_refresh", "飞书登录刚好在自动续期，下一轮会自动恢复。"),
+                ("授权", "飞书授权有问题，需要你重新登录 lark-cli。"),
+                ("timeout", "飞书接口超时，下一轮会自动重试。")]
+
+
+def _plain(error):
+    for key, words in PLAIN_ERRORS:
+        if key in (error or ""):
+            return words
+    return (error or "原因未记录")[:60]
+
+
+def _acks(root):
+    try:
+        return json.loads((Path(root) / "state/monitor-acks.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def clear_resolved(root, now=None):
+    """Owner pressed「清掉已处理的」: forget failures that are already fixed or settled."""
+    now = now or datetime.now(TZ)
+    acks = _acks(root)
+    acks["cindy_failures_before"] = now.isoformat(timespec="seconds")
+    (Path(root) / "state/monitor-acks.json").write_text(json.dumps(acks, ensure_ascii=False))
+    try:
+        db = activity._db(root)
+        with db:
+            db.execute("UPDATE events SET status='resolved' WHERE status='failed' AND kind!='send'")
+        db.close()
+    except Exception:
+        pass
+
+
+def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=None):
+    out = []
+    def add(level, title, what, done, you="", action=None):
+        out.append({"level": level, "title": title, "what": what, "done": done, "you": you, "action": action})
+    hb = _age(heartbeat, now)
+    if hb is None or hb > 3:
+        add("error", "实时监听停了", "你在飞书的回复、会前卡片会变慢。",
+            "菜单栏应用正在自动重启它。", "如果 2 分钟后还是这样，点「重启监听」。", {"kind": "restart_listener"})
+    working = now.weekday() < 5 and 8 <= now.hour < 22
+    routine = cindy.get(CINDY["routine"], {})
+    last_run = routine.get("runs", [{}])[0].get("at") if routine.get("runs") else None
+    beat = _age((beats.get("会议检查") or {}).get("at"), now)
+    if working and (beat is None or beat > 15):
+        add("warn", "Cindy 的例行检查停了", f"已经 {int(beat) if beat else '很久'} 分钟没检查会议和代做，会后待办、AI 代做都在等。",
+            "已在飞书提醒你一次（2 小时内不重复）。", "打开 Cindy，确认它开着，「会议复盘与提前代做」是启用状态。")
+    acks = _acks(root)
+    for name in CINDY["jobs"]:
+        runs = cindy.get(name, {}).get("runs", [])
+        cleared = acks.get("cindy_failures_before")
+        if runs and cleared and runs[0]["at"].isoformat() <= cleared:
+            continue
+        if runs and runs[0]["status"] == "failed" and now - runs[0]["at"] < timedelta(hours=24):
+            add("info", f"「{name.split('｜')[-1]}」{runs[0]['at']:%H:%M} 那次没跑成", _plain(runs[0]["error"]),
+                "已修复，下次会正常运行；当时的简报已由补发机制送达。" if name.endswith("明日计划") else "已修复，下次会正常运行。")
+    missing = [EVENT_NAMES.get(k, k) for k, v in streams.items() if v == "not_subscribed"]
+    if missing:
+        add("setup", "一次性设置：订阅飞书推送", "、".join(missing) + " 还没订阅，现在靠定时检查，会慢一些。",
+            "订阅后自动生效，不用重启。", "点「去订阅」，在飞书开放平台各点一次确认。",
+            {"kind": "subscribe", "urls": [u for k, u in (links or {}).items() if streams.get(k) == "not_subscribed"]})
+    sends_failed = [e for e in errors_today if e["kind"] == "send"]
+    if sends_failed:
+        add("error", "有消息没发出去", f"{sends_failed[0]['at'][11:16]} 的「{sends_failed[0]['title'][:20]}」发送失败。",
+            "为防止重复发送，结果不明的不会自动重发。", "点「立即检查」，或在 Cindy 里问豚豚这条有没有收到。")
+    other = [e for e in errors_today if e["kind"] != "send" and _age(e["at"], now) is not None and _age(e["at"], now) < 120]
+    if other:
+        add("warn", f"最近 2 小时出错 {len(other)} 次", f"最近一次：{other[0]['title']}（{_plain(other[0]['detail'])}）",
+            "出错的那一轮会在下一轮自动重试。", "如果反复出现同一个错，告诉我。")
+    return out
+
+
+# ---- summary ---------------------------------------------------------------------
 
 def build(root, now=None):
     now = now or datetime.now(TZ)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     events, beats = activity.recent(root, since=today)
-    sends = [e for e in events if e["kind"] == "send"]
-    errors = [e for e in events if e["status"] == "failed"]
-    queues, streams, heartbeat, links = _queues(root)
-    issues, level = [], "ok"
-
-    def flag(text, severity):
-        nonlocal level
-        issues.append({"text": text, "level": severity})
-        if severity == "error" or (severity == "warn" and level == "ok"):
-            level = severity
-
-    hb_age = _age(heartbeat, now)
-    if hb_age is None or hb_age > 3:
-        flag("实时监听没在运行：私聊回复、会前卡片会变慢。点「重启监听」。", "error")
-    for key, st in streams.items():
-        if st == "not_subscribed":
-            flag(f"飞书「{EVENT_NAMES.get(key, key)}」推送还没订阅，暂时靠定时检查。", "warn")
-    working_hours = now.weekday() < 5 and 8 <= now.hour < 22
-    for name, limit, where in COMPONENTS[1:]:
-        age = _age((beats.get(name) or {}).get("at"), now)
-        if working_hours and (age is None or age > limit):
-            flag(f"「{name}」超过 {limit} 分钟没跑了，看看 {where} 是否正常。", "warn")
-    recent_fail = [e for e in errors if _age(e["at"], now) is not None and _age(e["at"], now) <= 60]
-    if any(e["kind"] == "send" for e in recent_fail):
-        flag("最近 1 小时有消息发送失败。", "error")
-    elif recent_fail:
-        flag(f"最近 1 小时有 {len(recent_fail)} 次出错，详见下方。", "warn")
-    cindy = _cindy(now)
-    for c in cindy:
-        if c["last_status"] in {"failed", "error"}:
-            flag(f"Cindy「{c['name']}」上次运行失败。", "warn")
-    beats_out = []
-    for name, limit, where in COMPONENTS:
-        b = beats.get(name) or {}
-        age = _age(b.get("at"), now)
-        beats_out.append({"name": name, "at": b.get("at"), "minutes_ago": None if age is None else round(age, 1),
-                          "summary": b.get("summary", ""), "where": where})
-    return {"generated_at": now.isoformat(timespec="seconds"), "level": level, "issues": issues,
-            "headline": {"ok": "一切正常", "warn": "有地方要注意", "error": "出错了"}[level],
-            "sends_today": [{"id": e["id"], "time": e["at"][11:16], "title": e["title"], "ok": e["status"] == "ok"} for e in sends],
-            "errors_today": [{"id": e["id"], "time": e["at"][11:16], "title": e["title"], "detail": e["detail"][:200]} for e in errors[:20]],
+    streams, heartbeat, board, counts = _state(root)
+    snap = _snapshot(root)
+    try:
+        need, moving, backlog, done = classify(snap["rows"], now)
+    except Exception as exc:  # one odd row must never blank the whole panel
+        activity.log(root, "error", "面板整理事项时出错", detail=f"{type(exc).__name__}: {exc}", status="failed")
+        need, moving, backlog, done = [], [], [], []
+    # Things that look like the same item twice: suggest merging (owner decides; nothing is merged here).
+    from .merge import duplicate_pairs
+    for p in duplicate_pairs(snap["rows"], counts.pop("distinct", []))[:3]:
+        need.append({"n": p["drop"], "title": p["drop_title"], "label": "可能重复", "tone": "purple", "who": "", "due": "",
+                     "late": False, "url": None, "note": f"和 #{p['keep']} {p['keep_title'][:14]} 像是同一件事",
+                     "reply": f"{p['drop']} 合并到 {p['keep']} / {p['drop']} 不重复",
+                     "cmd": f"{p['drop']} 合并到 {p['keep']}", "cmd_label": "合并"})
+    cindy = _cindy_runs()
+    errors = [e for e in events if e["status"] == "failed"]  # 'resolved' failures are settled and not shown
+    issues = problems(root, now, streams, heartbeat, beats, errors, cindy, counts.pop("links", {}))
+    timeline, seen = [], {}
+    for e in events[:120]:  # newest first; the same thing repeated today shows once with a count
+        kind = {"send": "发给你", "detect": "检测到", "reply": "你的回复", "prework": "AI 进展", "run": "定时", "error": "出错"}.get(e["kind"], e["kind"])
+        if e["kind"] == "error":
+            continue
+        k = (kind, e["title"])
+        if k in seen:
+            seen[k]["count"] += 1
+            continue
+        seen[k] = {"id": e["id"], "time": e["at"][11:16], "kind": kind, "title": e["title"], "ok": e["status"] != "failed", "count": 1}
+        timeline.append(seen[k])
+    for x in timeline:
+        if x["count"] > 1:
+            x["title"] += f"（今天 ×{x['count']}）"
+    serious = [i for i in issues if i["level"] in {"error", "warn"}]
+    level = "error" if any(i["level"] == "error" for i in issues) else "warn" if serious else "ok"
+    if level == "error":
+        headline = issues[0]["title"]
+    elif need:
+        headline = f"需要你处理 {len(need)} 件"
+    elif serious:
+        headline = serious[0]["title"]
+    else:
+        headline = "一切正常，没有要你处理的"
+    stuck = sum(1 for x in moving if x["tone"] == "red")
+    return {"generated_at": now.isoformat(timespec="seconds"), "level": level, "headline": headline,
+            "summary": f"正在进行 {len(moving)} 件" + (f"（{stuck} 件卡住或逾期）" if stuck else "") +
+                       f" · 今天发给你 {sum(1 for e in events if e['kind'] == 'send' and e['status'] == 'ok')} 条",
+            "need_you": need, "in_progress": moving, "backlog_count": len(backlog), "done_recent": done[:20],
+            "timeline": timeline, "issues": issues,
+            "snapshot_at": snap.get("at"), "board_url": board, "counts": counts,
+            "auto_restart_listener": any(i["action"] and i["action"]["kind"] == "restart_listener" for i in issues),
             "latest_event_id": max((e["id"] for e in events), default=0),
-            "events_today": [{"id": e["id"], "time": e["at"][11:16], "kind": e["kind"], "title": e["title"], "ok": e["status"] == "ok"}
-                             for e in events[:60]],
-            "components": beats_out, "queues": queues,
-            "streams": [{"name": EVENT_NAMES.get(k, k), "state": STATE_WORDS.get(v, v)} for k, v in streams.items()],
-            "cindy": cindy, "board_url": links.get("board_url")}
+            "notify": [{"id": e["id"], "kind": e["kind"], "title": e["title"], "ok": e["status"] != "failed"}
+                       for e in events[:30] if e["kind"] in {"send", "error", "prework"} or e["status"] == "failed"]}
 
+
+def alert_if_cindy_stalled(root, client, state, now):
+    """Called by the listener every minute: tell the owner once when Cindy stops checking."""
+    _, beats = activity.recent(root, since=now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(), limit=1)
+    beat = _age((beats.get("会议检查") or {}).get("at"), now)
+    working = now.weekday() < 5 and 8 <= now.hour < 22
+    if not working or (beat is not None and beat <= 15):
+        return None
+    last = state.get("monitor:cindy-alert")
+    if last and now - datetime.fromisoformat(last) < timedelta(hours=2):
+        return "already_alerted"
+    minutes = f"{int(beat)} 分钟" if beat else "很久"
+    client.send_self(f"⚠ Cindy 的例行检查已经 {minutes}没跑了，会后待办和 AI 代做在等它。\n请打开 Cindy，确认它在运行、「会议复盘与提前代做」是启用状态。",
+                     "cindy-stalled-" + now.strftime("%Y%m%d%H%M"))
+    state.set("monitor:cindy-alert", now.isoformat())
+    return "alerted"
+
+
+# ---- local page --------------------------------------------------------------------
 
 PAGE = """<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta http-equiv="refresh" content="15">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>事项中心监控</title><style>
-:root{{--bg:#f6f7f9;--card:#fff;--ink:#1d2129;--muted:#86909c;--line:#e5e6eb;--ok:#00b42a;--warn:#ff7d00;--err:#f53f3f}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#17181a;--card:#232427;--ink:#e5e6eb;--muted:#8a8f98;--line:#33353a}}}}
-body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"PingFang SC",sans-serif}}
-main{{max-width:880px;margin:0 auto;padding:20px 16px}} h1{{font-size:22px;margin:0 0 4px}}
-.sub{{color:var(--muted);font-size:12px}} .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:14px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}} .card h2{{font-size:14px;margin:0 0 8px}}
-.row{{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid var(--line)}} .row:first-of-type{{border-top:0}}
-.muted{{color:var(--muted)}} .ok{{color:var(--ok)}} .warn{{color:var(--warn)}} .error{{color:var(--err)}}
-.dot{{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}}
-.issue{{padding:6px 10px;border-radius:6px;margin:6px 0;background:var(--bg)}}</style></head><body><main>
-<h1><span class="dot" style="background:var(--{level})"></span>{headline}</h1><div class="sub">更新于 {generated}，每 15 秒自动刷新</div>
-{issues}<div class="grid">
-<div class="card"><h2>今天发给你的消息（{send_count}）</h2>{sends}</div>
-<div class="card"><h2>各环节最后一次运行</h2>{components}</div>
-<div class="card"><h2>排队中</h2>{queues}</div>
-<div class="card"><h2>飞书实时推送</h2>{streams}</div>
-<div class="card"><h2>Cindy 例行任务</h2>{cindy}</div>
-<div class="card"><h2>今天的报错（{error_count}）</h2>{errors}</div>
-</div></main></body></html>"""
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>事项中心</title><style>
+:root{{--bg:#f5f6f8;--card:#fff;--ink:#1d2129;--muted:#86909c;--line:#e8e9ec;--red:#e5484d;--orange:#e8770e;--purple:#8e4ec6;--blue:#2f6fed;--gray:#86909c;--green:#2b9a66}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#151618;--card:#1f2023;--ink:#e6e7ea;--muted:#8b9099;--line:#2e3034}}}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,"PingFang SC",sans-serif}}
+main{{max-width:760px;margin:0 auto;padding:24px 16px 40px}} h1{{font-size:20px;margin:0}} .sub{{color:var(--muted);font-size:13px;margin:4px 0 18px}}
+section{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 16px;margin-bottom:14px}}
+h2{{font-size:13px;color:var(--muted);font-weight:600;margin:10px 0 4px}}
+.item{{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}} h2+.item{{border-top:0}}
+.tag{{flex:none;font-size:12px;padding:1px 8px;border-radius:99px;color:#fff;margin-top:2px}}
+.t-green{{background:var(--green)}}.t-red{{background:var(--red)}}.t-orange{{background:var(--orange)}}.t-purple{{background:var(--purple)}}.t-blue{{background:var(--blue)}}.t-gray{{background:var(--gray)}}
+.main{{flex:1;min-width:0}} .title{{font-weight:600}} .note{{color:var(--muted);font-size:13px}} .reply{{font-size:12px;color:var(--muted)}}
+a.btn{{flex:none;font-size:13px;color:var(--blue);text-decoration:none;margin-top:2px}} .time{{flex:none;width:44px;color:var(--muted);font-variant-numeric:tabular-nums}}
+.issue{{padding:10px 0;border-top:1px solid var(--line)}} h2+.issue{{border-top:0}} .issue b{{display:block}} .issue div{{font-size:13px}}
+.empty{{color:var(--muted);padding:8px 0 12px}}</style></head><body><main>
+<h1>{headline}</h1><div class="sub">{summary} · 更新于 {updated}</div>
+{urgent}
+<section><h2>需要你（{need_count}）</h2>{need}</section>
+<section><h2>正在进行（{moving_count}）</h2>{moving}{backlog}</section>
+<section><h2>最近完成（7 天）</h2>{done}</section>
+<section><h2>今天发生了什么</h2>{timeline}</section>
+{later}
+</main></body></html>"""
 
 
 def render(s):
     e = html.escape
-    row = lambda a, b, cls="": f'<div class="row"><span>{a}</span><span class="{cls}">{b}</span></div>'
-    none = '<div class="muted">暂无</div>'
-    ago = lambda m: "从未" if m is None else ("刚刚" if m < 1 else f"{m:.0f} 分钟前" if m < 120 else f"{m/60:.1f} 小时前")
+    def item(x):
+        link = f'<a class="btn" href="{e(x["url"])}">打开</a>' if x.get("url") else ""
+        meta = " · ".join(v for v in [x["who"] + "来做" if x["who"] in {"你", "AI"} else x["who"], x["due"]] if v)
+        reply = f'<div class="reply">回复：{e(x["reply"])}</div>' if x.get("reply") else ""
+        return (f'<div class="item"><span class="tag t-{x["tone"]}">{e(x["label"])}</span><div class="main">'
+                f'<div class="title">#{x["n"]} {e(x["title"])}</div><div class="note">{e(" · ".join(v for v in [x["note"], meta] if v))}</div>{reply}</div>{link}</div>')
+    def issue(i):
+        return (f'<div class="issue"><b>{"⚠" if i["level"] in {"warn", "error"} else "⚙" if i["level"] == "setup" else "ℹ"} {e(i["title"])}</b>'
+                f'<div>{e(i["what"])}</div><div class="note">系统：{e(i["done"])}</div>'
+                + (f'<div>你：{e(i["you"])}</div>' if i["you"] else "") + "</div>")
+    urgent = "".join(issue(i) for i in s["issues"] if i["level"] in {"error", "warn"})
+    later = "".join(issue(i) for i in s["issues"] if i["level"] not in {"error", "warn"})
     return PAGE.format(
-        level=s["level"] if s["level"] != "ok" else "ok", headline=e(s["headline"]), generated=e(s["generated_at"][11:19]),
-        issues="".join(f'<div class="issue {i["level"]}">{e(i["text"])}</div>' for i in s["issues"]),
-        send_count=len(s["sends_today"]),
-        sends="".join(row(f'{x["time"]}　{e(x["title"])}', "✓ 已送达" if x["ok"] else "✗ 失败", "ok" if x["ok"] else "error")
-                      for x in reversed(s["sends_today"])) or none,
-        components="".join(row(f'{e(c["name"])}<br><span class="muted">{e(c["summary"])}</span>', ago(c["minutes_ago"])) for c in s["components"]),
-        queues="".join(row(e(k), v) for k, v in s["queues"].items()),
-        streams="".join(row(e(x["name"]), e(x["state"]), "ok" if x["state"] == "已连接" else "warn") for x in s["streams"]) or none,
-        cindy="".join(row(f'{e(c["name"])}<br><span class="muted">{e(c["cron"] or "")}</span>',
-                          f'{(c["last_run"] or "")[11:16]} {e(c["last_status"] or "未运行")}',
-                          "ok" if c["last_status"] in {"success", "completed", "ok", "skipped", "idle"} else "warn") for c in s["cindy"]) or none,
-        error_count=len(s["errors_today"]),
-        errors="".join(row(f'{x["time"]}　{e(x["title"])}<br><span class="muted">{e(x["detail"])}</span>', "") for x in s["errors_today"]) or none)
+        headline=e(s["headline"]), summary=e(s["summary"]), updated=e(s["generated_at"][11:16]),
+        urgent=f'<section><h2>要先处理</h2>{urgent}</section>' if urgent else "",
+        later=f'<section><h2>系统说明（不影响使用）</h2>{later}</section>' if later else "",
+        need_count=len(s["need_you"]), need="".join(item(x) for x in s["need_you"]) or '<div class="empty">没有要你处理的</div>',
+        moving_count=len(s["in_progress"]), moving="".join(item(x) for x in s["in_progress"]) or '<div class="empty">暂无</div>',
+        done="".join(item(x) for x in s.get("done_recent", [])) or '<div class="empty">最近 7 天还没有完成的事</div>',
+        backlog=(f'<div class="empty">另有 {s["backlog_count"]} 件你的待办没定日期或还没到期，在看板里</div>' if s.get("backlog_count") else ""),
+        timeline="".join(f'<div class="item"><span class="time">{x["time"]}</span><div class="main"><span class="note">{e(x["kind"])}</span> {e(x["title"])}'
+                         f'{"" if x["ok"] else " ✗"}</div></div>' for x in s["timeline"][:40]) or '<div class="empty">今天还没有动静</div>')
 
 
 def main(argv=None):
@@ -189,8 +441,11 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--write-html", action="store_true")
     p.add_argument("--test-send", action="store_true")
+    p.add_argument("--clear-resolved", action="store_true", help="清掉已经处理好的旧提示")
     args = p.parse_args(argv)
     root = args.config.resolve().parent
+    if args.clear_resolved:
+        clear_resolved(root)
     if args.test_send:
         from .config import load
         from .feishu import Feishu
@@ -206,7 +461,7 @@ def main(argv=None):
         out = root / "state/monitor.html"
         out.write_text(render(status))
         status["page"] = str(out)
-    print(json.dumps(status, ensure_ascii=False))
+    print(json.dumps(status, ensure_ascii=False, default=str))
     return 0
 
 

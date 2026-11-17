@@ -36,6 +36,8 @@ class Action(Grounded):
     executor: Literal["我","AI","别人"] | None = None
     ai_can_prep: bool = False
     done_when: str | None = Field(default=None,max_length=60)
+    # Number of an open item this is the same thing as (see open_items.json); merged instead of re-created.
+    same_as: int | None = None
 
 
 MIN_CONFIDENCE=0.8
@@ -185,6 +187,29 @@ def render_review(review, config, meta):
     return summary_line(review,config,meta) or f"{meta.get('topic') or '会议'} · 无新待办"
 
 
+def _open_rows(client, state):
+    """Current items for same-thing checks; (None, None) when the table cannot be read (e.g. offline tests)."""
+    try:
+        from .workflow import Gateway
+        gateway=Gateway(client,state)
+        return gateway,gateway.rows()
+    except Exception:
+        return None,None
+
+
+def _same_target(rows, action):
+    from .merge import find_same, open_items, similarity
+    if action.same_as is not None:
+        target=next((r for r in open_items(rows) if str(r.get("编号")).strip()==str(action.same_as)),None)
+        if target is None:
+            raise MatrixError(f"「{action.title}」的 same_as #{action.same_as} 不是一件还没完成的事；去掉 same_as 或改成正确编号。")
+        if similarity(action.title,target.get("标题"))<0.2 and not set(action.title)&set(str(target.get("标题"))):
+            raise MatrixError(f"「{action.title}」和 #{action.same_as} 看不出是同一件事；确认后再填 same_as。")
+        return target
+    target,_,_=find_same(rows,action.title)
+    return target
+
+
 def publish(config, client, state, review):
     if not config.transcripts_to_llm_allowed or config.llm_backend!="cindy_current":
         raise MatrixError("会议处理权限尚未开启，不发布复盘。")
@@ -208,9 +233,20 @@ def publish(config, client, state, review):
         names={f.get("name",f.get("field_name")) for f in fields}
         if not set(required)<=names:
             raise MatrixError("复盘需要的字段已变化，停止写入："+table)
-    task_ids=[]
+    task_ids=[]; merged=[]
+    gateway,rows=_open_rows(client,state)
     for action in kept_actions(review):
         fields=task_fields(action,config,row["metadata"])
+        target=_same_target(rows,action) if rows is not None else None
+        if target is not None:
+            # One thing, one item: the meeting's new words go into the existing item.
+            from .merge import merge_into
+            from datetime import datetime
+            from .timeutil import TZ
+            merge_into(gateway,target,title=action.title,source="会议「"+str(row["metadata"].get("topic") or "")[:12]+"」",
+                       detail=f"[{action.timestamp}] {action.quote}",key=prefix+":merge:"+fields["去重键"],now=datetime.now(TZ))
+            merged.append(target.get("编号"))
+            continue
         receipt=state.once(prefix+":"+fields["去重键"],lambda f=fields:client.call("+record-batch-create",*coords,
                            "--table-id",config.tables["事项表"],"--json",js({"create_records":[f]}),write=True))
         ids=receipt.get("record_id_list")
@@ -228,12 +264,17 @@ def publish(config, client, state, review):
         line=numbered_line(client,state,review,config,meta,task_ids)
     except (MatrixError,AttributeError):
         line=summary_line(review,config,meta)  # numbers unreadable right now: counts only
+    if merged:
+        joined="、".join(f"#{n}" for n in merged)
+        line=(line+"\n" if line else f"{meta.get('topic') or '会议'} · ")+f"另有 {len(merged)} 件是已有的事，已并入 {joined}"
     if line:
         key="review-"+sha256(review.meeting_id.encode()).hexdigest()[:32]
         receipt=state.once(prefix+":notify",lambda:client.send_self(line,key))
     else:
         receipt={"notice":None,"task_ids":task_ids}
     queue.done(review.meeting_id,receipt)
+    from . import activity
+    activity.log(client.root,"detect",f"会议「{meta.get('topic') or '会议'}」提取完成："+(f"新增 {len(task_ids)} 件" if task_ids else "没有新待办"))
     return {"ok":True,"meeting_id":review.meeting_id,"task_ids":task_ids,
             "dropped_low_confidence":len(review.actions)-len(kept_actions(review)),
             "message":line,"message_id":find_value(receipt,"message_id")}

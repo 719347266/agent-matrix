@@ -254,7 +254,7 @@ def prepare(config, client, queue, mid):
         note = data.get("note",{})
         display = note.get("note_display_type")
         if display=="unified":
-            client._exec(["note","+transcript","--note-id",meta["note_id"],"--as","user","--output",str(path.relative_to(client.root))])
+            client._exec(["note","+transcript","--note-id",meta["note_id"],"--as","user","--output",path.relative_to(client.root).as_posix()])
         elif display in {"normal","unknown"} and note.get("verbatim_doc_token"):
             data = client._exec(["docs","+fetch","--doc",note["verbatim_doc_token"],"--doc-format","markdown","--as","user"])
             # Explicit content fields only, never fall back to AI note text.
@@ -271,7 +271,7 @@ def prepare(config, client, queue, mid):
     else:
         # Minutes output is file-based; only use the actual returned artifact path.
         data = client._exec(["minutes","+detail","--minute-tokens",meta["minute_token"],"--transcript",
-                             "--output-dir",str(directory.relative_to(client.root)),"--as","user"])
+                             "--output-dir",directory.relative_to(client.root).as_posix(),"--as","user"])
         entries = data.get("minutes",[])
         if len(entries)!=1 or entries[0].get("minute_token")!=meta["minute_token"]:
             raise MatrixError("妙记逐字稿返回不完整，停止处理。")
@@ -287,7 +287,19 @@ def prepare(config, client, queue, mid):
     digest = sha256(path.read_bytes()).hexdigest()
     queue.update(mid,status="prepared",transcript_path=str(path.relative_to(client.root)),transcript_sha256=digest,
                  next_check=(datetime.now(TZ)+timedelta(minutes=30)).isoformat())
-    return {"meeting_id":mid,"transcript_path":str(path),"transcript_sha256":digest,"metadata":meta}
+    # The things already in flight, so the model can say "this is #12 again" (same_as) instead of a new item.
+    open_path=path.parent/"open_items.json"
+    try:
+        from .workflow import Gateway
+        from .merge import open_items
+        rows=Gateway(client,queue.state).rows()
+        items=[{"编号":int(str(r["编号"])),"标题":r.get("标题"),"谁做":(r.get("执行方") or [""])[0],"状态":(r.get("状态") or [""])[0]}
+               for r in open_items(rows) if not r.get("排除本人提醒")]
+        open_path.write_text(json.dumps(items,ensure_ascii=False,indent=1))
+    except Exception:
+        open_path=None
+    return {"meeting_id":mid,"transcript_path":str(path),"transcript_sha256":digest,"metadata":meta,
+            "open_items_path":str(open_path) if open_path else None}
 
 
 def main(argv=None):

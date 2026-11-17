@@ -37,6 +37,17 @@ def log(root, kind, title, *, detail="", status="ok", ref=""):
         pass
 
 
+def resolve(root, ref):
+    """A later success settles earlier failures of the same thing; they stop showing as problems."""
+    try:
+        db = _db(root)
+        with db:
+            db.execute("UPDATE events SET status='resolved' WHERE ref=? AND status='failed'", (ref,))
+        db.close()
+    except Exception:
+        pass
+
+
 def beat(root, component, summary=""):
     try:
         db = _db(root)

@@ -65,20 +65,37 @@ def sync(config, client, state, now, *, notify=True):
     gateway = Gateway(client, state)
     rows = {str(r.get("去重键") or ""): r for r in gateway.rows()}
     created, completed = [], []
+    from ..merge import find_same, merge_into, task_guid
+    all_rows = gateway.rows()
+    linked = {task_guid(r.get("关联任务链接")) for r in all_rows if task_guid(r.get("关联任务链接"))}
+    merged = []
     for task in open_tasks:
         key = "feishu-task:" + task["guid"]
-        if key in rows:
+        if key in rows or task["guid"] in linked:
+            continue
+        target, _, _ = find_same(all_rows, task.get("summary"), task_link=task.get("url"))
+        if target is not None:
+            merge_into(gateway, target, title=task.get("summary"), source="飞书任务", task_link=task.get("url"),
+                       key="feishu-task-merge:" + task["guid"], now=now)
+            merged.append(target.get("编号"))
             continue
         receipt = gateway.create(fields_for(task, config, now.tzinfo), key, "feishu-task")
         created.append(receipt["record_id_list"][0])
-    for key, row in rows.items():
-        if not key.startswith("feishu-task:"):
-            continue
-        task = done_tasks.get(key.split(":", 1)[1])
+    # Completion follows the Feishu task, whether the item was created from it or merged with it.
+    by_link = {}
+    for r in all_rows:
+        g = task_guid(r.get("关联任务链接")) or (str(r.get("去重键") or "").split(":", 1)[1] if str(r.get("去重键") or "").startswith("feishu-task:") else None)
+        if g:
+            by_link[g] = r
+    for guid, row in by_link.items():
+        task = done_tasks.get(guid)
         if task and single(row.get("状态")) not in {"完成", "取消"} and single(row.get("执行方")) == "我":
             gateway.update(row, {"状态": ["完成"], "进度": "完成", "完成时间": task.get("completed_at") or now.isoformat()},
                            f"feishu-task-done:{row['record_id']}", "feishu-task")
             completed.append(row["record_id"])
+    if merged:
+        from .. import activity
+        activity.log(client.root, "detect", "飞书任务：" + "、".join(f"#{n}" for n in merged) + " 是已有的事，已关联，不重复建")
     message_id = None
     if created and notify:
         numbers = {r["record_id"]: number(r["编号"]) for r in gateway.rows() if r["record_id"] in created}
@@ -90,5 +107,9 @@ def sync(config, client, state, now, *, notify=True):
         from hashlib import sha256
         key = "feishu-tasks-new:" + sha256(",".join(sorted(created)).encode()).hexdigest()[:24]
         message_id = send_once(state, key, lambda: client.send_self(text, key.replace(":", "-"))).get("message_id")
+    if created or completed:
+        from .. import activity
+        activity.log(client.root, "detect", "飞书任务：" + "，".join(x for x in [f"新增 {len(created)} 件" if created else "",
+                                                                            f"你勾完成 {len(completed)} 件" if completed else ""] if x))
     state.set("feishu-tasks:last-sync", now.isoformat())
     return {"created": len(created), "completed": len(completed), "message_id": message_id}

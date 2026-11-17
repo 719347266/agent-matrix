@@ -1,10 +1,33 @@
 from contextlib import contextmanager
-import fcntl
 import json
+try:  # macOS / Linux
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
 from pathlib import Path
 import sqlite3
 from .models import MatrixError, MatrixBusy
 from .timeutil import now_iso
+
+
+def _try_lock(stream):
+    if fcntl:
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    else:
+        stream.seek(0)
+        try:
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            raise BlockingIOError(str(exc)) from exc
+
+
+def _unlock(stream):
+    if fcntl:
+        fcntl.flock(stream, fcntl.LOCK_UN)
+    else:
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 @contextmanager
@@ -15,11 +38,11 @@ def exclusive_lock(root: Path, wait=None):
     import os, time
     wait = float(os.environ.get("AGENT_MATRIX_LOCK_WAIT", "0")) if wait is None else wait
     root.mkdir(parents=True, exist_ok=True)
-    with (root / "matrix.lock").open("a") as stream:
+    with (root / "matrix.lock").open("a+") as stream:
         deadline = time.monotonic() + wait
         while True:
             try:
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _try_lock(stream)
                 break
             except BlockingIOError as exc:
                 if time.monotonic() >= deadline:
@@ -28,7 +51,7 @@ def exclusive_lock(root: Path, wait=None):
         try:
             yield
         finally:
-            fcntl.flock(stream, fcntl.LOCK_UN)
+            _unlock(stream)
 
 
 class State:

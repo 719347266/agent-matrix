@@ -63,7 +63,8 @@ def main(argv=None):
         else:
             message = "早间简报已处理，送达回执已记录。" if args.job == "morning" else "明日计划已处理，送达回执已记录。"
         from . import activity
-        activity.log(args.config.resolve().parent, "run", {"recurring": "周期事项", "morning": "早报", "evening": "明日计划"}[args.job], detail=message)
+        if not args.preview:
+          activity.log(args.config.resolve().parent, "run", {"recurring": "周期事项", "morning": "早报", "evening": "明日计划"}[args.job], detail=message)
         complete(message)
         return 0
     except Exception as exc:

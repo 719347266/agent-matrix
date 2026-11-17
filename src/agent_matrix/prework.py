@@ -4,7 +4,7 @@ This module never runs task text as commands, submits approvals, publishes to
 external audiences, or marks the underlying business task complete.
 """
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -148,7 +148,8 @@ def _v1(state):
 def _rows(config, client, state):
     require_owned(config, state)
     from .agents.pre_worker import V1_FIELDS
-    fields = [*FIELDS, *OUTPUT_FIELDS, *(V1_FIELDS + ["交付物链接"] if _v1(state) else [])]
+    # 进度 / 卡点 are written on publish, so they must be read back too.
+    fields = [*FIELDS, *OUTPUT_FIELDS, *(V1_FIELDS + ["交付物链接", "进度", "卡点"] if _v1(state) else [])]
     ensure_fields(client, "事项表", fields)
     return read_records(client, state, "事项表", fields)
 
@@ -197,7 +198,10 @@ def check(config, client, state, now=None):
         unnotified = [r for r in queue.list() if not state.get(key_for(r["record_id"], r["input_version"])+":sent-now")
                       and (r["status"] == "blocked" or state.get(key_for(r["record_id"], r["input_version"])+":published"))
                       and r["status"] not in {"stale", "done"}]
+    running = [r for r in queue.list() if r["status"] == "running" and r.get("lease_until") and r["lease_until"] > now.isoformat()]
     return {"ok": True, "run_model": bool(ready or unnotified), "reason": "actionable" if ready or unnotified else "idle",
+            "in_progress_elsewhere": [{"record_id": r["record_id"], "title": r["candidate"]["title"],
+                                       "until": r["lease_until"][11:16]} for r in running],
             "ready": [{"record_id": r["record_id"], "input_version": r["input_version"], "status": r["status"],
                        "title": r["candidate"]["title"], "due_date": r["candidate"].get("due_date")} for r in ready],
             "blocked_to_notify": len(unnotified), "candidate_count": result["candidate_count"],
@@ -241,8 +245,67 @@ def prepare(config, client, state, record_id, version):
     directory.mkdir(parents=True, exist_ok=True); directory.chmod(0o700)
     context = directory / "context.json"
     context.write_text(js(claimed["candidate"])); context.chmod(0o600)
+    previous = _previous_draft(state, record_id, version)
     return {"ok": True, "context_path": str(context), "row": claimed,
-            "draft": state.get(key+":draft"), "published": state.get(key+":published")}
+            "draft": state.get(key+":draft"), "published": state.get(key+":published"),
+            "notes": read_notes(client.root, record_id), "notes_path": str(notes_path(client.root, record_id)),
+            "previous_draft": previous,
+            "read_first": "先读 notes（上一轮做到哪、卡在哪、本人补过什么要求），有 previous_draft 就在它的基础上改，不要从头再来。"}
+
+
+# ---- one notebook per item: every session that touches it reads it first and adds to it -----------
+
+def notes_path(root, record_id):
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", record_id or ""):
+        raise MatrixError("事项 ID 无效。")
+    return Path(root) / "state/prework/notes" / f"{record_id}.md"
+
+
+def read_notes(root, record_id, last=40):
+    try:
+        lines = notes_path(root, record_id).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-last:])
+
+
+def add_note(root, record_id, text):
+    path = notes_path(root, record_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = f"[{datetime.now(TZ):%m-%d %H:%M}] " + re.sub(r"\s+", " ", str(text)).strip()[:600]
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(line + "\n")
+    return line
+
+
+def _previous_draft(state, record_id, version):
+    """The latest draft made for an earlier version of the same item, to build on."""
+    rows = state.db.execute("SELECT key, value FROM kv WHERE key LIKE ? AND key LIKE '%:draft'", (f"prework:{record_id}:%",)).fetchall()
+    drafts = []
+    for k, v in rows:
+        if k == key_for(record_id, version) + ":draft":
+            continue
+        try:
+            d = json.loads(v)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("draft_path"):
+            drafts.append(d["draft_path"])
+    return drafts[-1] if drafts else None
+
+
+def report_progress(config, client, state, record_id, text):
+    """A visible step, e.g. "2/4 已拉完今天数据": written to 进度 (shown on the panel) and to the notebook."""
+    from .workflow import Gateway
+    short = re.sub(r"\s+", " ", str(text)).strip()[:15]
+    gateway = Gateway(client, state)
+    row = next((r for r in gateway.rows() if r["record_id"] == record_id), None)
+    if not row:
+        raise MatrixError("事项不存在。")
+    gateway.update(row, {"进度": short}, f"prework-progress:{record_id}:{sha256((short + datetime.now(TZ).isoformat()).encode()).hexdigest()[:12]}",
+                   "prework:progress")
+    add_note(client.root, record_id, "进度：" + str(text))
+    return {"ok": True, "progress": short}
 
 
 def draft_init(config, client, state, record_id, version, decision):
@@ -307,7 +370,7 @@ def stage(config, client, state, result_path):
         raise MatrixError(f"写太长了：{len(text)} 字，{result.template}上限 {cap} 字；先给结论，删掉铺垫。")
     if _v1(state) and result.template == "其他" and not (fresh.get("完成标准") or "").strip():
         raise MatrixError("事项没有完成标准，不能按「其他」交付；先在卡点里问本人做到什么程度算完。")
-    check_result = client._exec(["docs", "+script", "--command", "parse", "--content", "@./"+str(artifact.relative_to(client.root)), "--format", "json"])
+    check_result = client._exec(["docs", "+script", "--command", "parse", "--content", "@./"+artifact.relative_to(client.root).as_posix(), "--format", "json"])
     if check_result.get("assessment", {}).get("status") != "passed":
         raise MatrixError("文档版式或资源检查未通过，不能发布。")
     canonical = js(result.model_dump())
@@ -329,7 +392,8 @@ def publish(config, client, state, record_id, version):
         current(config, client, state, record_id, version, published=old["url"])
         return old
     current(config, client, state, record_id, version, published=_saved_url(config, state, key))
-    pending = [x for x in state.pending() if x.startswith("prework:"+record_id+":") and state.operation(x)["status"] != "not_sent"]
+    pending = [x for x in state.pending() if x.startswith("prework:"+record_id+":") and state.operation(x)["status"] != "not_sent"
+               and x != key+":writeback"]  # an unconfirmed write-back is reconciled below by reading it back
     if pending:
         raise MatrixError("该事项存在未确认的历史写入，先核对后再发布。")
     validated = state.get(key+":validated")
@@ -339,7 +403,7 @@ def publish(config, client, state, record_id, version):
     artifact = local_path(client.root, result.artifact_path)
     if sha256(artifact.read_bytes()).hexdigest() != result.artifact_sha256:
         raise MatrixError("结果文件在校验后变化，停止发布。")
-    argv = ["docs", "+create", "--content", "@./"+str(artifact.relative_to(client.root)),
+    argv = ["docs", "+create", "--content", "@./"+artifact.relative_to(client.root).as_posix(),
             "--doc-format", "xml", "--parent-position", "my_library", "--as", "user"]
     def create():
         try:
@@ -365,16 +429,23 @@ def publish(config, client, state, record_id, version):
     patch = {"状态": ["待验收" if _v1(state) else "草稿已备"], "AI草稿链接": url, "预做结果摘要": result.summary, "预做凭据": version}
     if _v1(state):
         patch.update({"交付物链接": url, "进度": "1/1 已交付", "卡点": None})
+    def written(fresh):
+        return not any((_draft_url(fresh.get(name)) != _draft_url(value)) if name in {"AI草稿链接", "交付物链接"}
+                       else (fresh.get(name) or None) != value for name, value in patch.items())
     def update():
         response = client.call("+record-batch-update", "--base-token", config.base_token, "--table-id", config.tables["事项表"],
                                "--json", js({"update_records": {record_id: patch}}), write=True)
         if response.get("ignored_fields"):
             raise MatrixError("预做结果回写有字段被忽略，需核对，不自动重试。")
-        fresh = current(config, client, state, record_id, version, published=url)
-        if any((_draft_url(fresh.get(name)) != _draft_url(value)) if name in {"AI草稿链接", "交付物链接"}
-               else (fresh.get(name) or None) != value for name, value in patch.items()):
+        if not written(current(config, client, state, record_id, version, published=url)):
             raise MatrixError("结果回写尚未读回确认，保留待核对。")
         return {"verified_by_readback": True}
+    previous = state.operation(key+":writeback")
+    if previous and previous["status"] == "pending":
+        # Self-repair: the earlier write may have landed. Confirm it by reading back; never rewrite blindly.
+        if not written(current(config, client, state, record_id, version, published=url)):
+            raise MatrixError("结果回写尚未读回确认，保留待核对。")
+        state.confirm(key+":writeback", {"verified_by_readback": True, "reconciled": True})
     state.once(key+":writeback", update)
     published = {"record_id": record_id, "input_version": version, "title": row["candidate"]["title"], "url": url,
                  "summary": result.summary, "confirmation": result.confirmation, "limitations": result.limitations,
@@ -459,6 +530,11 @@ def notify_now(config, client, state):
         if published:
             pending.append(("result", key, row, published))
         elif row["status"] == "blocked":
+            # Same item stuck for the same reason within a day: already told, do not repeat.
+            said = state.get("blocked-notified:" + row["record_id"]) or {}
+            if said.get("reason") == row.get("reason") and said.get("at", "") > (datetime.now(TZ) - timedelta(hours=24)).isoformat():
+                state.set(key+":sent-now", {"deduplicated": True}); state.set(key+":notice", {"deduplicated": True})
+                continue
             pending.append(("blocked", key, row, None))
     if not pending:
         return {"ok": True, "sent": False, "reason": "no_new_results"}
@@ -476,7 +552,8 @@ def notify_now(config, client, state):
             head, hint, color, _ = line
             if published.get("confirmation"):
                 hint = (hint + " · " if hint else "") + "需你定：" + published["confirmation"][:30]
-            done_items.append(brief_v1._row_item((head, hint, color, None), published["url"]))
+            done_items.append(brief_v1._row_item((head, hint, color, None), published["url"],
+                                                 cmd=f"{brief_v1.number(fresh['编号'])} 过", cmd_label="通过"))
         else:
             stuck_items.append(brief_v1._row_item(line))
     blocks = []
@@ -501,6 +578,8 @@ def notify_now(config, client, state):
             queue.done(row["record_id"], row["input_version"], receipt)
         state.set(key+":sent-now", receipt)
         state.set(key+":notice", receipt)
+        if kind == "blocked":
+            state.set("blocked-notified:" + row["record_id"], {"reason": row.get("reason"), "at": datetime.now(TZ).isoformat()})
     return {"ok": True, "sent": True, "count": len(pending), "receipt": require_message_receipt(receipt)}
 
 
@@ -517,7 +596,9 @@ def mark_blocked(config, client, state, record_id, reason):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="预做评估、准备、结果交付；不对外提交")
-    parser.add_argument("command", choices=["setup", "check", "status", "prepare", "draft-init", "stage", "publish", "notify", "block", "defer"])
+    parser.add_argument("command", choices=["setup", "check", "status", "prepare", "draft-init", "stage", "publish", "notify", "block", "defer",
+                                            "note", "progress"])
+    parser.add_argument("--text", help="note / progress 的内容")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--record-id"); parser.add_argument("--version")
     parser.add_argument("--decision", help="内联版式决策 JSON；初始化前不预建文档或决策文件。"); parser.add_argument("--result", type=Path)
@@ -545,11 +626,18 @@ def main(argv=None):
                         result = stage(config, client, state, args.result)
                     elif args.command == "publish": result = publish(config, client, state, args.record_id, args.version)
                     elif args.command == "notify": result = notify(config, client, state, max_items=args.max_items)
+                    elif args.command == "note":
+                        if not args.record_id or not args.text: raise MatrixError("note 需要 --record-id 和 --text。")
+                        result = {"ok": True, "note": add_note(path.parent, args.record_id, args.text)}
+                    elif args.command == "progress":
+                        if not args.record_id or not args.text: raise MatrixError("progress 需要 --record-id 和 --text。")
+                        result = report_progress(config, client, state, args.record_id, args.text)
                     else:
                         key_for(args.record_id, args.version)
                         if not args.reason: raise MatrixError("需要明确的卡点说明。")
                         if args.command == "block":
                             queue.block(args.record_id,args.version,args.reason)
+                            add_note(path.parent, args.record_id, "卡住：" + args.reason)
                             if _v1(state):
                                 mark_blocked(config, client, state, args.record_id, args.reason)
                         else: queue.defer(args.record_id,args.version,datetime.now(TZ),args.reason)
@@ -559,14 +647,20 @@ def main(argv=None):
                 if args.command == "check":
                     activity.beat(path.parent, "代做检查", f"可做 {len(result.get('ready', []))} 件")
                 elif args.command in {"publish", "block"}:
-                    activity.log(path.parent, "prework", ("交付：" if args.command == "publish" else "卡住：") + str(result.get("title") or args.record_id))
+                    item = queue.get(args.record_id, args.version) if args.version else None
+                    title = result.get("title") or (item or {}).get("candidate", {}).get("title") or "一件事"
+                    activity.log(path.parent, "prework", ("做完待你验收：" if args.command == "publish" else "卡住了：") + title,
+                                 ref="prework:" + args.command + ":" + args.record_id)
+                    if args.command == "publish":
+                        activity.resolve(path.parent, "prework:publish:" + args.record_id)
                 return 2 if args.command == "check" and not result.get("run_model") else 0
             finally: state.close()
     except MatrixBusy:
         print(js({"ok": True, "run_model": False, "reason": "busy"})); return 2
     except (MatrixError, OSError, ValueError) as exc:
         from . import activity
-        activity.log(path.parent, "error", f"代做 {args.command} 出错", detail=str(exc), status="failed")
+        activity.log(path.parent, "error", f"代做 {args.command} 出错", detail=str(exc), status="failed",
+                     ref=f"prework:{args.command}:{args.record_id or ''}")
         print(js({"ok": False, "error": str(exc) if isinstance(exc, MatrixError) else "预做文件或结果格式异常，已停止。"})); return 1
 
 

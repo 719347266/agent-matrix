@@ -209,3 +209,101 @@ class PrepAndWeeklyTests(unittest.TestCase):
         self.assertIsNone(due(datetime(2026, 11, 20, 16, 59, tzinfo=TZ), state))
         self.assertEqual(due(datetime(2026, 11, 20, 17, 1, tzinfo=TZ), state), "weekly:2026-W47")
         self.assertIsNone(due(datetime(2026, 11, 19, 17, 1, tzinfo=TZ), state))
+
+
+class CompleteDeliverableTests(unittest.TestCase):
+    def run_text(self, a, text):
+        out = []
+        for op in parse(text, TODAY)[0]:
+            out += a.apply(op)
+        return out
+
+    def test_completion_settles_the_deliverable(self):
+        from unittest.mock import patch
+        rows = [row(1, "未开始", "我", 标题="跟进会员设计稿交接"),
+                row(2, "未开始", "我", 标题="撰写标签体系需求文档"),
+                row(3, "未开始", "我", 标题="年度运营计划方案"),
+                row(4, "进行中", "我", 标题="整理周报", 交付物链接="https://x.feishu.cn/docx/w")]
+        a = applier(rows)
+        found = {"title": "标签体系需求文档 v1", "url": "https://x.feishu.cn/docx/tag"}
+        with patch("agent_matrix.reply.find_deliverable", side_effect=lambda c, cfg, title, now: found if "标签" in title else None):
+            self.assertIn("行动项", self.run_text(a, "1 完成")[0])
+            self.assertIn("《标签体系需求文档 v1》", self.run_text(a, "2 完成")[0])
+            self.assertIn("没找到", self.run_text(a, "3 完成")[0])
+            self.assertIn("交付物已在", self.run_text(a, "4 完成")[0])
+        d = a.gateway.data
+        self.assertEqual([d[f"rec{i}"]["交付情况"] for i in (1, 2, 3, 4)], [["无交付"], ["有交付"], ["待补交付"], ["有交付"]])
+        self.assertEqual(d["rec2"]["交付物链接"], "https://x.feishu.cn/docx/tag")
+        # the missing one is fixed by a link, or declared to have no file
+        self.assertIn("交付物已挂上", self.run_text(a, "3 + https://x.feishu.cn/docx/plan")[0])
+        self.assertEqual((d["rec3"]["交付情况"], d["rec3"]["交付物链接"]), (["有交付"], "https://x.feishu.cn/docx/plan"))
+        a2 = applier([row(5, "未开始", "我", 标题="写方案")])
+        self.assertIn("无交付", self.run_text(a2, "5 完成 无交付")[0])
+        self.assertEqual(a2.gateway.data["rec5"]["状态"], ["完成"])
+
+    def test_document_match_needs_the_owner_and_a_clear_title(self):
+        from agent_matrix.reply import find_deliverable
+        now = datetime(2026, 11, 17, 12, 0, tzinfo=TZ)
+        def result(title, owner="ou_me", when="2026-11-17T10:00:00+08:00"):
+            return {"title_highlighted": title, "result_meta": {"owner_id": owner, "edit_user_id": owner, "update_time_iso": when,
+                                                                "url": "https://x.feishu.cn/docx/" + str(abs(hash(title)))}}
+        client = SimpleNamespace(_exec=lambda argv: {"results": [
+            result("<h>标签体系</h>需求文档"), result("别人的标签体系需求文档", owner="ou_x"),
+            result("标签体系需求文档（旧）", when="2026-09-01T10:00:00+08:00")]})
+        config = Config(owner_open_id="ou_me")
+        self.assertEqual(find_deliverable(client, config, "撰写标签体系需求文档", now)["title"], "标签体系需求文档")
+        self.assertIsNone(find_deliverable(client, config, "聚光投放复盘", now))
+
+
+class NotebookTests(unittest.TestCase):
+    """Each AI item keeps one notebook so the next session continues instead of starting over."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        from pathlib import Path
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_notes_append_and_read_last_lines(self):
+        from agent_matrix.prework import add_note, read_notes
+        self.assertEqual(read_notes(self.root, "rec1"), "")
+        add_note(self.root, "rec1", "拉完今天数据")
+        add_note(self.root, "rec1", "卡住：缺 归因\n数据")
+        self.assertIn("卡住：缺 归因 数据", read_notes(self.root, "rec1", last=1))
+        self.assertNotIn("拉完", read_notes(self.root, "rec1", last=1))
+        with self.assertRaises(MatrixError):
+            add_note(self.root, "../etc", "x")
+
+    def test_owner_reply_lands_in_the_notebook_and_expand_shows_it(self):
+        from agent_matrix.prework import read_notes
+        a = applier([row(19, "待验收")])
+        a.client = SimpleNamespace(root=self.root)
+        ApplyTests.run_text(self, a, "19 退 少了定价")
+        self.assertIn("本人退回：少了定价", read_notes(self.root, "rec19"))
+        self.assertIn("最近进展", ApplyTests.run_text(self, a, "展开 19")[0])
+
+    def test_previous_draft_is_handed_to_the_next_version(self):
+        from agent_matrix.prework import _previous_draft, key_for
+        from agent_matrix.state import State
+        state = State(self.root / "state.db")
+        old, new = "a" * 64, "b" * 64
+        state.set(key_for("rec1", old) + ":draft", {"draft_path": "state/prework/old.xml"})
+        self.assertEqual(_previous_draft(state, "rec1", new), "state/prework/old.xml")
+        self.assertIsNone(_previous_draft(state, "rec1", old))
+        self.assertIsNone(_previous_draft(state, "rec2", new))
+
+    def test_progress_goes_to_the_table_and_the_notebook(self):
+        from unittest.mock import patch
+        from agent_matrix.prework import read_notes, report_progress
+        fake = FakeGateway([row(44, "进行中")])
+        client = SimpleNamespace(root=self.root)
+        with patch("agent_matrix.workflow.Gateway", lambda c, s: fake):
+            out = report_progress(None, client, None, "rec44", "2/4 已拉完今天全部渠道的数据")
+        self.assertEqual(fake.data["rec44"]["进度"], out["progress"])
+        self.assertLessEqual(len(out["progress"]), 15)
+        self.assertIn("进度：2/4", read_notes(self.root, "rec44"))
+        with patch("agent_matrix.workflow.Gateway", lambda c, s: fake), self.assertRaises(MatrixError):
+            report_progress(None, client, None, "rec404", "x")

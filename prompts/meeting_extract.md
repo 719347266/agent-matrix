@@ -39,6 +39,10 @@ actions 另外还有这些字段：
 
 `open_questions` 只保留会卡住某条待办的问题。**不要输出 suggestions。**
 
+## 同一件事只开一张单
+
+prepare 返回的 `open_items_path` 列出了本人还没完成的事。如果某条待办其实是其中一件事的新进展、新要求或同一份交付物，就填 `same_as: 编号`，不要当成新事。系统会把这条并进那件事的"补充材料"，不再新建。拿不准的不要填；代码还会按标题再比对一遍。
+
 ## 流程
 
 按 `agent_matrix.meeting_review.Review` 的 JSON schema 写入本次会议目录的 `review.json`。`meeting_id`、`transcript_sha256` 只能用 prepare 返回的实际值。
