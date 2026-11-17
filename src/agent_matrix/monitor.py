@@ -9,8 +9,8 @@ Sections:
   今天       timeline: detections (meetings / chats / Feishu tasks), replies, messages sent
   系统问题   only real problems, each with what happened / what the system did / what you do
 
-Self-repair: a stopped listener is restarted by the menu bar app; a stalled Cindy routine is
-reported to the owner on Feishu once (it can only be fixed in Cindy). Nothing calls a model.
+Self-repair: a stopped listener is restarted by the menu bar app; an AI employee that stopped
+checking is reported to the owner on Feishu once. Nothing calls a model.
 """
 import argparse
 from datetime import datetime, timedelta
@@ -30,7 +30,9 @@ CINDY = {"routine": "会议复盘与提前代做", "poll": "事项中心｜飞�
          "jobs": ["事项中心｜每日周期事项", "事项中心｜工作日早间简报", "事项中心｜工作日明日计划"]}
 STALE_AI_HOURS = 3
 SNAPSHOT_FIELDS = ["编号", "标题", "执行方", "状态", "进度", "卡点", "截止日", "交付物链接", "验收结果",
-                   "退回意见", "排除本人提醒", "更新时间", "预做结果摘要", "交付情况", "完成时间"]
+                   "退回意见", "排除本人提醒", "更新时间", "预做结果摘要", "交付情况", "完成时间",
+                   # for the 心响 item page: where it came from and what was asked
+                   "原话引用", "来源", "来源链接", "完成标准", "补充材料", "下一步动作", "创建时间", "关联任务链接"]
 
 
 # ---- task snapshot (written by the listener every 2 minutes) --------------------
@@ -278,8 +280,8 @@ def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=No
     last_run = routine.get("runs", [{}])[0].get("at") if routine.get("runs") else None
     beat = _age((beats.get("会议检查") or {}).get("at"), now)
     if working and (beat is None or beat > 15):
-        add("warn", "Cindy 的例行检查停了", f"已经 {int(beat) if beat else '很久'} 分钟没检查会议和代做，会后待办、AI 代做都在等。",
-            "已在飞书提醒你一次（2 小时内不重复）。", "打开 Cindy，确认它开着，「会议复盘与提前代做」是启用状态。")
+        add("warn", "AI 员工没在检查", f"已经 {int(beat) if beat else '很久'} 分钟没检查会议和事项，会后待办、AI 代做都在等。",
+            "已在飞书提醒你一次（2 小时内不重复）。", "点「重启监听」，它负责每 2 分钟叫醒 AI 员工。", {"kind": "restart_listener"})
     acks = _acks(root)
     for name in CINDY["jobs"]:
         runs = cindy.get(name, {}).get("runs", [])
@@ -297,7 +299,7 @@ def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=No
     sends_failed = [e for e in errors_today if e["kind"] == "send"]
     if sends_failed:
         add("error", "有消息没发出去", f"{sends_failed[0]['at'][11:16]} 的「{sends_failed[0]['title'][:20]}」发送失败。",
-            "为防止重复发送，结果不明的不会自动重发。", "点「立即检查」，或在 Cindy 里问豚豚这条有没有收到。")
+            "为防止重复发送，结果不明的不会自动重发。", "点「立即检查」，或在飞书里看这条有没有收到。")
     other = [e for e in errors_today if e["kind"] != "send" and _age(e["at"], now) is not None and _age(e["at"], now) < 120]
     if other:
         add("warn", f"最近 2 小时出错 {len(other)} 次", f"最近一次：{other[0]['title']}（{_plain(other[0]['detail'])}）",
@@ -306,6 +308,64 @@ def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=No
 
 
 # ---- summary ---------------------------------------------------------------------
+
+def _unread(root):
+    try:
+        from . import inbox
+        return inbox.unread(root)
+    except Exception:
+        return 0
+
+
+def worker_view(root, rows, moving, now):
+    """Exactly one「AI 正在做」(with its step and minutes), the rest of the AI queue as「排队第 N」.
+
+    Returns the AI employee's state for its own panel section:
+    {"state": working|extracting|checking|idle, "line", "n", "title", "step", "minutes", "queue", "last"}."""
+    from .worker import is_running, read_status
+    ws = read_status(root)
+    running = is_running(root)
+    n_of, title_of = {}, {}
+    for r in rows:
+        try:
+            n_of[r.get("record_id")] = int(str(r.get("编号")).strip())
+            title_of[r.get("record_id")] = str(r.get("标题") or "")[:26]
+        except (TypeError, ValueError):
+            pass
+    by_n = {x["n"]: x for x in moving}
+    info = {"state": "idle", "line": "AI 员工：空闲，有新的事会自动开始", "n": None, "title": "", "step": "", "minutes": 0}
+    if running and ws.get("kind") == "item" and ws.get("record_id"):
+        n = n_of.get(ws["record_id"])
+        started = _when(ws.get("item_started") or ws.get("stage_at"))
+        minutes = max(0, int((now - started).total_seconds() // 60)) if started else 0
+        step = ws.get("step") or ws.get("stage") or ""
+        info.update(state="working", n=n, title=title_of.get(ws["record_id"]) or ws.get("title") or "", step=step, minutes=minutes,
+                    line=f"AI 员工：正在做 #{n} · {step} · {minutes} 分钟")
+        if n in by_n:
+            by_n[n].update(label="AI 正在做", tone="blue", note=f"{step} · 已 {minutes} 分钟"[:28])
+    elif running and ws.get("kind") in {"meeting", "chat"}:
+        info.update(state="extracting", title=ws.get("title") or "", step=ws.get("stage") or "提取待办",
+                    line=f"AI 员工：{ws.get('stage') or '提取待办'}（{ws.get('title') or ''}）")
+    elif running:
+        info.update(state="checking", line="AI 员工：在看有没有要做的")
+    queue = []
+    for i, q in enumerate(ws.get("queue") or [] if running else [], 1):
+        n = n_of.get(q.get("record_id"))
+        queue.append({"n": n, "title": title_of.get(q.get("record_id")) or q.get("title") or ""})
+        x = by_n.get(n)
+        if x and x.get("label") != "AI 正在做":
+            x.update(label=f"排队第 {i}", tone="gray", note="做完前面的就轮到它")
+    info["queue"] = queue
+    last = ws.get("last") or {}
+    if last:
+        at = _when(last.get("at"))
+        info["last"] = {"n": last.get("n"), "title": last.get("title") or "", "outcome": last.get("outcome") or "",
+                        "text": last.get("text") or "", "time": f"{at:%H:%M}" if at else ""}
+    order = {"AI 正在做": 0}
+    moving.sort(key=lambda x: (order.get(x.get("label"), 2 if not str(x.get("label", "")).startswith("排队") else 1),
+                               int(str(x.get("label", "")).replace("排队第", "").strip() or 0) if str(x.get("label", "")).startswith("排队") else 0))
+    return info
+
 
 def build(root, now=None):
     now = now or datetime.now(TZ)
@@ -318,6 +378,11 @@ def build(root, now=None):
     except Exception as exc:  # one odd row must never blank the whole panel
         activity.log(root, "error", "面板整理事项时出错", detail=f"{type(exc).__name__}: {exc}", status="failed")
         need, moving, backlog, done = [], [], [], []
+    try:
+        worker = worker_view(root, snap["rows"], moving, now)
+    except Exception as exc:
+        worker = {"state": "error", "line": "AI 员工：状态读不到", "queue": []}
+        activity.log(root, "error", "面板读 AI 员工状态出错", detail=f"{type(exc).__name__}: {exc}", status="failed")
     # Things that look like the same item twice: suggest merging (owner decides; nothing is merged here).
     from .merge import duplicate_pairs
     for p in duplicate_pairs(snap["rows"], counts.pop("distinct", []))[:3]:
@@ -356,6 +421,7 @@ def build(root, now=None):
     return {"generated_at": now.isoformat(timespec="seconds"), "level": level, "headline": headline,
             "summary": f"正在进行 {len(moving)} 件" + (f"（{stuck} 件卡住或逾期）" if stuck else "") +
                        f" · 今天发给你 {sum(1 for e in events if e['kind'] == 'send' and e['status'] == 'ok')} 条",
+            "worker": worker, "unread": _unread(root),
             "need_you": need, "in_progress": moving, "backlog_count": len(backlog), "done_recent": done[:20],
             "timeline": timeline, "issues": issues,
             "snapshot_at": snap.get("at"), "board_url": board, "counts": counts,
@@ -376,7 +442,7 @@ def alert_if_cindy_stalled(root, client, state, now):
     if last and now - datetime.fromisoformat(last) < timedelta(hours=2):
         return "already_alerted"
     minutes = f"{int(beat)} 分钟" if beat else "很久"
-    client.send_self(f"⚠ Cindy 的例行检查已经 {minutes}没跑了，会后待办和 AI 代做在等它。\n请打开 Cindy，确认它在运行、「会议复盘与提前代做」是启用状态。",
+    client.send_self(f"⚠ AI 员工已经 {minutes}没检查会议和事项了，会后待办和 AI 代做在等它。\n请在菜单栏「事项中心」的 ⋯ 里点「重启监听」。",
                      "cindy-stalled-" + now.strftime("%Y%m%d%H%M"))
     state.set("monitor:cindy-alert", now.isoformat())
     return "alerted"
@@ -401,6 +467,7 @@ a.btn{{flex:none;font-size:13px;color:var(--blue);text-decoration:none;margin-to
 .empty{{color:var(--muted);padding:8px 0 12px}}</style></head><body><main>
 <h1>{headline}</h1><div class="sub">{summary} · 更新于 {updated}</div>
 {urgent}
+<section><h2>AI 员工</h2>{worker}</section>
 <section><h2>需要你（{need_count}）</h2>{need}</section>
 <section><h2>正在进行（{moving_count}）</h2>{moving}{backlog}</section>
 <section><h2>最近完成（7 天）</h2>{done}</section>
@@ -422,9 +489,17 @@ def render(s):
                 f'<div>{e(i["what"])}</div><div class="note">系统：{e(i["done"])}</div>'
                 + (f'<div>你：{e(i["you"])}</div>' if i["you"] else "") + "</div>")
     urgent = "".join(issue(i) for i in s["issues"] if i["level"] in {"error", "warn"})
+    w = s.get("worker") or {}
+    wlines = [e(w.get("line") or "AI 员工：状态读不到")]
+    if w.get("queue"):
+        wlines.append("排队：" + "、".join(e(f"#{q['n']} {q['title']}") for q in w["queue"]))
+    if w.get("last"):
+        l = w["last"]
+        wlines.append(e(f"上一件：#{l['n']} {l['title']} · {l['outcome']} {l['time']} · {l['text']}"))
+    worker = "".join(f'<div class="item"><div class="main">{x}</div></div>' for x in wlines)
     later = "".join(issue(i) for i in s["issues"] if i["level"] not in {"error", "warn"})
     return PAGE.format(
-        headline=e(s["headline"]), summary=e(s["summary"]), updated=e(s["generated_at"][11:16]),
+        headline=e(s["headline"]), summary=e(s["summary"]), updated=e(s["generated_at"][11:16]), worker=worker,
         urgent=f'<section><h2>要先处理</h2>{urgent}</section>' if urgent else "",
         later=f'<section><h2>系统说明（不影响使用）</h2>{later}</section>' if later else "",
         need_count=len(s["need_you"]), need="".join(item(x) for x in s["need_you"]) or '<div class="empty">没有要你处理的</div>',
@@ -441,6 +516,8 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--write-html", action="store_true")
     p.add_argument("--test-send", action="store_true")
+    p.add_argument("--test-card", action="store_true", help="发一张带按钮的测试卡片，点了原地变成「收到」")
+    p.add_argument("--refresh", action="store_true", help="马上从飞书重读事项，刷新本地快照（心响点完按钮后用）")
     p.add_argument("--clear-resolved", action="store_true", help="清掉已经处理好的旧提示")
     args = p.parse_args(argv)
     root = args.config.resolve().parent
@@ -454,6 +531,35 @@ def main(argv=None):
         now = datetime.now(TZ)
         receipt = client.send_self(f"【监控测试】{now:%H:%M} 发送通道正常，这条消息说明系统能给你发飞书。",
                                    "monitor-test-" + now.strftime("%Y%m%d%H%M%S"))
+        print(json.dumps({"ok": True, "message_id": receipt.get("message_id")}, ensure_ascii=False))
+        return 0
+    if args.refresh:
+        from .config import load
+        from .feishu import Feishu
+        from .state import State, exclusive_lock
+        from .workflow import Gateway
+        client = Feishu(load(args.config.resolve()), root)
+        with exclusive_lock(root / "state", wait=60):
+            state = State(root / "state/state.db")
+            try:
+                client.verify_owner(client.auth())
+                rows = Gateway(client, state).rows()
+            finally:
+                state.close()
+        save_snapshot(root, rows)
+        print(json.dumps({"ok": True, "rows": len(rows)}))
+        return 0
+    if args.test_card:
+        from .brief_v1 import _block, _row_item, card
+        from .config import load
+        from .feishu import Feishu
+        client = Feishu(load(args.config.resolve()), root)
+        client.verify_owner(client.auth())
+        now = datetime.now(TZ)
+        c = card("按钮测试", "", "blue", [_block("点一下右边的按钮", "blue", [
+            _row_item(("这一行点完会原地变成「✓ 收到」", "不会改任何事项", "grey", None), cmd="__ping__", cmd_label="点我")])],
+                 "点了没变化，说明卡片回调还没生效。", None)
+        receipt = client.send_card(c, "monitor-card-" + now.strftime("%Y%m%d%H%M%S"))
         print(json.dumps({"ok": True, "message_id": receipt.get("message_id")}, ensure_ascii=False))
         return 0
     status = build(root)

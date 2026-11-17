@@ -6,11 +6,13 @@
 Pushed events (one `lark-cli event consume` child each):
   im.message.receive_v1                    owner's replies to the bot → applied, ✓ within seconds
   vc.meeting.participant_meeting_ended_v1  meeting ended → queued immediately
-  vc.note.generated_v1                     notes/transcript ready → marked ready; the 2-minute
-                                           Cindy check then wakes the model for extraction
+  vc.note.generated_v1                     notes/transcript ready → marked ready; the AI employee
+                                           (worker.py) is woken at once for extraction
   task.task.update_user_access_v2          Feishu task changed → synced into the task table
+  card.action.trigger                      a tapped card button → applied, the card turns into "✓ 已完成"
 Timers: prep cards ~30 min before meetings, brief catch-up, Friday review (every minute);
-chat reading (every 10 min); Feishu task sync fallback (every 15 min).
+chat reading (every 10 min); Feishu task sync fallback (every 15 min); the AI employee is
+started every 2 minutes when it is not already working (it exits when nothing is left).
 
 A subscription the Feishu console has not enabled yet is retried every 10 minutes, so
 enabling it later needs no restart. Every job is idempotent with the 5-minute fallback poll.
@@ -102,6 +104,7 @@ class Listener:
         self.status = {}
         self.retry = []
         self.last = {}
+        self.fixed_done = {}
 
     def locked(self, job):
         """Run a job under the project lock; a busy lock means try again shortly."""
@@ -169,18 +172,24 @@ class Listener:
             return "no_command"
         if state.get("card:seen:" + eid):
             return "seen"
-        reply = handle(config, client, state, cmd, source="card", message_ref=eid)
-        if reply:
+        # The test card's button ("给我发张测试卡片"): changes nothing, only proves taps arrive.
+        reply = "✓ 按钮可用" if cmd == "__ping__" else handle(config, client, state, cmd, source="card", message_ref=eid)
+        # The card itself changes ("✓ 已完成 14:52"); a chat message only when the card cannot be updated.
+        from .cards import update_in_place
+        in_place = bool(reply) and update_in_place(client, client.root, event, cmd, reply, datetime.now(TZ))
+        if reply and not in_place:
             send_once(state, "card-ack:" + eid, lambda: client.send_self(reply, "card-" + sha256(eid.encode()).hexdigest()[:32]))
         state.set("card:seen:" + eid, True)
-        return "handled"
+        return "updated" if in_place else "handled"
 
     def on_meeting(self, config, client, state, event):
         from .meeting_watch import MeetingQueue, MeetingSource, ingest
         mid = event.get("meeting_id") or (event.get("note_source") or {}).get("source_entity_id")
         if not mid:
             return "no_meeting_id"
-        return ingest(config, MeetingSource(client), MeetingQueue(state), str(mid), datetime.now(TZ))
+        result = ingest(config, MeetingSource(client), MeetingQueue(state), str(mid), datetime.now(TZ))
+        self.wake_worker(config, force=True)
+        return result
 
     def on_task(self, config, client, state, event):
         from .sources import feishu_tasks
@@ -207,6 +216,37 @@ class Listener:
             self.last[name] = now
             return True
         return False
+
+    def wake_worker(self, config, force=False):
+        """The AI employee runs in its own process; this only starts it when it is idle."""
+        try:
+            from .worker import kick
+            if kick(self.root, config, force=force) == "started":
+                log("worker", "started")
+        except Exception as exc:
+            log("worker kick failed", type(exc).__name__, str(exc)[:200])
+
+    SCHEDULE = [("recurring", (6, 0), False), ("morning", (8, 30), True), ("evening", (21, 0), True)]
+
+    def fixed_times(self):
+        """06:00 周期事项, workday 08:30 早报 and 21:00 晚报, run here so no other scheduler is needed.
+
+        Each runs once a day (also safe next to another scheduler: the brief keys are per date)."""
+        now = datetime.now(TZ)
+        for job, (h, m), workdays in self.SCHEDULE:
+            if workdays and now.weekday() >= 5:
+                continue
+            if (now.hour, now.minute) < (h, m) or (now.hour, now.minute) > (h + 2, m):
+                continue  # only within two hours of the slot; later catch-up is done by the brief itself
+            key = f"listen:fixed:{job}:{now.date().isoformat()}"
+            if self.fixed_done.get(key):
+                continue
+            self.fixed_done[key] = True
+            def go(job=job):
+                done = subprocess.run([sys.executable, "-m", "agent_matrix.scheduled", job], cwd=self.root, capture_output=True,
+                                      text=True, encoding="utf-8", timeout=600)
+                log("fixed", job, "→", (done.stdout or done.stderr or "").strip()[-160:])
+            threading.Thread(target=go, daemon=True).start()
 
     def timers(self):
         jobs = []
@@ -243,6 +283,10 @@ class Listener:
                 from .sources import feishu_tasks
                 return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if config.feishu_tasks_enabled else "off"
             jobs.append(("tasks", tasks))
+        if self.every("worker", 120):
+            self.wake_worker(load(self.path))
+        if self.every("schedule", 60):
+            self.fixed_times()
         for name, job in jobs:
             try:
                 result = self.locked(job)
@@ -259,7 +303,9 @@ class Listener:
         config = load(self.path)
         for key, identity in EVENTS:
             Consumer(key, identity, self.inbox, self.status, config.lark_binary).start()
-        log("listener started", self.root)
+        from .app import start_background
+        served = start_background(self.root, config)
+        log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:
                 key, event = self.inbox.get(timeout=5)

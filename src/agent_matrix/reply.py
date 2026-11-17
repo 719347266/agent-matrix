@@ -81,6 +81,9 @@ VERBS = [
     (r"(我来|我做)", "me"),
     (r"(AI做|ai做|交给AI|交给ai|AI来|ai来)", "ai"),
     (r"(AI备|ai备|AI准备|ai准备)", "prep"),
+    (r"(先做|优先|插队|先做这个)", "first"),
+    (r"(恢复|捞回来|撤销|撤回)", "restore"),
+    (r"(继续|接着做|继续做|往下做)", "resume"),
     (r"给\s*(\S{1,12})", "delegate"),
     (r"([A-Da-d])", "option"),
     (r"\+\s*(.+)", "material"),
@@ -123,7 +126,7 @@ def parse(text, today):
         else:
             # "3个会都开完了" is chat; only a #-prefixed or short reply gets a question back.
             if hashed or len(rest) <= 6:
-                problems.append(f"没看懂「{raw}」。可回：过 / 退 意见 / 完成 / 周五 / 不做 / 我来 / AI做 / AI备 / 展开")
+                problems.append(f"没看懂「{raw}」。可回：过 / 退 意见 / 完成 / 周五 / 不做 / 我来 / AI做 / AI备 / 先做 / 继续 / 展开")
     return ops, problems
 
 
@@ -162,6 +165,16 @@ class Applier:
 
     def key(self, op, n):
         return f"reply:{self.ref}:{n}:{op.verb}:{sha256(op.arg.encode()).hexdigest()[:8]}"
+
+    def stop_ai(self, row):
+        """If an AI is working on this item right now, it stops (built-in within seconds, others at their next call)."""
+        if self.client is None:
+            return ""
+        try:
+            from .drive import stop_record
+            return "，已通知 AI 停止" if stop_record(self.client.root, row["record_id"]) else ""
+        except Exception:
+            return ""
 
     def write(self, row, patch, op, n):
         receipt = self.gateway.update(row, patch, self.key(op, n), f"reply:{self.source}:{self.ref}")
@@ -202,6 +215,16 @@ class Applier:
         owner = [{"id": self.config.owner_open_id}]
         if op.verb == "expand":
             return self.expand(row)
+        if op.verb == "restore":
+            if st not in {"完成", "取消"}:
+                return f"#{n} {name} 现在是{st}，不用恢复。"
+            self.write(row, {"状态": ["待确认"], "进度": "0/1 待确认", "完成时间": None, "交付情况": None,
+                             "卡点": None, "验收结果": None,
+                             "补充材料": _append(row.get("补充材料"), f"{self.now.isoformat()} 本人恢复：重新确认这件事")}, op, n)
+            if self.client is not None:
+                from .thread import forget_judgment
+                forget_judgment(self.client.root, row["record_id"])
+            return f"#{n} {name} → 恢复了，回到「新进来」等你定 ✓"
         if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete"}:
             return f"#{n} {name} 已经是{st}，没动。"
         if st == "取消" and op.verb in {"no_deliverable", "material", "complete"}:
@@ -221,10 +244,10 @@ class Applier:
                              "退回意见": _append(row.get("退回意见"), f"{self.now:%m-%d} {op.arg}")}, op, n)
             return f"#{n} {name} → 退回修改 ✓"
         if op.verb in {"complete", "no_deliverable"}:
-            return self.complete(row, op, n, name, st, no_file=op.verb == "no_deliverable")
+            return self.complete(row, op, n, name, st, no_file=op.verb == "no_deliverable") + self.stop_ai(row)
         if op.verb == "cancel":
             self.write(row, {"状态": ["取消"], "进度": "不做"}, op, n)
-            return f"#{n} {name} → 不做了 ✓"
+            return f"#{n} {name} → 不做了 ✓" + self.stop_ai(row)
         if op.verb == "reschedule":
             from .workflow import day
             old, new = day(row.get("截止日")), date.fromisoformat(op.arg)
@@ -282,6 +305,18 @@ class Applier:
             if self.state:
                 self.state.set("merge:distinct", sorted(set(marked) | set(keys)))
             return f"#{n} {name} → 记下了，不是重复，以后不再提示 ✓"
+        if op.verb in {"first", "resume"}:
+            if ex != "AI":
+                return f"#{n} {name} 不是 AI 在做。要交给 AI，回「{n} AI做」。"
+            if op.verb == "resume":
+                patch = {"补充材料": _append(row.get("补充材料"), f"{self.now:%m-%d} 本人：继续做，按现有资料先做出来")}
+                if st == "卡住":
+                    patch.update({"状态": ["进行中"], "卡点": None, "进度": "继续做"})
+                self.write(row, patch, op, n)
+            if self.state is not None:
+                first = [x for x in self.state.get("work:first", []) if x != row["record_id"]]
+                self.state.set("work:first", [row["record_id"], *first] if op.verb == "first" else first)
+            return f"#{n} {name} → " + ("AI 下一件就做 ✓" if op.verb == "first" else "AI 接着做 ✓")
         if op.verb == "prep":
             if ex != "我":
                 return f"#{n} {name} 不是你的事，不用 AI备。"
@@ -465,6 +500,9 @@ def find_deliverable(client, config, title, now, days=21):
     return {"title": scored[0][3], "url": scored[0][4]}
 
 
+WAKE_WORKER = {"material", "reject", "ai", "first", "resume", "prep"}
+
+
 def handle(config, client, state, text, *, source, message_ref):
     ops, problems = parse(text, _now(config).date())
     if not ops and not problems:
@@ -476,6 +514,12 @@ def handle(config, client, state, text, *, source, message_ref):
     from . import activity
     for line in lines:
         activity.log(client.root, "reply", f"你回复「{text.strip()[:20]}」→ {line[:60]}", status="ok" if "✓" in line else "info")
+    if any(op.verb in WAKE_WORKER for op in ops) and any("✓" in x for x in lines):
+        try:  # new material, a rejection or "先做": the AI employee starts now, not on the next tick
+            from .worker import kick
+            kick(client.root, config, force=True)
+        except Exception:
+            pass
     return "\n".join([*lines, *problems])
 
 

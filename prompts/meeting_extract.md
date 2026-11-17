@@ -45,7 +45,6 @@ prepare 返回的 `open_items_path` 列出了本人还没完成的事。如果�
 
 ## 流程
 
-按 `agent_matrix.meeting_review.Review` 的 JSON schema 写入本次会议目录的 `review.json`。`meeting_id`、`transcript_sha256` 只能用 prepare 返回的实际值。
+按 `review.schema.json`（即 `Review` 的 JSON schema）在当前文件夹写好 `review.json` 就结束。`meeting_id`、`transcript_sha256` 只能用开头给出的实际值。
 
-1. 先运行 validate。不通过时只修正有依据的字段，最多重试一次。如果是因为缺少承接字眼不通过，说明它本来就不是待办，直接删掉这条。
-2. 通过后运行 publish。没有待办的会不会发任何消息；有待办的会只发一行，列出新编号。
+校验和发布都由程序做。没通过时，程序会把原因发回给你：只修正有依据的字段；如果是因为缺少承接字眼没通过，说明它本来就不是待办，直接删掉这条。没有待办的会不会发任何消息。

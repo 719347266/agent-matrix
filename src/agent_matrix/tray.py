@@ -89,6 +89,12 @@ class Tray:
             for verb in ("/End", "/Run"):
                 subprocess.run(["schtasks", verb, "/TN", LISTENER_TASK], creationflags=NO_WINDOW, capture_output=True)
 
+    def center(self):
+        try:
+            return json.loads((self.root / "state/app.json").read_text()).get("url") or "http://127.0.0.1:8765/"
+        except (OSError, ValueError):
+            return "http://127.0.0.1:8765/"
+
     def page(self):
         out = self.root / "state/monitor.html"
         out.write_text(monitor.render(self.status or monitor.build(self.root)), encoding="utf-8")
@@ -116,7 +122,7 @@ class Tray:
             self.last_seen = latest
         else:
             for e in sorted((e for e in events if e["id"] > self.last_seen), key=lambda e: e["id"])[:4]:
-                title = {"send": "已发到你的飞书" if e["ok"] else "飞书消息没发出去", "prework": "AI 有进展"}.get(
+                title = {"send": "心响" if e["ok"] else "心响 · 消息没送到", "prework": "AI 有进展"}.get(
                     e["kind"], "事项中心出了点问题")
                 if e["kind"] in {"send", "prework"} or not e["ok"]:
                     try:
@@ -153,6 +159,14 @@ class Tray:
         yield Item(s["headline"], noop, enabled=False)
         if s.get("summary"):
             yield Item(s["summary"], noop, enabled=False)
+        w = s.get("worker") or {}
+        if w.get("line"):
+            yield Item(w["line"][:80], noop, enabled=False)
+        for q in (w.get("queue") or [])[:3]:
+            yield Item(f"   排队：#{q.get('n')} {q.get('title')}"[:80], noop, enabled=False)
+        if w.get("last"):
+            l = w["last"]
+            yield Item(f"   上一件 {l.get('time')}：#{l.get('n')} {l.get('outcome')} · {l.get('text')}"[:80], noop, enabled=False)
         for p in [i for i in s["issues"] if i["level"] in {"error", "warn"}]:
             fix = (p.get("action") or {}).get("kind") == "restart_listener"
             yield Item(f"⚠ {p['title']}：{p['you'] or p['done']}", (lambda icon, item: self.restart_listener()) if fix else noop, enabled=fix)
@@ -171,11 +185,14 @@ class Tray:
             if urls:
                 yield Item("⚙ 订阅飞书推送（一次性设置）", self.opener(urls))
         yield Menu.SEPARATOR
-        yield Item("打开完整页面", lambda icon, item: self.open(self.page()), default=True)
+        unread = s.get("unread") or 0
+        yield Item("打开心响" + (f"（{unread} 条新消息）" if unread else ""), lambda icon, item: self.open(self.center()), default=True)
+        yield Item("打开完整页面", lambda icon, item: self.open(self.page()))
         yield Item("打开飞书看板", lambda icon, item: self.open(s.get("board_url")))
         yield Item("更多", Menu(
             Item("立即检查一次", lambda icon, item: self.python("agent_matrix.reply", "poll")),
             Item("给我发条测试消息", lambda icon, item: self.python("agent_matrix.monitor", "--test-send")),
+            Item("给我发张测试卡片（试按钮）", lambda icon, item: self.python("agent_matrix.monitor", "--test-card")),
             Item("清掉已处理的提示", lambda icon, item: (monitor.clear_resolved(self.root), self.refresh())),
             Item("重启监听", lambda icon, item: self.restart_listener()),
         ))

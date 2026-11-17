@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>心响</title>
+<link rel="icon" href="/icon.png">
+<style>
+:root{--bg:#f7f6f3;--panel:#fff;--ink:#1f2328;--ink2:#5f6670;--ink3:#9ca1a8;--line:#e8e6e1;--soft:#f2f0ec;
+--accent:#7c3aed;--accent-bg:#f2ecff;--blue:#2563eb;--blue-bg:#edf3ff;--green:#15803d;--green-bg:#ebf7ef;--amber:#b45309;--amber-bg:#fff6e3;--red:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#141517;--panel:#1c1d20;--ink:#e8e8ea;--ink2:#a9adb4;--ink3:#6f747c;--line:#2c2e33;--soft:#232428;
+--accent-bg:#2a1f45;--blue-bg:#18233b;--green-bg:#14291c;--amber-bg:#33270f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+button{font:inherit;cursor:pointer;color:inherit}
+a{color:var(--blue);text-decoration:none}
+.demo{font-size:12px;color:var(--ink3);text-align:center;padding:6px;border-bottom:1px solid var(--line)}
+.demo label{margin-left:14px;cursor:pointer}
+header{display:flex;align-items:center;gap:22px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+.logo{font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px}
+.logo i{width:22px;height:22px;border-radius:6px;background:var(--accent) url(/icon.png) center/cover;display:inline-block}
+nav{display:flex;gap:4px}
+nav button{border:0;background:none;padding:6px 12px;border-radius:7px;color:var(--ink2)}
+nav button.on{background:var(--soft);color:var(--ink);font-weight:600}
+nav b{font-weight:600;color:var(--accent);margin-left:4px}
+.ai{margin-left:auto;font-size:13px;color:var(--ink2);border:1px solid var(--line);border-radius:99px;padding:4px 12px;background:none}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px;vertical-align:1px}
+.dot.busy{background:var(--blue);animation:p 1.4s infinite}@keyframes p{50%{opacity:.3}}
+.cmd input{width:220px;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+main{max-width:980px;margin:0 auto;padding:26px 28px 80px}
+/* flow strip */
+.flow{display:flex;align-items:stretch;gap:0;margin-bottom:26px}
+.stage{flex:1;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:12px 16px;text-align:left;position:relative}
+.stage.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.stage .name{font-size:13px;color:var(--ink2)}
+.stage .num{font-size:26px;font-weight:700;line-height:1.3}
+.stage .sub{font-size:12px;color:var(--ink3)}
+.stage.need .name:after{content:"等你";margin-left:6px;font-size:11px;color:#fff;background:var(--red);border-radius:99px;padding:0 6px}
+.arrow{width:26px;display:flex;align-items:center;justify-content:center;color:var(--ink3)}
+/* list */
+h2{font-size:15px;margin:0 0 4px}
+.hint{font-size:12px;color:var(--ink3);margin:0 0 12px}
+.group{font-size:12px;color:var(--ink3);margin:18px 0 4px;font-weight:600}
+.list{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line);cursor:pointer}
+.row:first-child{border-top:0}.row:hover{background:var(--soft)}
+.row .main{flex:1;min-width:0}
+.row .title{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .n{color:var(--ink3);margin-right:6px;font-variant-numeric:tabular-nums}
+.row .meta{font-size:12px;color:var(--ink2)}
+.row .meta .late{color:var(--red)}
+.row .ask{font-size:13px;color:var(--amber)}
+.bar{height:4px;border-radius:2px;background:var(--blue-bg);margin-top:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--blue)}
+.btn{border:1px solid var(--line);background:var(--panel);padding:5px 12px;border-radius:7px;font-size:13px;white-space:nowrap}
+.btn:hover{border-color:var(--ink3)}.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.link{border-color:transparent;color:var(--blue)}
+.empty{padding:18px 16px;color:var(--ink3)}
+.inline{display:flex;gap:6px;padding:0 16px 12px}.inline input{flex:1;padding:7px 10px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 12px;font-size:12px;color:var(--ink2)}
+.chip.on{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.switch{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 12px;cursor:pointer}
+.switch .tr{width:36px;height:20px;border-radius:99px;background:var(--line);position:relative;flex:none;transition:.15s}
+.switch .tr:after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch.on .tr{background:var(--accent)}.switch.on .tr:after{left:18px}
+.switch b{font-weight:600}.switch span{font-size:12px;color:var(--ink2)}
+.judge{font-size:12px;color:var(--ink2);margin-top:2px}.judge b{color:var(--accent);font-weight:600}
+/* item story */
+.back{border:0;background:none;color:var(--ink2);padding:0;margin-bottom:12px}
+.ih{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}.ih h1{font-size:22px;margin:0}
+.state{font-size:12px;padding:2px 10px;border-radius:99px;background:var(--soft);color:var(--ink2);white-space:nowrap}
+.state.need{background:var(--accent-bg);color:var(--accent)}.state.ai{background:var(--blue-bg);color:var(--blue)}.state.done{background:var(--green-bg);color:var(--green)}
+.sec{display:grid;grid-template-columns:28px 1fr;gap:0 10px;margin-top:22px}
+.sec .k{width:24px;height:24px;border-radius:50%;background:var(--soft);color:var(--ink2);font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.sec .k.hot{background:var(--accent);color:#fff}
+.sec h3{font-size:14px;margin:2px 0 10px}
+.src{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px}
+.src q{display:block;margin:4px 0 6px;color:var(--ink);quotes:"「" "」"}
+.src .meta{color:var(--ink2);font-size:12px}
+.thread{display:flex;flex-direction:column;gap:12px}
+.m{display:grid;grid-template-columns:96px 1fr;gap:10px}
+.m .who{font-size:11px;color:var(--ink3);text-align:right;padding-top:2px;white-space:nowrap}
+.m .who b{display:block;color:var(--ink2);font-weight:600}
+.bub{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;white-space:pre-wrap;word-break:break-word}
+.m.me .bub{background:var(--accent-bg);border-color:transparent}
+.m.ask .bub{background:var(--amber-bg);border-color:#f3cf94}
+.steps{font-size:12px;color:var(--ink2);padding:2px 0}
+.steps span{color:var(--ink3)}
+.sys{text-align:center;font-size:12px;color:var(--ink3)}
+.dv{border:1px solid #bfe3cb;background:var(--green-bg);border-radius:10px;padding:10px 12px;font-size:13px;white-space:normal}
+.dv .top{display:flex;justify-content:space-between;gap:10px;font-weight:600}
+.dv .q{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--panel)}
+.dv details{margin-top:6px;color:var(--ink2)}.dv summary{cursor:pointer;font-size:12px}
+.dv ul{margin:4px 0 0;padding-left:18px}
+.now{background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:14px 16px}
+.now .what{font-size:14px;margin-bottom:10px}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.say{display:flex;gap:8px;margin-top:12px}
+.say textarea{flex:1;height:58px;resize:none;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit}
+.kv{display:grid;grid-template-columns:90px 1fr;gap:6px 12px;font-size:13px}.kv div:nth-child(odd){color:var(--ink3)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:9px 16px;border-radius:9px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:20}
+.toast.on{opacity:1}
+@media (max-width:820px){header{flex-wrap:wrap;gap:10px;padding:12px 16px}.cmd{display:none}main{padding:18px 16px}.flow{flex-direction:column}.arrow{width:auto;height:18px;transform:rotate(90deg)}}
+</style>
+</head>
+<body>
+<div id="demo"></div>
+<header>
+  <div class="logo"><i></i>心响</div>
+  <nav id="nav"></nav>
+  <button class="ai" id="ai"></button>
+  <div class="cmd"><input id="cmdbox" placeholder="输入指令：44 过 / 44 + 要求" onkeydown="if(event.key==='Enter')runCmd()"></div>
+</header>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+<script>
+let D = /*__DATA__*/null;            /* the prototype embeds data here; the app loads it from /api/state */
+const TOKEN = /*__TOKEN__*/"";
+const LIVE = !D;
+let TODAY = (D && D.today) || new Date().toISOString().slice(0,10);
+async function api(path, body){
+  const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json","X-Xinxiang-Token":TOKEN}, body:JSON.stringify(body)}
+                                   : {headers:{"X-Xinxiang-Token":TOKEN}});
+  if(!r.ok) throw new Error(r.status);
+  return r.json();
+}
+let failing = false;
+async function load(){
+  try{ D = await api("/api/state"); TODAY = D.today; failing = false; }
+  catch(e){ failing = true; }
+  render();
+}
+const S = {view:"home", stage:null, item:null, back:"home", all:"进行中", inbox:"全部", working:false, step:0, blocked:null};
+const DEMO_N = 45, DEMO_STEPS = ["1/4 读任务单和背景","2/4 读标签体系文档","3/4 写需求文档","4/4 自检"];
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const byN = n => D.items.find(i => i.n === n);
+const clock = () => new Date().toTimeString().slice(0,5);
+function toast(t){ const el=$("#toast"); el.textContent=t; el.classList.add("on"); clearTimeout(toast.h); toast.h=setTimeout(()=>el.classList.remove("on"),2600); }
+const live = i => !i.hidden && i.status !== "取消";
+const active = i => live(i) && !["完成","待验收","待确认"].includes(i.status);
+const late = i => i.due && i.due < TODAY && !["完成","取消","待验收"].includes(i.status);
+function due(i){ if(!i.due||["完成","待验收"].includes(i.status)) return ""; const d=Math.round((new Date(i.due)-new Date(TODAY))/864e5);
+  return d<0?`逾期 ${-d} 天`:d===0?"今天到期":d===1?"明天到期":`${i.due.slice(5)} 到期`; }
+const whoText = i => ({"我":"你来做","AI":"AI 做","别人":"别人做"}[i.who]||"");
+const cur = () => LIVE ? (D.worker && D.worker.current) : (S.working ? {n:DEMO_N, step:DEMO_STEPS[S.step], minutes:2+S.step*3} : null);
+const doingList = () => LIVE ? ((D.worker && D.worker.doing) || []).filter(d => d.kind === "item" && d.n) : (cur() ? [cur()] : []);
+const jobOf = i => doingList().find(d => d.n === i.n);
+const isWorking = i => !["完成","取消","待确认"].includes(i.status) && !!jobOf(i);
+const stepIndex = c => { const m=String(c&&c.step||"").match(/(\d)\s*\/\s*4/); return m ? Math.min(4,+m[1]) : 1; };
+const blockedAI = i => i.who==="AI" && i.status==="卡住";
+
+/* ---------- the four stages of the workflow ---------- */
+function stages(){
+  const v=D.items.filter(live);
+  const fresh=v.filter(i=>i.status==="待确认" && i.who!=="别人");
+  const doing=v.filter(i=>(active(i)&&!blockedAI(i)) || isWorking(i));
+  const wait=v.filter(i=>(i.status==="待验收"&&!isWorking(i)) || blockedAI(i));
+  const week=addDays(TODAY,-7);
+  const done=v.filter(i=>i.status==="完成" && (!i.finished || i.finished>=week));
+  return [
+    {key:"fresh", name:"新进来", items:fresh, need:fresh.length>0, sub:"等你定谁来做"},
+    {key:"doing", name:"在做", items:doing, need:false, sub:`你 ${doing.filter(i=>i.who==="我").length} · AI ${doing.filter(i=>i.who==="AI").length} · 别人 ${doing.filter(i=>i.who==="别人").length}`},
+    {key:"wait", name:"等你验收", items:wait, need:wait.length>0, sub: wait.some(blockedAI)?`含 AI 卡住 ${wait.filter(blockedAI).length} 件`:"AI 和别人交回来的"},
+    {key:"done", name:"完成", items:done, need:false, sub:"最近 7 天"},
+  ];
+}
+function addDays(d,k){ const x=new Date(d); x.setDate(x.getDate()+k); return x.toISOString().slice(0,10); }
+
+/* ---------- one row, one main button ---------- */
+const CMD={restore:n=>`${n} 恢复`,approve:n=>`${n} 过`,reject:(n,t)=>`${n} 退 ${t}`,add:(n,t)=>`${n} + ${t}`,me:n=>`${n} 我来`,ai:n=>`${n} AI做`,cancel:n=>`${n} 不做`,
+  done:n=>`${n} 完成`,date:(n,t)=>`${n} ${t}`,first:n=>`${n} 先做`,cont:n=>`${n} 继续`,answer:(n,t)=>`${n} + ${t}`};
+function mainButtons(i){
+  if(["完成","取消"].includes(i.status)) return [["恢复","restore",""]];
+  if(isWorking(i)) return [["不做","cancel",""],["已完成","done",""]];
+  if(blockedAI(i)) return [["回答…","answer","pri","直接回答 AI 的问题"]];
+  if(i.status==="待验收") return [["✓ 通过","approve","pri"]];
+  if(i.status==="待确认") return [["我来","me","pri"],["交给 AI","ai",""],["不做","cancel",""],["已完成","done",""]];
+  if(i.status==="完成") return [];
+  if(i.who==="我") return [["✓ 完成","done",""],["不做","cancel",""]];
+  if(i.who==="AI" && !isWorking(i)) return [["先做","first",""],["不做","cancel",""],["已完成","done",""]];
+  return [];
+}
+function btn(i,[label,k,cls,ph]){ return `<button class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
+function row(i){
+  let meta=[whoText(i), due(i)].filter(Boolean);
+  let extra="";
+  if(isWorking(i)){ const c=jobOf(i); extra=`<div class="meta">${esc(c.driver||"AI")} 正在做 · ${esc(c.step)} · 已 ${c.minutes} 分钟</div><div class="bar"><i style="width:${stepIndex(c)*25}%"></i></div>`; meta=[]; }
+  else if(blockedAI(i)) extra=`<div class="ask">AI 问：${esc(i.blocker)}</div>`;
+  const j = D.judgments && D.judgments[i.n];
+  if(j && i.status==="待确认") extra += `<div class="judge"><b>AI 判断</b>：${esc({ai:"能独立做",prep:"需要你，AI 可先备材料",me:"需要你自己来",skip:"不用做",done:"已经办完"}[j.decision]||"")} · ${esc(j.reason||"")}</div>`;
+  const metaHtml = meta.length?`<div class="meta">${meta.map(x=>x.startsWith("逾期")?`<span class="late">${x}</span>`:esc(x)).join(" · ")}</div>`:"";
+  const open = !isWorking(i) && (i.status==="待验收"||i.status==="完成") && i.url ? `<a class="btn link" href="${esc(i.url)}" target="_blank" onclick="event.stopPropagation()">打开交付</a>` : "";
+  return `<div class="row" onclick="openItem(${i.n})"><div class="main"><div class="title"><span class="n">#${i.n}</span>${esc(i.title)}</div>${metaHtml}${extra}</div>${open}${mainButtons(i).map(b=>btn(i,b)).join("")}</div>`;
+}
+function act(n,k,ph,el){
+  if(ph){ const host=el.closest(".row")||el.closest(".now"); const old=document.querySelector(".inline"); if(old) old.remove();
+    const f=document.createElement("div"); f.className="inline"; f.onclick=e=>e.stopPropagation();
+    f.innerHTML=`<input placeholder="${ph}"><button class="btn pri">确定</button>`; host.after(f);
+    const inp=f.querySelector("input"); inp.focus(); const go=()=>{ if(!inp.value.trim()) return inp.focus(); apply(n,k,inp.value.trim()); };
+    f.querySelector("button").onclick=go; inp.onkeydown=e=>{ if(e.key==="Enter") go(); }; return; }
+  apply(n,k,null);
+}
+function say(n, from, kind, text){ (D.threads[n] ||= []).push({at:TODAY.slice(5)+" "+clock(), from, kind, text, driver: from==="ai"?"本机 GPT":""}); }
+async function apply(n,k,arg){
+  if(LIVE){
+    const text = CMD[k](n,arg); toast(`处理中：${text}`);
+    try{ const r = k==="answer"||k==="add" ? await api("/api/say",{n,text:arg}) : await api("/api/cmd",{text}); toast(r.reply||"已处理"); }
+    catch(e){ toast("没处理成功，连不上本机服务"); }
+    setTimeout(load, 4000); setTimeout(load, 9000);
+    return load();
+  }
+  const i=byN(n);
+  const words={restore:"恢复",approve:"通过",reject:"退回："+arg,add:"补充："+arg,answer:arg,me:"我自己来做",ai:"交给 AI 做",cancel:"不做了",done:"完成了",date:"改日期到 "+arg,first:"先做这件",cont:"按现有资料先做出来"}[k];
+  say(n,"me","feedback",words);
+  if(["add","answer"].includes(k) && ["完成","取消"].includes(i.status)){ toast("已记进对话"); render(); return; }
+  if(k==="restore"){ i.status="待确认"; i.finished=null; i.blocker=null; if(D.judgments) delete D.judgments[n]; }
+  if(["cancel","done","approve"].includes(k) && n===DEMO_N){ S.working=false; clearInterval(demoWork.h); }
+  if(k==="approve"||k==="done") { i.status="完成"; i.finished=TODAY; }
+  if(k==="reject"||k==="add"||k==="answer"||k==="cont"){ i.status="进行中"; i.blocker=null; setTimeout(()=>{ say(n,"ai","say", k==="reject"?"收到退回意见，在上一版基础上改，改好出 v2。":"收到，接着这件事往下做，不从头来。"); render(); }, 900); }
+  if(k==="me"){ i.who="我"; if(["待确认","卡住"].includes(i.status)) i.status="未开始"; }
+  if(k==="ai"){ i.who="AI"; if(i.status==="待确认") i.status="未开始"; }
+  if(k==="cancel") i.status="取消";
+  if(k==="date") i.due_note=arg;
+  toast(`已处理（相当于回复「${CMD[k](n,arg)}」）· 原型，不改飞书`);
+  render();
+}
+
+/* ---------- pages ---------- */
+function home(){
+  const st=stages();
+  if(!S.stage) S.stage=(st.find(s=>s.need&&s.key==="wait")||st.find(s=>s.need)||st[1]).key;
+  const cur=st.find(s=>s.key===S.stage);
+  const flow=st.map((s,k)=>`${k?'<div class="arrow">→</div>':""}<button class="stage ${s.key===S.stage?"on":""} ${s.need?"need":""}" onclick="S.stage='${s.key}';render()"><div class="name">${s.name}</div><div class="num">${s.items.length}</div><div class="sub">${s.sub}</div></button>`).join("");
+  return `<div class="flow">${flow}</div>${stageList(cur)}`;
+}
+function stageList(s){
+  const L=(title,items,hint)=>items.length?`<div class="group">${title}（${items.length}）</div><div class="list">${items.map(row).join("")}</div>`:"";
+  if(s.key==="fresh") return `<h2>新进来 · ${s.items.length} 件</h2><p class="hint">会议、聊天、飞书任务里新冒出来的事。点一下决定谁来做，也可以直接标记「不做」或「已完成」。</p>${autoSwitch()}`+(s.items.length?`<div class="list">${s.items.map(row).join("")}</div>`:`<div class="list"><div class="empty">没有新进来的事</div></div>`)+closedByAI();
+  if(s.key==="wait"){ const b=s.items.filter(blockedAI), r=s.items.filter(i=>!blockedAI(i));
+    return `<h2>等你验收 · ${s.items.length} 件</h2><p class="hint">AI 或别人交回来的东西；AI 做到一半卡住的也在这里，等你一句话。</p>`+L("AI 卡住，等你一句话",b)+L("等你验收",r)+(s.items.length?"":`<div class="list"><div class="empty">没有要你验收的 ✓</div></div>`); }
+  if(s.key==="doing"){ const q=(D.worker&&D.worker.queue)||[], pos=i=>isWorking(i)?-1:(q.indexOf(i.n)<0?99:q.indexOf(i.n)), ai=s.items.filter(i=>i.who==="AI").sort((a,b)=>pos(a)-pos(b)), me=s.items.filter(i=>i.who==="我").sort((a,b)=>(a.due||"9")>(b.due||"9")?1:-1), others=s.items.filter(i=>i.who==="别人");
+    return `<h2>在做 · ${s.items.length} 件</h2><p class="hint">AI 最多同时做 10 件，有空位就接下一件。</p>`+L("AI",ai)+L("你",me)+L("别人",others); }
+  return `<h2>完成 · ${s.items.length} 件</h2><p class="hint">最近 7 天做完的事，点开能看到当时的对话和交付。</p>`+(s.items.length?`<div class="list">${s.items.map(row).join("")}</div>`:`<div class="list"><div class="empty">最近 7 天还没有完成的事</div></div>`);
+}
+function closedByAI(){
+  const J=D.judgments||{}, week=addDays(TODAY,-7);
+  const list=D.items.filter(i=>J[i.n]&&["skip","done"].includes(J[i.n].decision)&&["取消","完成"].includes(i.status)&&String(J[i.n].at||"")>=week.slice(5));
+  if(!list.length) return "";
+  return `<div class="group">AI 放下或关掉的（${list.length}）· 放错了点「恢复」</div><div class="list">${list.map(i=>`<div class="row" onclick="openItem(${i.n})"><div class="main"><div class="title"><span class="n">#${i.n}</span>${esc(i.title)}</div>
+    <div class="judge"><b>${J[i.n].decision==="done"?"已经办完":"不用做"}</b>：${esc(J[i.n].reason||"")}</div></div>${btn(i,["恢复","restore",""])}</div>`).join("")}</div>`;
+}
+function autoSwitch(){
+  const on = !!(D.settings && D.settings.auto_assign);
+  return `<div class="switch ${on?"on":""}" onclick="toggleAuto(${!on})"><div class="tr"></div><div><b>AI 自己判断能不能做</b><br><span>${on
+    ? "已开启：AI 先翻这件事之后的聊天——你已经办完的直接关掉、不用做的放下；能独立做的接手（最多同时 10 件），要你拍板的先备材料，只能你做的留在这里。"
+    : "开启后，新进来的事先让 AI 看上下文再判断：已经办完的关掉、不用做的放下、能做的接手、要你来的先备材料。对外发送、审批、付款这类事 AI 不会接手。"}</span></div></div>`;
+}
+async function setSetting(key, on){
+  D.settings = {...(D.settings||{}), [key]:on}; render();
+  if(LIVE){ try{ await api("/api/settings",{[key]:on}); toast("已保存"); }catch(e){ toast("没保存成功，连不上本机服务"); } load(); }
+}
+function copyGuide(){
+  const t=$("#guide").innerText;
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast("已复制，发给任何 AI 就能接入"))
+    .catch(()=>{ const r=document.createRange(); r.selectNodeContents($("#guide")); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); toast("已选中，按 ⌘C 复制"); });
+}
+async function toggleAuto(on){
+  D.settings = {...(D.settings||{}), auto_assign:on}; render();
+  if(LIVE){ try{ await api("/api/settings",{auto_assign:on}); toast(on?"已开启：AI 马上判断新进来的事":"已关闭：新进来的事等你来定"); }catch(e){ toast("没保存成功，连不上本机服务"); } setTimeout(load, 15000); }
+  else toast(on?"已开启（原型模拟）":"已关闭（原型模拟）");
+}
+function allPage(){
+  const F={"进行中":i=>!["完成","取消"].includes(i.status),"你来做":i=>i.who==="我"&&!["完成","取消"].includes(i.status),"AI 做":i=>i.who==="AI"&&!["完成","取消"].includes(i.status),"别人做":i=>i.who==="别人"&&!["完成","取消"].includes(i.status),"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
+  const list=D.items.filter(i=>!i.hidden&&F[S.all](i)).sort((a,b)=>(a.due||"9")>(b.due||"9")?1:-1);
+  return `<h2>全部事项 · ${list.length} 件</h2><div class="chips" style="margin-top:10px">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div><div class="list">${list.map(row).join("")||'<div class="empty">没有</div>'}</div>`;
+}
+function inboxPage(){
+  const K={"全部":()=>true,"未读":m=>!m.read,"AI 结果":m=>["done","blocked"].includes(m.kind),"新增待办":m=>m.kind==="new","简报":m=>["brief","prep","weekly"].includes(m.kind)};
+  const list=D.inbox.filter(K[S.inbox]);
+  return `<h2>消息</h2><div class="chips" style="margin-top:10px">${Object.keys(K).map(k=>`<button class="chip ${k===S.inbox?"on":""}" onclick="S.inbox='${k}';render()">${k}</button>`).join("")}<button class="chip" onclick="readAll()">全部已读</button></div>
+  <div class="list">${list.map(m=>`<div class="row" onclick="readMsg(${m.id})"><div class="main"><div class="title" style="${m.read?"":"font-weight:600"}">${m.read?"":'<span class="dot" style="background:var(--accent)"></span>'}${esc(m.title)}</div><div class="meta">${esc(m.time)}${m.n?` · #${m.n}`:""}</div></div></div>`).join("")||'<div class="empty">没有消息</div>'}</div>`;
+}
+function readMsg(id){ const m=D.inbox.find(x=>x.id===id); m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); if(m.n&&byN(m.n)) openItem(m.n,"inbox"); else render(); }
+function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); render(); }
+function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
+  const builtin=st.builtin_driver!==false;
+  const seen=(w.drivers||[]).map(d=>`<div class="row" style="cursor:default"><div class="main"><div class="title">${esc(d.driver)}</div><div class="meta">最近 ${esc(d.last)} · 做完 ${d.done||0} 件${d.open?` · 正在做 ${d.open} 件`:""}</div></div></div>`).join("");
+  const doing=(w.doing||[]).map(d=>`<div class="row" style="cursor:default"><div class="main"><div class="title">${esc(d.driver)} · ${esc(d.title)}</div><div class="meta">${esc(d.step||"")} · 已 ${d.minutes} 分钟</div></div></div>`).join("");
+  return `<h2>谁来驱动</h2><p class="hint">任何 AI 都能接入：本机 GPT、Claude、Cindy、Cursor……能运行命令的都行。每件事的对话存在心响里，换谁来做都接得上。</p>
+  <div class="switch ${builtin?"on":""}" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 GPT 也来干活</b><br><span>${builtin?"开着：有活就自动做（一次一件）。":"关着：只等外部 AI 来领活。"}</span></div></div>
+  ${doing?`<div class="group">正在做</div><div class="list">${doing}</div>`:""}
+  <div class="group">最近接入过的 AI</div><div class="list">${seen||'<div class="empty">还没有记录</div>'}</div>
+  <div class="group">让任何 AI 接入（把下面这段发给它）</div>
+  <div class="list" style="padding:12px 14px"><pre id="guide" style="white-space:pre-wrap;margin:0;font-size:12px;line-height:1.6">${esc(D.guide||"")}</pre>
+  <div class="acts" style="margin-top:10px"><button class="btn pri" onclick="copyGuide()">复制接入说明</button></div></div>
+  <h2 style="margin-top:26px">系统</h2><div class="list" style="padding:14px 16px"><div class="kv">
+  <div>本机常驻程序</div><div>${esc(s.listener||"运行中")}</div>
+  <div>飞书推送</div><div>${esc(s.subs||"")}</div><div>飞书消息</div><div>只发 08:30 早报、21:00 晚报</div><div>数据在哪</div><div>事项：飞书多维表格；对话、交付版本、时间线：本机</div></div></div>`; }
+
+/* ---------- one item, one story ---------- */
+function openItem(n, from){ S.back=from||S.view; S.item=n; S.view="item"; render(); window.scrollTo(0,0); }
+function stateTag(i){
+  if(isWorking(i)) return ["AI 正在做","ai"]; if(blockedAI(i)) return ["AI 卡住，等你","need"];
+  if(i.status==="待验收") return ["等你验收","need"]; if(i.status==="待确认") return ["等你定","need"];
+  if(i.status==="完成") return ["已完成","done"]; if(i.status==="取消") return ["不做",""]; if(i.who==="AI") return ["AI 排队","ai"]; return [i.status,""];
+}
+function itemPage(){
+  const i=byN(S.item); const [tag,cls]=stateTag(i);
+  const parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
+  const src=`<div class="src"><div class="meta">${esc(i.source||"手动添加")}${i.source_url?` · <a href="${esc(i.source_url)}" target="_blank">打开原处 ↗</a>`:""}</div>
+    ${i.quote?`<q>${esc(i.quote.slice(0,220))}</q>`:""}<div class="meta">要做：${esc(i.next||i.title)}${i.criterion?` · 做到算完：${esc(i.criterion)}`:""}</div>
+    ${parent?`<div class="meta">这是给 <a href="#" onclick="openItem(${parent.n});return false">#${parent.n} ${esc(parent.title)}</a> 备的材料</div>`:""}
+    ${kids.length?`<div class="meta">AI 在帮你备材料：${kids.map(k=>`<a href="#" onclick="openItem(${k.n});return false">#${k.n}</a>`).join("、")}</div>`:""}</div>`;
+  return `<button class="back" onclick="S.view=S.back==='item'?'home':S.back;render()">← 返回</button>
+  <div class="ih"><h1><span style="color:var(--ink3);font-weight:500">#${i.n}</span> ${esc(i.title)}</h1><span class="state ${cls}">${tag}</span></div>
+  <div class="meta" style="color:var(--ink2);font-size:13px">${esc([whoText(i),due(i),i.due_note?"改到 "+i.due_note:""].filter(Boolean).join(" · "))}</div>
+  <div class="sec"><div class="k">1</div><div><h3>从哪来</h3>${src}</div></div>
+  <div class="sec"><div class="k">2</div><div><h3>AI 对话和交付</h3>${thread(i)}</div></div>
+  <div class="sec"><div class="k hot">3</div><div><h3>现在</h3>${nowBox(i)}</div></div>`;
+}
+function thread(i){
+  const th=D.threads[i.n]||[], dv=D.deliverables[i.n]||[]; let out=[], steps=[], k=0;
+  const flush=()=>{ if(steps.length){ out.push(`<div class="m"><div class="who"><b>AI</b></div><div class="steps">${steps.map(s=>`<span>${esc(s.at.slice(6))}</span> ${esc(s.text)}`).join("　→　")}</div></div>`); steps=[]; } };
+  for(const m of th){
+    if(m.kind==="step"){ steps.push(m); continue; } flush();
+    if(m.from==="system"){ out.push(`<div class="sys">${esc(m.at)} · ${esc(m.text)}</div>`); continue; }
+    const who=m.from==="me"?"你":(m.driver||"AI");
+    let body=`<div class="bub">${esc(m.text)}</div>`;
+    if(m.kind==="deliver"){ const v=dv[k]||{v:k+1,summary:m.text,url:m.url}; k++;
+      body=`<div class="dv"><div class="top"><span>交付 v${v.v}</span>${(v.url||m.url)?`<a href="${esc(v.url||m.url)}" target="_blank">打开文档 ↗</a>`:""}</div><div>${esc(v.summary||"")}</div>
+      ${v.confirm?`<div class="q">需要你拍板：${esc(v.confirm)}</div>`:""}
+      ${(v.assumptions&&v.assumptions.length)||(v.sources&&v.sources.length)?`<details><summary>它做的假设和用到的资料</summary><ul>${(v.assumptions||[]).map(a=>`<li>${esc(a)}</li>`).join("")}${(v.sources||[]).map(a=>`<li><a href="${esc(a)}" target="_blank">${esc(a.slice(0,56))}</a></li>`).join("")}</ul></details>`:""}</div>`; }
+    out.push(`<div class="m ${m.from==="me"?"me":""} ${m.kind==="ask"?"ask":""}"><div class="who"><b>${esc(who)}</b>${esc(m.at)}</div>${body}</div>`);
+  }
+  flush();
+  if(isWorking(i)){ const c=jobOf(i); out.push(`<div class="m"><div class="who"><b>${esc(c.driver||"AI")}</b>现在</div><div class="steps">${esc(c.step||"在做")} …</div></div>`); }
+  return out.length?`<div class="thread">${out.join("")}</div>`:`<div class="src" style="color:var(--ink3)">还没有对话。在下面说一句，AI 就从这件事开始。</div>`;
+}
+function nowBox(i){
+  let what="", buttons=[];
+  if(blockedAI(i)){ what=`AI 卡住了，问你：<b>${esc(i.blocker)}</b>${i.tried?`<div style="font-size:12px;color:var(--ink3)">它已经试过：${esc(i.tried)}</div>`:""}`; buttons=[["按现有资料先做出来","cont","pri"],["我自己来","me",""]]; }
+  else if(i.status==="待验收"){ const v=(D.deliverables[i.n]||[]).length||1; what=`等你验收 v${v}。`; buttons=[["✓ 通过","approve","pri"],["退回…","reject","","要改哪里？"]]; }
+  else if(i.status==="待确认"){ what="谁来做、什么时候做还没定。"; buttons=[["我来","me","pri"],["交给 AI","ai",""],["改日期…","date","","例如：周五 / 11-20"],["不做","cancel",""],["已完成","done",""]]; }
+  else if(i.status==="完成"){ what="已经完成。在下面说的话会记进这件事的对话，方便以后追溯。"; buttons=[["恢复（标错了）","restore",""]]; }
+  else if(i.status==="取消"){ what="已经标为不做。"; buttons=[["恢复（标错了）","restore",""]]; }
+  else if(isWorking(i)){ const c=jobOf(i); what=`${esc(c.driver||"AI")} 正在做：${esc(c.step||"")}。不用等，有想法直接在下面说；不想做了点「不做」，你已经自己办完了点「已完成」，AI 会马上停下。`; buttons=[["不做","cancel",""],["已完成","done",""]]; }
+  else if(i.who==="AI"){ what="AI 等待空位，最多可同时做 10 件。"; buttons=[["先做这件","first","pri"],["不做","cancel",""],["已完成","done",""]]; }
+  else if(i.who==="我"){ what=`这是你的事${due(i)?"，"+due(i):""}。要 AI 帮忙，点「交给 AI」。`; buttons=[["✓ 完成","done","pri"],["交给 AI","ai",""],["改日期…","date","","例如：周五 / 11-20"],["不做","cancel",""]]; }
+  else { what="别人在做，到期前会提醒你跟进。"; }
+  return `<div class="now"><div class="what">${what}</div>${buttons.length?`<div class="acts">${buttons.map(b=>btn(i,b)).join("")}</div>`:""}
+  <div class="say"><textarea id="saybox" placeholder="接着和 AI 说这件事…（例：预算按 600 一天重算；加上竞品）" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))sendSay()"></textarea><button class="btn pri" onclick="sendSay()">发送</button></div></div>`;
+}
+function sendSay(){ const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus(); apply(S.item, "add", t); }
+
+/* ---------- frame ---------- */
+async function runCmd(){ const v=$("#cmdbox").value.trim(); if(!v) return;
+  if(LIVE){ $("#cmdbox").value=""; toast(`处理中：${v}`); try{ const r=await api("/api/cmd",{text:v}); toast(r.reply||"已处理"); }catch(e){ toast("连不上本机服务"); } setTimeout(load, 4000); setTimeout(load, 9000); return load(); }
+  const m=v.match(/^#?(\d+)\s*(.*)$/);
+  if(m&&byN(+m[1])){ say(+m[1],"me","feedback",m[2]||v); $("#cmdbox").value=""; toast(`已处理「${v}」· 原型`); openItem(+m[1]); }
+  else toast("格式：编号 + 动作，例如 44 过 / 44 + 加上竞品"); }
+function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型 · 数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟　演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
+function demoBlock(on){ const i=byN(44); if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
+function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
+function render(){
+  if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
+  $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
+  const st=stages(), need=st.filter(s=>s.need).reduce((a,s)=>a+s.items.length,0), unread=D.inbox.filter(m=>!m.read).length;
+  const tabs=[["home","现在",need],["all","全部事项",0],["inbox","消息",unread],["sys","系统",0]];
+  $("#nav").innerHTML=tabs.map(([k,l,c])=>`<button class="${S.view===k||(S.view==="item"&&S.back===k)?"on":""}" onclick="S.view='${k}';render()">${l}${c?`<b>${c}</b>`:""}</button>`).join("");
+  const w=D.worker||{}, c=cur(), many=LIVE?(w.doing||[]).length:0;
+  $("#ai").innerHTML = many>1 ? `<span class="dot busy"></span>AI 正在同时做 ${many} 件` : c ? `<span class="dot busy"></span>${esc(c.driver||"AI")} 正在${c.n?`做 #${c.n}`:esc(c.title||"干活")}${c.step?" · "+esc(String(c.step).replace(/^\d\/4\s*/,"")):""}`
+                         : `<span class="dot"></span>AI 空闲${w.last&&w.last.n?` · 上一件 #${w.last.n} ${esc(w.last.outcome)}`:""}`;
+  $("#ai").onclick=()=>{ const n=c&&c.n||(w.last&&w.last.n); if(n&&byN(n)) openItem(n); };
+  const a=document.activeElement; if(a && ["INPUT","TEXTAREA"].includes(a.tagName) && a.closest("main") && a.value) return;
+  $("#main").innerHTML={home,all:allPage,inbox:inboxPage,sys:sysPage,item:itemPage}[S.view]();
+}
+if(LIVE){ load(); setInterval(load, 8000); } else render();
+</script>
+</body>
+</html>

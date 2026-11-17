@@ -32,6 +32,18 @@ class Config(BaseModel):
     feishu_tasks_enabled: bool = True
     # Words too common in meeting titles to link items by topic, e.g. the company name.
     topic_stopwords: list[str] = Field(default_factory=list)
+    # The AI employee (worker.py): up to ten concurrent jobs, one GPT conversation per item.
+    # Where messages to the owner go: "local" = the local client's inbox (Feishu is only the database),
+    # "feishu" = Feishu private chat as before.
+    notify_channel: Literal["local", "feishu"] = "local"
+    app_port: int = Field(default=8765, ge=1024, le=65535)
+    worker_enabled: bool = True
+    worker_codex: str = ""          # path to the codex command; empty = find it (PATH, then the Cindy bundle)
+    worker_model: str = "gpt-6-astra"
+    worker_effort: str = "high"     # doing the work
+    extract_effort: str = "medium"  # picking todos out of meetings and chats
+    worker_timeout_minutes: int = Field(default=30, ge=5, le=120)
+    worker_concurrency: int = Field(default=10, ge=1, le=20)  # jobs the built-in GPT works on at the same time
 
 
 class MatrixError(RuntimeError):

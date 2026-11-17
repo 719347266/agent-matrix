@@ -60,7 +60,7 @@ class AuthorizationAlerts(unittest.TestCase):
     def setUp(self):
         self.temp = TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.config = Config(app_id="cli_fixture", owner_open_id="ou_fixture_owner", base_token="base_fixture",
+        self.config = Config(app_id="cli_fixture", owner_open_id="ou_fixture_owner", base_token="base_fixture", notify_channel="feishu",
                              tables={"事项表": "tbl_a", "周期规则表": "tbl_b", "会议处理记录表": "tbl_c", "运行日志表": "tbl_d"})
         save(self.root / "config.yaml", self.config)
         self.state = State(self.root / "state/state.db"); self.addCleanup(self.state.close)

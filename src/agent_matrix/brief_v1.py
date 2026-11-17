@@ -136,6 +136,7 @@ def build(config, rows, events, target, edition, *, previous=None, catchup=False
 def verify_delivery(client, receipt):
     mid=message_id(receipt)
     if not mid:raise MatrixError('消息回执为空，停止重发。')
+    if mid.startswith('local_'):return {**receipt,'verified_by_readback':True,'recipient':'local_inbox'}
     data=client._exec(['im','+messages-mget','--message-ids',mid,'--no-reactions','--as','bot','--format','json'])
     found=[m for m in data.get('messages',[]) if m.get('message_id')==mid]
     if len(found)!=1:raise MatrixError('发送回执尚未读回，不自动重发。')
@@ -148,10 +149,10 @@ def deliver(client,state,key,text):
     return send_once(state,key,lambda:verify_delivery(client,client.send_self(frozen or text,key)))
 
 
-def deliver_card(client,state,key,card_json):
+def deliver_card(client,state,key,card_json,channel=None):
     frozen=state.get(key+':card')
     if frozen is None:state.set(key+':card',card_json)
-    return send_once(state,key,lambda:verify_delivery(client,client.send_card(frozen or card_json,key)))
+    return send_once(state,key,lambda:verify_delivery(client,client.send_card(frozen or card_json,key,channel=channel)))
 
 
 def run(config, client, state, *, edition='morning', target_date=None, preview=False, now=None):
@@ -180,7 +181,8 @@ def run(config, client, state, *, edition='morning', target_date=None, preview=F
     result['card']=build_card(config,rows,events,target,edition,catchup=result['text'].count('补发')>0,
                               rolls=rolls,board_url=state.get('brief-v1:board-url'))
     if preview:return result
-    receipt=deliver_card(client,state,key,result['card'])
+    # The 08:30 / 21:00 briefs are the only messages still sent on Feishu (a copy also lands in the local inbox).
+    receipt=deliver_card(client,state,key,result['card'],channel='feishu')
     state.set('brief-v1:last-ai',result['ai_signatures'])
     for k in result['included_notices']:
         notice=state.get(k);notice['delivered']=message_id(receipt);state.set(k,notice)

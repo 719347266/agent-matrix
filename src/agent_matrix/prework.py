@@ -272,9 +272,16 @@ def read_notes(root, record_id, last=40):
 def add_note(root, record_id, text):
     path = notes_path(root, record_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = f"[{datetime.now(TZ):%m-%d %H:%M}] " + re.sub(r"\s+", " ", str(text)).strip()[:600]
+    stamp = f"{datetime.now(TZ):%m-%d %H:%M}"
+    body = re.sub(r"\s+", " ", str(text)).strip()[:600]
+    line = f"[{stamp}] " + body
     with path.open("a", encoding="utf-8") as stream:
         stream.write(line + "\n")
+    try:  # the same line goes into the item's conversation in 心响
+        from .thread import from_note
+        from_note(root, record_id, body, stamp=stamp)
+    except Exception:
+        pass
     return line
 
 
@@ -302,6 +309,10 @@ def report_progress(config, client, state, record_id, text):
     row = next((r for r in gateway.rows() if r["record_id"] == record_id), None)
     if not row:
         raise MatrixError("事项不存在。")
+    status = row.get("状态")
+    status = status[0] if isinstance(status, list) and status else status
+    if status in {"完成", "取消"}:
+        raise MatrixError("事项已结束，不再更新进度。")
     gateway.update(row, {"进度": short}, f"prework-progress:{record_id}:{sha256((short + datetime.now(TZ).isoformat()).encode()).hexdigest()[:12]}",
                    "prework:progress")
     add_note(client.root, record_id, "进度：" + str(text))
@@ -451,6 +462,62 @@ def publish(config, client, state, record_id, version):
                  "summary": result.summary, "confirmation": result.confirmation, "limitations": result.limitations,
                  "kind": result.kind, "status": "awaiting_owner_confirmation"}
     state.set(key+":published", published)
+    return published
+
+
+def _md_plain(text):
+    return "".join(re.sub(r"[#*`>|_\-\[\]()!~:：]", "", text).split())
+
+
+def publish_markdown(config, client, state, record_id, version, path, result, *, title):
+    """The AI employee's 交付.md → a Feishu document of the owner's, read back, then written to the item.
+
+    Same guarantees as `publish`: one document per version (state.once), the body is read back before
+    the item says 待验收, and the table write is confirmed by reading it back.
+    """
+    from .workflow import Gateway
+    key = key_for(record_id, version)
+    old = state.get(key + ":published")
+    if old:
+        return old
+    queue = WorkQueue(state)
+    if not queue.get(record_id, version):
+        raise MatrixError("该事项没有在 AI 员工的队列里。")
+    current(config, client, state, record_id, version, published=_saved_url(config, state, key))
+    path = Path(path).resolve()
+    rel = path.relative_to(client.root.resolve()).as_posix()
+    data = path.read_bytes()
+    argv = ["docs", "+create", "--content", "@./" + rel, "--doc-format", "markdown", "--title", str(title)[:60],
+            "--parent-position", "my_library", "--as", "user"]
+    def create():
+        try:
+            client._exec([*argv, "--dry-run"])
+        except FeishuError as exc:
+            exc.not_sent = True
+            raise
+        return client._exec(argv)
+    receipt = state.once(key + ":doc", create)
+    doc = receipt.get("document", {})
+    url, token = doc.get("url", ""), doc.get("document_id", "")
+    parsed = urlparse(url)
+    if not token or parsed.scheme != "https" or parsed.hostname != urlparse(config.base_url).hostname or parsed.path != "/docx/" + token:
+        raise MatrixError("新文档回执的 ID 或地址未核验，不发送结果。")
+    fetched = client._exec(["docs", "+fetch", "--doc", token, "--doc-format", "markdown", "--as", "user"])
+    remote = _md_plain((fetched.get("document") or {}).get("content", "") or json.dumps(fetched, ensure_ascii=False))
+    lines = [_md_plain(x)[:14] for x in data.decode("utf-8").splitlines() if x.strip() and not x.lstrip().startswith(("#", "|", "```"))]
+    probes = [x for x in lines if len(x) >= 6][:3]
+    if not probes or not all(p in remote for p in probes):
+        raise MatrixError("文档正文读回不一致，暂不标记待验收。")
+    row = current(config, client, state, record_id, version, published=url)
+    queue.prepared(record_id, version, rel, sha256(data).hexdigest(), datetime.now(TZ))
+    gateway = Gateway(client, state)
+    patch = {"状态": ["待验收"], "AI草稿链接": url, "交付物链接": url, "预做结果摘要": str(result.get("summary"))[:40],
+             "预做凭据": version, "进度": "已交付", "卡点": None}
+    gateway.update(row, patch, key + ":writeback-md", "worker:publish")
+    published = {"record_id": record_id, "input_version": version, "title": str(title), "url": url,
+                 "summary": str(result.get("summary"))[:40], "confirmation": str(result.get("confirmation") or "")[:30],
+                 "limitations": [], "kind": "internal_result", "status": "awaiting_owner_confirmation"}
+    state.set(key + ":published", published)
     return published
 
 

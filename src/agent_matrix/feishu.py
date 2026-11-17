@@ -130,7 +130,7 @@ class Feishu:
                 raise
         return self._exec(argv)
 
-    def send_card(self, card, key):
+    def send_card(self, card, key, channel=None):
         """Send an interactive card (display + open-url buttons only) to the owner."""
         if not self.can_message_self:
             raise MatrixError("尚未核验当前机器人与账号绑定，不发送消息。")
@@ -139,12 +139,22 @@ class Feishu:
         argv = ["im", "+messages-send", "--user-id", self.config.owner_open_id, "--msg-type", "interactive",
                 "--content", json.dumps(card, ensure_ascii=False), "--idempotency-key", key,
                 "--as", "bot", "--format", "json"]
-        return self._send_logged(argv, card, key)
+        return self._send_logged(argv, card, key, channel)
 
-    def _send_logged(self, argv, content, key):
+    def _send_logged(self, argv, content, key, channel=None):
         """Every message to the owner goes through here, so the local monitor sees all of them."""
         from . import activity
         title = activity.preview(content)
+        from . import inbox
+        if (channel or getattr(self.config, "notify_channel", "feishu")) == "local":
+            # Nothing goes to Feishu: the message lands in the local client's inbox.
+            receipt = inbox.add(self.root, key, content)
+            activity.log(self.root, "send", receipt["title"] or title, status="ok", ref=receipt["message_id"])
+            return receipt
+        try:  # Feishu messages (the 08:30 / 21:00 briefs) keep a copy in the local inbox too
+            inbox.add(self.root, "feishu:" + key, content)
+        except Exception:
+            pass
         try:
             try:
                 self._exec([*argv, "--dry-run"])
@@ -158,9 +168,12 @@ class Feishu:
         from .delivery import message_id
         activity.log(self.root, "send", title, detail=str(content)[:400] if not isinstance(content, dict) else "",
                      status="ok", ref=message_id(receipt) or key)
+        if isinstance(content, dict) and message_id(receipt):
+            from .cards import remember
+            remember(self.root, message_id(receipt), content)
         return receipt
 
-    def send_self(self, text, key):
+    def send_self(self, text, key, channel=None):
         if not self.can_message_self:
             raise MatrixError("尚未核验当前机器人与账号绑定，不发送消息。")
         if not self.config.owner_open_id.startswith("ou_"):
@@ -170,4 +183,4 @@ class Feishu:
         kind = "--markdown" if re.search(r"\]\(https?://", text) else "--text"
         argv = ["im", "+messages-send", "--user-id", self.config.owner_open_id,
                 kind, text, "--idempotency-key", key, "--as", "bot", "--format", "json"]
-        return self._send_logged(argv, text, key)
+        return self._send_logged(argv, text, key, channel)

@@ -7,21 +7,36 @@
 设计原则：
 
 - **能用代码做的不用模型。** 接收推送、过滤、同步、生成简报、处理回复，全是代码。模型只在三件事上被唤醒：读会议逐字稿、读筛过的聊天、代做文档。
+- **AI 像员工一样接单。** 本机"AI 员工"默认最多同时做 10 件事，每件事有自己的文件夹和自己的 GPT 对话：先由代码备好背景（会议原话前后文、来源聊天、相关文档、做过的同类事项、你给过的链接），不够它自己去扒，扒够了再写；做完代码自检、建文档、发卡片。你后来补的要求追加进同一个对话，接着上次往下改。
 - **宁缺毋滥。** 一条待办必须有原话里承接的字眼，负责人要么是说话的人，要么在原话里被点了名，日期必须写明。没有待办的会议不发任何消息。
 - **你是最后一关。** AI 做的事只有你回"过"才算完成。每次写表都会读回核对，结果不确定时不会自动重试。
+
+## 心响：本机客户端
+
+所有消息和操作都在本机的"心响"里。飞书只当数据库，另外只收早报和晚报。
+
+- **打开方式**：Mac 菜单栏点"打开心响"，或者在聚焦搜索里搜"心响"；Windows 托盘双击。界面地址是 `http://127.0.0.1:8765/`，只对本机开放。
+- **首页**：一条流程"新进来 → 在做 → 等你验收 → 完成"，下面是选中那一段的列表，每行一个主按钮。
+- **点开一件事**：一条故事线，依次是从哪来、AI 对话和每一版交付、现在等你做什么。可以接着和 AI 说，AI 会在同一个对话里往下做。
+- **"新进来"开关"AI 自己判断能不能做"**：打开后，AI 先看后续聊天：有完成证据的直接关掉，不用做的放下，能做的接手，要你拍板的先备材料。
+- **停止与恢复**：新进来、正在做的事项都能点「不做」或「已完成」。本机驱动会停止当前运行及其命令；外部驱动下次调用会收到 `cancelled`，必须停止。点「恢复」回到新进来，历史对话和交付继续保留。
+- **数据存放**：对话、交付版本、判断记录存在本机 `state/xinxiang.db`，消息存在 `state/inbox.db`，都不进 Git。
+- **改回飞书通知**：在 `config.yaml` 里写 `notify_channel: feishu`。
+- **谁来驱动，不限**：任何 AI 都能接入。用 `~/.agent-matrix/bin/xinxiang next --driver "名字"` 领活，在交回的文件夹里干活，再用 `xinxiang submit --job ID` 交活；完整说明运行 `xinxiang guide` 查看，或在心响系统页一键复制。本机 GPT 是内置的驱动，也可以在系统页关掉。
 
 ## 架构
 
 ```
-飞书推送（实时）                  定时（兜底）              唤醒模型（只在有活时）
-├ 私聊回复  ─┐                   ├ 08:30 早报 / 21:00 晚报   ├ 逐字稿 → 待办
-├ 会议结束   ├→ listen（常驻）    ├ 06:00 周期事项           ├ 聊天候选 → 待办
-├ 逐字稿生成 │   纯代码            ├ 每 2 分钟检查脚本 ───────→└ 代做（按模板，做完再交）
-└ 任务变化  ─┘                   └ 聊天每 10 分钟读一次
+飞书推送（实时）                  定时（兜底）              AI 员工（worker.py，只在有活时）
+├ 私聊回复  ─┐                   ├ 08:30 早报 / 21:00 晚报   最多同时十件，一件一个 GPT 对话：
+├ 会议结束   ├→ listen（常驻）    ├ 06:00 周期事项           ├ 逐字稿 → 待办
+├ 逐字稿生成 │   纯代码 ──叫醒──→ ├ 聊天每 10 分钟读一次  ───→├ 聊天候选 → 待办
+├ 卡片按钮   │                   └ 每 2 分钟看一次队列       └ 代做：找背景 → 写 → 自检 → 交付
+└ 任务变化  ─┘
                  ↓
-        飞书多维表格（事项表）  →  卡片：简报 / 会前准备 / 做完了 / 周五复盘
+        飞书多维表格（事项表）  →  卡片：简报 / 会前准备 / 做完了 / 周五复盘（点「✓ 通过」卡片原地变成已完成）
                  ↑
-        你回复："15 过""8 周五""18 AI备""展开 12"
+        你回复："15 过""8 周五""18 AI备""44 先做""展开 12"
 ```
 
 | 模块 | 作用 |
@@ -32,7 +47,10 @@
 | `meeting_watch.py`、`meeting_review.py` | 会议队列；逐字稿提取结果的校验与入表 |
 | `sources/chats.py`、`chat_review.py` | 聊天读取、代码过滤；定时批量提取 |
 | `sources/feishu_tasks.py` | 飞书任务同步进事项表（只读飞书任务，不回写） |
-| `prework.py` | AI 代做：按模板检查栏目、占位文字、篇幅，做完立即发卡片 |
+| `worker.py` | AI 员工：最多并发十件、每件一个 GPT 对话（`codex exec`）；自检交付、建文档、回写表格、发卡片 |
+| `background.py` | 背景包：纯代码先拉会议原话、来源聊天、相关文档、同类事项、你给过的链接 |
+| `prework.py` | 代做队列与交付校验：模板栏目、占位文字、篇幅；文档读回核对 |
+| `cards.py` | 卡片原地更新：点了按钮，那一行变成"✓ 已完成 14:52" |
 | `agents/meeting_prep.py`、`agents/weekly_review.py` | 会前准备卡、周五复盘卡（纯代码） |
 | `agents/recurring.py` | 周期事项（RRULE），提前生成 |
 | `workflow.py` | 事项表读写网关：写前重读，写后读回 |
@@ -50,15 +68,20 @@
 | `15 过` / `15 19 过` | 验收通过；AI 子项通过后，自动解锁你那一步 |
 | `19 退 少了定价` | 退回修改，意见记入事项 |
 | `8 周五` / `8 11-20` / `8 改到下周三` | 改日期，记录顺延 |
-| `12 完成` / `12 不做` | 完成 / 取消 |
+| `12 完成` / `12 不做` | 完成 / 取消；停止正在执行的 AI |
+| `12 恢复` | 撤回误标，回到新进来，保留历史 |
 | `12 我来` / `12 AI做` / `12 给张三` | 改执行方 |
 | `18 AI备` | AI 先备材料，你验收后再开始 |
-| `20 + 材料` | 补材料，卡住的事接着做 |
+| `20 + 材料` | 补材料，卡住的事接着做（同一个对话里接着改） |
+| `44 继续` | 卡住的事让 AI 按现有资料接着做 |
+| `44 先做` | 插队，AI 员工下一件就做它 |
 | `展开 12` | 看详情和原话 |
 
 ## 安装
 
-需要 Python 3.11+、已登录的 `lark-cli`（npm 包 `@larksuite/cli`），以及一个能运行定时任务、按 `prompts/` 执行的 AI 宿主（作者用的是 Cindy，换成其他宿主也可以）。
+需要 Python 3.11+、已登录的 `lark-cli`（npm 包 `@larksuite/cli`）、已登录的 GPT 命令行 `codex`（AI 员工用它干活；找不到时在 `config.yaml` 写 `worker_codex: <路径>`），以及一个能跑定时脚本的宿主（launchd、Windows 计划任务或任何 AI 宿主都行）。
+
+AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e .
@@ -69,7 +92,7 @@ cp config.example.yaml config.yaml
 ./launchd/install-listen.sh                     # 安装常驻监听（macOS）
 ```
 
-实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
+实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`；卡片按钮要在"事件与回调 → 回调配置"里开启 `card.action.trigger`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
 
 宿主需要配置的定时任务：
 
@@ -77,7 +100,7 @@ cp config.example.yaml config.yaml
 |---|---|---|
 | 06:00 | 只跑脚本 | `python -m agent_matrix.scheduled recurring` |
 | 工作日 08:30 / 21:00 | 只跑脚本 | `python -m agent_matrix.scheduled morning` / `evening` |
-| 每 2 分钟 | 前置脚本 + 模型 | `python -m agent_matrix.precheck`：先处理回复，再跑会议、代做、聊天三项检查；退出码 0 才唤醒模型，模型按 `prompts/routine.md` 执行 |
+| 每 2 分钟（可选） | 只跑脚本 | `python -m agent_matrix.precheck`：处理回复、确保 AI 员工在跑。常驻监听已经每 2 分钟叫醒 AI 员工，这一项只是兜底；它永远不需要宿主唤醒模型 |
 
 ## 常用命令
 
@@ -85,13 +108,14 @@ cp config.example.yaml config.yaml
 .venv/bin/python -m agent_matrix brief --morning --preview     # 预览简报，不发送
 .venv/bin/python -m agent_matrix.reply --text "15 过"           # 处理一条指令
 .venv/bin/python -m agent_matrix.listen --status                # 监听连接状态
+.venv/bin/python -m agent_matrix.worker status                  # AI 员工正在做哪件、做到哪、排队顺序
 .venv/bin/python -m agent_matrix health                         # 授权与表格自检
 .venv/bin/python -m unittest discover -s tests                  # 测试
 ```
 
 ## 隐私
 
-`config.yaml`（账号与表格 ID）、`state/`（逐字稿、聊天候选、收据）、`logs/`、生成的文档和验收记录都已加入 `.gitignore`，不进版本库。消息只发给本人。聊天只在本地过滤，只有筛下来的少量句子才会交给模型。
+`config.yaml`（账号与表格 ID）、`state/`（逐字稿、聊天候选、收据）、`logs/`、生成的文档和验收记录都已加入 `.gitignore`，不进版本库。消息只发给本人。聊天只在本地过滤，只有筛下来的少量句子才会交给模型。AI 员工的工作文件夹（任务单、背景、交付草稿）在本机 `state/work/` 或 `~/.agent-matrix/`，同样不进版本库。
 
 ## Windows
 
@@ -117,12 +141,12 @@ powershell -ExecutionPolicy Bypass -File windows\install.ps1
 
 首次使用还要按上面"安装"一节，运行一次 `setup`、`brief_migration setup-fields`、`brief_migration apply`。卸载计划任务：`powershell -ExecutionPolicy Bypass -File windows\uninstall.ps1`（不删数据）。
 
-**AI 例行任务（任何系统、任何 AI 宿主都一样）**：让你的 AI 助手每 2 分钟在项目目录运行 `python -m agent_matrix.precheck`。退出码 0 表示有活，按 `prompts/routine.md` 处理；2 表示没事，不用唤醒模型；1 表示检查出错。
+**AI 员工（任何系统都一样）**：常驻监听每 2 分钟会叫醒它，有活就做，没活就退出，不需要另配 AI 宿主。如果想再加一道兜底，可以让任意定时器在项目目录运行 `python -m agent_matrix.precheck`（退出码 2 = 正常，1 = AI 员工没能启动）。
 
 ## 本地监控（macOS 菜单栏）
 
 ```bash
-./macapp/build.sh        # 编译安装到 ~/Applications/事项中心监控.app，开机自动启动
+./macapp/build.sh        # 编译安装到 ~/Applications/心响.app，开机自动启动
 ```
 
 - 菜单栏图标：✓ 正常，⚠ 有地方要注意，✕ 出错了。

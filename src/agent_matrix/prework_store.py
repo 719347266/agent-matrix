@@ -263,6 +263,16 @@ class WorkQueue:
                             (_safe_reason(reason), _iso(_now()), record_id, version))
             return self.get(record_id, version)
 
+    def release(self, record_id, version):
+        """An interrupted run gives the item back to the queue at once, without counting a failure."""
+        with self._transaction():
+            current = self._require(record_id, version)
+            if current["status"] != "running":
+                return current
+            self.db.execute("""UPDATE prework_queue SET status='queued',lease_until=NULL,updated_at=?
+                WHERE record_id=? AND input_version=?""", (_iso(_now()), record_id, version))
+            return self.get(record_id, version)
+
     def defer(self, record_id, version, now, reason):
         stamp = _iso(now)
         with self._transaction():

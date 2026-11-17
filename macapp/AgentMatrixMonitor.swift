@@ -3,6 +3,77 @@
 // fix as a button. Reads `python -m agent_matrix.monitor --json` every 15 s. No model calls.
 import SwiftUI
 import AppKit
+import WebKit
+import UserNotifications
+
+/// The 心响 main window: the local client served by the always-on listener (127.0.0.1 only).
+@MainActor
+final class CenterWindow: NSObject, NSWindowDelegate {
+    static let shared = CenterWindow()
+    private var window: NSWindow?
+    private var web: WKWebView?
+
+    private func address(_ root: String) -> URL {
+        if let data = FileManager.default.contents(atPath: root + "/state/app.json"),
+           let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let text = info["url"] as? String, let url = URL(string: text) { return url }
+        return URL(string: "http://127.0.0.1:8765/")!
+    }
+
+    func show(_ root: String) {
+        if window == nil {
+            let web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            w.title = "心响"; w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = self
+            w.minSize = NSSize(width: 720, height: 520)
+            if !w.setFrameUsingName("XinxiangMain") { w.center() }
+            w.setFrameAutosaveName("XinxiangMain")
+            web.load(URLRequest(url: address(root)))
+            window = w; self.web = web
+        } else if window?.isVisible == false {
+            web?.load(URLRequest(url: address(root)))
+        }
+        NSApp.setActivationPolicy(.regular)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
+}
+
+/// System notifications; clicking one opens 心响. Falls back to a plain notification if not allowed.
+final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    static let shared = Notifier()
+    let root = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixRoot") as? String ?? ""
+    private var allowed = false
+
+    func setup() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { ok, _ in self.allowed = ok }
+    }
+
+    func post(_ title: String, _ body: String) -> Bool {
+        guard allowed else { return false }
+        let content = UNMutableNotificationContent()
+        content.title = title; content.body = body; content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        return true
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler done: @escaping () -> Void) {
+        let root = self.root
+        Task { @MainActor in CenterWindow.shared.show(root) }
+        done()
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        done([.banner, .sound])
+    }
+}
 
 struct Item: Identifiable { let id = UUID(); let n: Int; let label: String; let tone: String; let title: String; let note: String; let who: String; let due: String; let reply: String; let url: String?; let cmd: String?; let cmdLabel: String }
 
@@ -16,6 +87,13 @@ final class Monitor: ObservableObject {
     @Published var level = "unknown"
     @Published var headline = "读取中…"
     @Published var summary = ""
+    @Published var unread = 0
+    // The AI employee: what it is doing now, what is queued, how the last one ended.
+    @Published var workerState = "idle"
+    @Published var workerHead = ""
+    @Published var workerStep = ""
+    @Published var workerQueue = ""
+    @Published var workerLast = ""
     @Published var need: [Item] = []
     @Published var moving: [Item] = []
     @Published var backlog = 0
@@ -34,6 +112,7 @@ final class Monitor: ObservableObject {
     init() {
         root = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixRoot") as? String ?? ""
         lastSeen = UserDefaults.standard.integer(forKey: "lastSeenEvent")
+        Notifier.shared.setup()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in Task { @MainActor in self.refresh() } }
     }
@@ -77,10 +156,28 @@ final class Monitor: ObservableObject {
         level = s["level"] as? String ?? "unknown"
         headline = s["headline"] as? String ?? ""
         summary = s["summary"] as? String ?? ""
+        unread = s["unread"] as? Int ?? 0
         updated = String((s["generated_at"] as? String ?? "").dropFirst(11).prefix(5))
         boardURL = s["board_url"] as? String
         pagePath = s["page"] as? String
         need = items(s["need_you"]); moving = items(s["in_progress"]); done = items(s["done_recent"])
+        let w = s["worker"] as? [String: Any] ?? [:]
+        workerState = w["state"] as? String ?? "idle"
+        let wn = number(w["n"]), wt = w["title"] as? String ?? "", step = w["step"] as? String ?? ""
+        switch workerState {
+        case "working":
+            workerHead = "正在做 #\(wn) \(wt)"
+            workerStep = "\(step) · 已 \(w["minutes"] as? Int ?? 0) 分钟"
+        case "extracting": workerHead = "正在\(step)"; workerStep = wt
+        case "checking": workerHead = "在看有没有要做的"; workerStep = ""
+        case "error": workerHead = "状态读不到"; workerStep = ""
+        default: workerHead = "空闲，有新的事会自动开始"; workerStep = ""
+        }
+        let q = (w["queue"] as? [[String: Any]] ?? []).map { "#\(number($0["n"])) \($0["title"] as? String ?? "")" }
+        workerQueue = q.isEmpty ? "" : "排队：" + q.prefix(4).joined(separator: "、") + (q.count > 4 ? " 等 \(q.count) 件" : "")
+        if let l = w["last"] as? [String: Any] {
+            workerLast = "上一件 \(l["time"] as? String ?? "")：#\(number(l["n"])) \(l["outcome"] as? String ?? "") · \(l["text"] as? String ?? "")"
+        } else { workerLast = "" }
         backlog = s["backlog_count"] as? Int ?? 0
         timeline = (s["timeline"] as? [[String: Any]] ?? []).map {
             Line(time: $0["time"] as? String ?? "", kind: $0["kind"] as? String ?? "", title: $0["title"] as? String ?? "", ok: $0["ok"] as? Bool ?? true)
@@ -103,8 +200,8 @@ final class Monitor: ObservableObject {
         for e in fresh.prefix(4) {
             let ok = e["ok"] as? Bool ?? true, kind = e["kind"] as? String ?? "", title = e["title"] as? String ?? ""
             switch (kind, ok) {
-            case ("send", true): post("已发到你的飞书", title)
-            case ("send", false): post("飞书消息没发出去", title)
+            case ("send", true): post("心响", title)
+            case ("send", false): post("心响 · 消息没送到", title)
             case ("prework", _): post("AI 有进展", title)
             default: if !ok { post("事项中心出了点问题", title) }
             }
@@ -113,6 +210,7 @@ final class Monitor: ObservableObject {
     }
 
     private func post(_ title: String, _ body: String) {
+        if Notifier.shared.post(title, body) { return }
         let esc = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -207,6 +305,14 @@ struct Panel: View {
     @ObservedObject var m: Monitor
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Button { CenterWindow.shared.show(m.root) } label: {
+                HStack {
+                    Text("打开心响").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    if m.unread > 0 { Text("\(m.unread) 条新消息").font(.system(size: 11)) }
+                }.frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(m.headline).font(.system(size: 15, weight: .semibold))
@@ -214,6 +320,7 @@ struct Panel: View {
                     Menu {
                         Button("立即检查一次") { m.run("检查中…", ["agent_matrix.reply", "poll"]) }
                         Button("给我发条测试消息") { m.run("发送中…", ["agent_matrix.monitor", "--test-send"]) }
+                        Button("给我发张测试卡片（试按钮）") { m.run("发送中…", ["agent_matrix.monitor", "--test-card"]) }
                         Button("清掉已处理的提示") { m.run("清理中…", ["agent_matrix.monitor", "--clear-resolved", "--json"]) }
                         Button("重启监听") { m.restartListener() }
                         Divider()
@@ -241,6 +348,18 @@ struct Panel: View {
                 .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             }
 
+            Section(title: "AI 员工") {
+                HStack(spacing: 6) {
+                    Circle().fill(m.workerState == "working" || m.workerState == "extracting" ? Color.blue
+                                  : m.workerState == "error" ? Color.red : m.workerState == "idle" ? Color.green : Color.gray)
+                        .frame(width: 7, height: 7)
+                    Text(m.workerHead).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                }
+                if !m.workerStep.isEmpty { Text(m.workerStep).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
+                if !m.workerQueue.isEmpty { Text(m.workerQueue).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2) }
+                if !m.workerLast.isEmpty { Text(m.workerLast).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2) }
+            }
+            Divider()
             Section(title: "需要你（\(m.need.count)）") {
                 if m.need.isEmpty { Text("没有要你处理的 ✓").font(.system(size: 12)).foregroundStyle(.secondary) }
                 ForEach(m.need.prefix(6)) { Row(item: $0, m: m) }
@@ -288,8 +407,18 @@ struct Panel: View {
     }
 }
 
+/// Opening 心响 again (Spotlight, Launchpad, Dock) while it runs in the menu bar shows the main window.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let root = Notifier.shared.root
+        Task { @MainActor in CenterWindow.shared.show(root) }
+        return true
+    }
+}
+
 @main
 struct AgentMatrixMonitorApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var monitor = Monitor()
     var body: some Scene {
         MenuBarExtra {
