@@ -1,0 +1,94 @@
+"""Feishu tasks assigned to the owner → the task table. Pure code, no model.
+
+- New open task assigned to the owner → one row (executor 我, source 飞书任务, link back).
+- First run imports only tasks created in the last 14 days; later every new one comes in.
+- Owner ticks it done in Feishu → the row becomes 完成 (that is the owner's own action).
+- Nothing is ever written back to Feishu tasks.
+"""
+from datetime import datetime, timedelta
+
+from ..brief_migration import number, single
+from ..models import MatrixError
+
+FIRST_IMPORT_DAYS = 14
+
+
+def _list(client, *, complete, since):
+    data = client._exec(["task", "+get-my-tasks", "--complete=" + ("true" if complete else "false"),
+                         "--created_at", since.strftime("%Y-%m-%d"), "--page-all", "--as", "user", "--format", "json"])
+    items = data.get("items") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise MatrixError("飞书任务列表结构异常，本轮不同步。")
+    return items
+
+
+def _assigned_to(task, owner):
+    return any(m.get("id") == owner and m.get("role") == "assignee" for m in task.get("members") or [])
+
+
+def _due(task, tz):
+    due = task.get("due") or {}
+    stamp = due.get("timestamp") if isinstance(due, dict) else None
+    if not stamp:
+        return None
+    return datetime.fromtimestamp(int(stamp) / 1000, tz).strftime("%Y-%m-%d 00:00")
+
+
+def fields_for(task, config, tz):
+    title = " ".join(str(task.get("summary") or "").split())[:60]
+    fields = {"标题": title, "执行方": ["我"], "状态": ["未开始"], "进度": "0/1 未开始",
+              "负责人": [{"id": config.owner_open_id}], "来源": ["飞书任务"], "类型": ["临时"],
+              "关联任务链接": task.get("url")}
+    due = _due(task, tz)
+    if due:
+        fields["截止日"] = due
+    return fields
+
+
+def sync(config, client, state, now, *, notify=True):
+    from ..workflow import Gateway, ensure_options
+    if not state.get("v1:source-options"):
+        ensure_options(client, state, "来源", ["飞书任务", "聊天"])
+        state.set("v1:source-options", True)
+    started = state.get("feishu-tasks:started")
+    if not started:
+        started = now.isoformat()
+        state.set("feishu-tasks:started", started)
+        first = True
+    else:
+        first = False
+    since = now - timedelta(days=FIRST_IMPORT_DAYS)
+    owner = config.owner_open_id
+    open_tasks = [t for t in _list(client, complete=False, since=since)
+                  if _assigned_to(t, owner) and str(t.get("summary") or "").strip()]
+    done_tasks = {t["guid"]: t for t in _list(client, complete=True, since=since - timedelta(days=16))}
+    gateway = Gateway(client, state)
+    rows = {str(r.get("去重键") or ""): r for r in gateway.rows()}
+    created, completed = [], []
+    for task in open_tasks:
+        key = "feishu-task:" + task["guid"]
+        if key in rows:
+            continue
+        receipt = gateway.create(fields_for(task, config, now.tzinfo), key, "feishu-task")
+        created.append(receipt["record_id_list"][0])
+    for key, row in rows.items():
+        if not key.startswith("feishu-task:"):
+            continue
+        task = done_tasks.get(key.split(":", 1)[1])
+        if task and single(row.get("状态")) not in {"完成", "取消"} and single(row.get("执行方")) == "我":
+            gateway.update(row, {"状态": ["完成"], "进度": "完成", "完成时间": task.get("completed_at") or now.isoformat()},
+                           f"feishu-task-done:{row['record_id']}", "feishu-task")
+            completed.append(row["record_id"])
+    message_id = None
+    if created and notify:
+        numbers = {r["record_id"]: number(r["编号"]) for r in gateway.rows() if r["record_id"] in created}
+        titles = {r["record_id"]: str(r.get("标题"))[:14] for r in gateway.rows() if r["record_id"] in created}
+        listed = " / ".join(f"#{numbers[x]} {titles[x]}" for x in created[:4]) + (f" 等 {len(created)} 件" if len(created) > 4 else "")
+        head = "飞书任务 · 首次导入近两周的 " if first else "飞书任务 · 新增 "
+        text = f"{head}{len(created)} 件：{listed}\n不是你的回「编号 给某人」，不做回「编号 不做」"
+        from ..delivery import send_once
+        from hashlib import sha256
+        key = "feishu-tasks-new:" + sha256(",".join(sorted(created)).encode()).hexdigest()[:24]
+        message_id = send_once(state, key, lambda: client.send_self(text, key.replace(":", "-"))).get("message_id")
+    state.set("feishu-tasks:last-sync", now.isoformat())
+    return {"created": len(created), "completed": len(completed), "message_id": message_id}

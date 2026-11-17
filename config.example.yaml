@@ -1,0 +1,30 @@
+stage: 0
+timezone: Asia/Shanghai
+base_name: 会议与待办中心
+owner_open_id: ''
+owner_name: ''
+# 同事对你的叫法，用于判断原话里是不是在点你的名，例如 [小王]
+owner_aliases: []
+app_id: ''
+base_token: ''
+base_url: ''
+tables: {}
+lark_binary: lark-cli
+timeout_seconds: 60
+llm_backend: disabled
+transcripts_to_llm_allowed: false
+scheduling_enabled: false
+meeting_watch_enabled: false
+meeting_watch_started_at: ''
+# 可用时间只在明确设置工作时段后计算，不猜填。
+work_start: null
+work_end: null
+work_breaks: []
+prework_enabled: false
+prework_lead_days: 2
+# 实时来源：聊天用你的身份读取、本地过滤；到下面这些时间点才批量交给模型提取
+chat_watch_enabled: true
+chat_review_times: ['11:30', '14:30', '17:30', '20:30']
+feishu_tasks_enabled: true
+# 会议标题里太常见、不能用来关联事项的词，例如公司名
+topic_stopwords: []

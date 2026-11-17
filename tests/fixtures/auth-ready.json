@@ -1,0 +1,1 @@
+{"appId":"cli_fixture","identities":{"user":{"status":"ready","available":true,"verified":true,"openId":"ou_fixture_owner","userName":"示例用户","tokenStatus":"valid"},"bot":{"status":"ready","available":true,"verified":true,"openId":"ou_fixture_bot"}},"verified":true}

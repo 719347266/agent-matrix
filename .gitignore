@@ -1,0 +1,26 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+
+# Secrets and personal configuration (copy config.example.yaml → config.yaml)
+.env
+.env.*
+!.env.example
+config.yaml
+
+# Runtime data: transcripts, chat candidates, task snapshots, receipts, logs
+state/
+logs/
+notes/
+minutes/
+
+# Generated business content and real-data acceptance records (kept local only)
+documents/
+draft_*_folder/
+docs/
+
+# Generated per machine by launchd/install-listen.sh
+launchd/*.plist
