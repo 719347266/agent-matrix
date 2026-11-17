@@ -237,7 +237,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return self._send(403, {"error": "forbidden"})
             try:
-                return self._send(200, build_state(self.server.root))
+                commands = self.server.commands.recent()
+                return self._send(200, {**build_state(self.server.root), "commands": commands})
             except Exception as exc:
                 return self._send(500, {"error": f"{type(exc).__name__}: {exc}"[:300]})
         return self._send(404, {"error": "not found"})
@@ -252,10 +253,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "bad json"})
         root, path = self.server.root, urlparse(self.path).path
         try:
-            if path == "/api/cmd":
-                return self._send(200, run_command(root, body.get("text")))
-            if path == "/api/say":
-                return self._send(200, say(root, body.get("n"), body.get("text")))
+            if path in {"/api/commands", "/api/cmd", "/api/say"}:
+                if path == "/api/say":
+                    body = {**body, "kind": "say"}
+                command = self.server.commands.submit(body)
+                return self._send(202, {"ok": True, "command": command, "reply": command["message"]})
+            if path == "/api/commands/retry":
+                command = self.server.commands.retry(str(body.get("id") or ""))
+                return self._send(202, {"ok": True, "command": command})
+            if path == "/api/commands/dismiss":
+                self.server.commands.dismiss(str(body.get("id") or ""))
+                return self._send(200, {"ok": True})
             if path == "/api/settings":
                 from . import thread
                 if "builtin_driver" in body:
@@ -271,6 +279,8 @@ class Handler(BaseHTTPRequestHandler):
                 from . import inbox
                 inbox.mark_read(root, None if body.get("all") else [int(x) for x in body.get("ids") or []])
                 return self._send(200, {"ok": True})
+        except ValueError as exc:
+            return self._send(400, {"ok": False, "reply": str(exc)})
         except Exception as exc:
             return self._send(500, {"ok": False, "reply": f"出错了：{type(exc).__name__}"})
         return self._send(404, {"error": "not found"})
@@ -280,6 +290,8 @@ def make_server(root, port):
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.root, server.token = Path(root), token(root)
     server.daemon_threads = True
+    from .commands import Commands
+    server.commands = Commands(root)
     info = Path(root) / "state/app.json"
     info.write_text(json.dumps({"port": port, "pid": os.getpid(), "url": f"http://127.0.0.1:{port}/"}))
     return server

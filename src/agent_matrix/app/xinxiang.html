@@ -101,6 +101,13 @@ h2{font-size:15px;margin:0 0 4px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:9px 16px;border-radius:9px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:20}
 .toast.on{opacity:1}
 @media (max-width:820px){header{flex-wrap:wrap;gap:10px;padding:12px 16px}.cmd{display:none}main{padding:18px 16px}.flow{flex-direction:column}.arrow{width:auto;height:18px;transform:rotate(90deg)}}
+button:disabled{opacity:.55;cursor:wait}
+#actions:empty{display:none}
+#actions{max-width:1100px;margin:12px auto 0;padding:0 16px}
+.command-result{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:6px 0;border:1px solid var(--line);border-radius:10px;font-size:13px;line-height:1.6}
+.command-result>div{flex:1;min-width:0;overflow-wrap:anywhere}
+.command-result.failed,.command-result.unknown{border-color:var(--ink3)}
+@media(max-width:600px){.command-result{flex-wrap:wrap}.command-result>div{flex-basis:100%}}
 </style>
 </head>
 <body>
@@ -111,6 +118,7 @@ h2{font-size:15px;margin:0 0 4px}
   <button class="ai" id="ai"></button>
   <div class="cmd"><input id="cmdbox" placeholder="输入指令：44 过 / 44 + 要求" onkeydown="if(event.key==='Enter')runCmd()"></div>
 </header>
+<div id="actions" role="status" aria-live="polite"></div>
 <main id="main"></main>
 <div class="toast" id="toast"></div>
 <script>
@@ -119,18 +127,103 @@ const TOKEN = /*__TOKEN__*/"";
 const LIVE = !D;
 let TODAY = (D && D.today) || new Date().toISOString().slice(0,10);
 async function api(path, body){
-  const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json","X-Xinxiang-Token":TOKEN}, body:JSON.stringify(body)}
-                                   : {headers:{"X-Xinxiang-Token":TOKEN}});
-  if(!r.ok) throw new Error(r.status);
-  return r.json();
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),12000);
+  try {
+    const r=await fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Xinxiang-Token":TOKEN},
+      ...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
+    const data=await r.json();
+    if(!r.ok){ const e=new Error(data.reply||data.error||("服务返回 "+r.status)); e.confirmed=r.status===400; throw e; }
+    return data;
+  } finally { clearTimeout(timer); }
 }
-let failing = false;
+let failing = false, loadSequence=0, refreshTimer;
 async function load(){
-  try{ D = await api("/api/state"); TODAY = D.today; failing = false; }
-  catch(e){ failing = true; }
+  const seq=++loadSequence;
+  try{ const data=await api("/api/state"); if(seq!==loadSequence)return; D=data; TODAY=D.today; failing=false; syncCommands(); }
+  catch(e){ if(seq!==loadSequence)return; failing=true; }
   render();
+  clearTimeout(refreshTimer);
+  refreshTimer=setTimeout(load,commands().some(waiting)?1500:8000);
 }
-const S = {view:"home", stage:null, item:null, back:"home", all:"进行中", inbox:"全部", working:false, step:0, blocked:null};
+const S = {inline:null, view:"home", stage:null, item:null, back:"home", all:"进行中", inbox:"全部", working:false, step:0, blocked:null};
+// Requests stay visible across refreshes; an ambiguous transport error keeps the
+// same ID for reconciliation instead of creating another write.
+const localCommands = new Map();
+try { for(const c of JSON.parse(sessionStorage.getItem("xinxiang-commands")||"[]")) localCommands.set(c.id,c); } catch {}
+function keepCommands(){ try { sessionStorage.setItem("xinxiang-commands",JSON.stringify([...localCommands.values()])); } catch {} }
+function commands(){
+  const all=new Map((D?.commands||[]).map(c=>[c.id,c]));
+  for(const c of localCommands.values()) all.set(c.id,c);
+  return [...all.values()].sort((a,b)=>b.created-a.created);
+}
+const waiting = c => ["sending","queued","running","unknown"].includes(c.status);
+const pendingFor = n => commands().find(c=>c.numbers.includes(n)&&(waiting(c)||c.status==="failed"));
+function syncCommands(){
+  for(const c of D.commands||[]) localCommands.delete(c.id);
+  keepCommands();
+}
+function commandView(){
+  const all=commands(), finished=all.filter(c=>c.status==="done").slice(0,3);
+  return all.filter(c=>waiting(c)||c.status==="failed"||finished.includes(c)).map(c=>{
+    const elapsed=Math.max(0,Math.floor(Date.now()/1000-c.created));
+    const refs=c.message.startsWith("#")?"":c.numbers.map(n=>"#"+n).join("、");
+    const extra=c.status==="unknown"?"":waiting(c)?` · 已等 ${elapsed} 秒`:"";
+    const retry=["failed","unknown"].includes(c.status)?`<button class="btn" onclick="retryCommand('${c.id}')">核对并重试</button>`:"";
+    const close=["done","failed"].includes(c.status)?`<button class="btn" aria-label="收起处理结果" onclick="dismissCommand('${c.id}')">收起</button>`:"";
+    return `<div class="command-result ${c.status}"><div><b>${esc(refs)}</b> ${esc(c.message)}${extra}${failing&&waiting(c)?" · 连接中断，正在重新核对":""}</div>${retry}${close}</div>`;
+  }).join("");
+}
+async function submitCommand(body,numbers,existing=null){
+  if(!existing && numbers.some(n=>pendingFor(n))) return;
+  const id=existing?.id || (globalThis.crypto?.randomUUID?.() || ("r"+Date.now().toString(36)+Math.random().toString(36).slice(2)));
+  const c={id,numbers,text:body.text,payload:body,status:"sending",message:"正在提交，请稍候",created:existing?.created||Date.now()/1000};
+  localCommands.set(id,c); keepCommands(); render();
+  try {
+    const r=await api("/api/commands",{...body,request_id:id});
+    localCommands.delete(id); localCommands.set(r.command.id,r.command);
+    if(body.kind==="say"){
+      const box=$("#saybox");
+      if(box&&box.dataset.draft==="say-"+body.n&&box.value.trim()===body.text){
+        box.value="";drafts.delete("say-"+body.n);
+      }
+    }
+  } catch(e) {
+    c.status=e.confirmed?"failed":"unknown";
+    c.message=e.confirmed?e.message:"暂时没收到服务回执，请核对；重复点击不会再次提交。";
+    localCommands.set(id,c);
+  }
+  keepCommands(); render(); await load();
+}
+async function retryCommand(id){
+  const c=commands().find(c=>c.id===id); if(!c)return;
+  if(c.payload) return submitCommand(c.payload,c.numbers,c);
+  localCommands.set(id,{...c,status:"sending",message:"正在核对上次操作"}); render();
+  try { const r=await api("/api/commands/retry",{id}); localCommands.delete(id); localCommands.set(r.command.id,r.command); }
+  catch(e) { localCommands.set(id,{...c,status:"failed",message:e.message||"连接中断，请稍后核对"}); }
+  keepCommands(); await load();
+}
+async function dismissCommand(id){
+  const c=localCommands.get(id);
+  try { await api("/api/commands/dismiss",{id}); localCommands.delete(id); D.commands=(D.commands||[]).filter(c=>c.id!==id); keepCommands(); render(); }
+  catch(e){ toast("暂时连不上服务，处理结果已保留"); }
+}
+
+const drafts=new Map(), htmlCache=new Map();
+let renderedView="";
+function putHTML(selector,html){
+  if(htmlCache.get(selector)===html)return false;
+  $(selector).innerHTML=html; htmlCache.set(selector,html); return true;
+}
+function inlineForm(i){
+  const f=S.inline;
+  if(!f||f.n!==i.n)return "";
+  return `<div class="inline" onclick="event.stopPropagation()"><input id="inline-${i.n}" data-draft="inline-${i.n}-${f.k}" placeholder="${esc(f.ph)}" onkeydown="if(event.key==='Enter')submitInline()"><button class="btn pri" data-n="${i.n}" onclick="submitInline()">确定</button></div>`;
+}
+function submitInline(){
+  const f=S.inline, input=f&&$("#inline-"+f.n); if(!input||pendingFor(f.n))return;
+  const value=input.value.trim();if(!value)return input.focus();
+  input.value=""; drafts.delete("inline-"+f.n+"-"+f.k); S.inline=null; apply(f.n,f.k,value);
+}
 const DEMO_N = 45, DEMO_STEPS = ["1/4 读任务单和背景","2/4 读标签体系文档","3/4 写需求文档","4/4 自检"];
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -181,7 +274,7 @@ function mainButtons(i){
   if(i.who==="AI" && !isWorking(i)) return [["先做","first",""],["不做","cancel",""],["已完成","done",""]];
   return [];
 }
-function btn(i,[label,k,cls,ph]){ return `<button class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
+function btn(i,[label,k,cls,ph]){ return `<button data-n="${i.n}" ${pendingFor(i.n)?"disabled aria-busy=\"true\"":""} class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
 function row(i){
   let meta=[whoText(i), due(i)].filter(Boolean);
   let extra="";
@@ -191,24 +284,19 @@ function row(i){
   if(j && i.status==="待确认") extra += `<div class="judge"><b>AI 判断</b>：${esc({ai:"能独立做",prep:"需要你，AI 可先备材料",me:"需要你自己来",skip:"不用做",done:"已经办完"}[j.decision]||"")} · ${esc(j.reason||"")}</div>`;
   const metaHtml = meta.length?`<div class="meta">${meta.map(x=>x.startsWith("逾期")?`<span class="late">${x}</span>`:esc(x)).join(" · ")}</div>`:"";
   const open = !isWorking(i) && (i.status==="待验收"||i.status==="完成") && i.url ? `<a class="btn link" href="${esc(i.url)}" target="_blank" onclick="event.stopPropagation()">打开交付</a>` : "";
-  return `<div class="row" onclick="openItem(${i.n})"><div class="main"><div class="title"><span class="n">#${i.n}</span>${esc(i.title)}</div>${metaHtml}${extra}</div>${open}${mainButtons(i).map(b=>btn(i,b)).join("")}</div>`;
+  return `<div class="row" onclick="openItem(${i.n})"><div class="main"><div class="title"><span class="n">#${i.n}</span>${esc(i.title)}</div>${metaHtml}${extra}</div>${open}${mainButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}`;
 }
 function act(n,k,ph,el){
-  if(ph){ const host=el.closest(".row")||el.closest(".now"); const old=document.querySelector(".inline"); if(old) old.remove();
-    const f=document.createElement("div"); f.className="inline"; f.onclick=e=>e.stopPropagation();
-    f.innerHTML=`<input placeholder="${ph}"><button class="btn pri">确定</button>`; host.after(f);
-    const inp=f.querySelector("input"); inp.focus(); const go=()=>{ if(!inp.value.trim()) return inp.focus(); apply(n,k,inp.value.trim()); };
-    f.querySelector("button").onclick=go; inp.onkeydown=e=>{ if(e.key==="Enter") go(); }; return; }
+  if(pendingFor(n))return;
+  if(ph){ S.inline={n,k,ph};render();$("#inline-"+n)?.focus();return; }
   apply(n,k,null);
 }
 function say(n, from, kind, text){ (D.threads[n] ||= []).push({at:TODAY.slice(5)+" "+clock(), from, kind, text, driver: from==="ai"?"本机 GPT":""}); }
 async function apply(n,k,arg){
   if(LIVE){
-    const text = CMD[k](n,arg); toast(`处理中：${text}`);
-    try{ const r = k==="answer"||k==="add" ? await api("/api/say",{n,text:arg}) : await api("/api/cmd",{text}); toast(r.reply||"已处理"); }
-    catch(e){ toast("没处理成功，连不上本机服务"); }
-    setTimeout(load, 4000); setTimeout(load, 9000);
-    return load();
+    if(pendingFor(n))return;
+    const body=k==="answer"||k==="add"?{kind:"say",n,text:arg}:{kind:"cmd",text:CMD[k](n,arg)};
+    return submitCommand(body,[n]);
   }
   const i=byN(n);
   const words={restore:"恢复",approve:"通过",reject:"退回："+arg,add:"补充："+arg,answer:arg,me:"我自己来做",ai:"交给 AI 做",cancel:"不做了",done:"完成了",date:"改日期到 "+arg,first:"先做这件",cont:"按现有资料先做出来"}[k];
@@ -349,13 +437,13 @@ function nowBox(i){
   else if(i.who==="我"){ what=`这是你的事${due(i)?"，"+due(i):""}。要 AI 帮忙，点「交给 AI」。`; buttons=[["✓ 完成","done","pri"],["交给 AI","ai",""],["改日期…","date","","例如：周五 / 11-20"],["不做","cancel",""]]; }
   else { what="别人在做，到期前会提醒你跟进。"; }
   return `<div class="now"><div class="what">${what}</div>${buttons.length?`<div class="acts">${buttons.map(b=>btn(i,b)).join("")}</div>`:""}
-  <div class="say"><textarea id="saybox" placeholder="接着和 AI 说这件事…（例：预算按 600 一天重算；加上竞品）" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))sendSay()"></textarea><button class="btn pri" onclick="sendSay()">发送</button></div></div>`;
+  ${inlineForm(i)}<div class="say"><textarea id="saybox" data-draft="say-${i.n}" placeholder="接着和 AI 说这件事…（例：预算按 600 一天重算；加上竞品）" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))sendSay()"></textarea><button data-n="${i.n}" ${pendingFor(i.n)?"disabled":""} class="btn pri" onclick="sendSay()">发送</button></div></div>`;
 }
 function sendSay(){ const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus(); apply(S.item, "add", t); }
 
 /* ---------- frame ---------- */
 async function runCmd(){ const v=$("#cmdbox").value.trim(); if(!v) return;
-  if(LIVE){ $("#cmdbox").value=""; toast(`处理中：${v}`); try{ const r=await api("/api/cmd",{text:v}); toast(r.reply||"已处理"); }catch(e){ toast("连不上本机服务"); } setTimeout(load, 4000); setTimeout(load, 9000); return load(); }
+  if(LIVE){ const numbers=(v.match(/^#?[\d\s、,，]+/)?.[0].match(/\d+/g)||[]).map(Number); if(numbers.some(n=>pendingFor(n)))return; $("#cmdbox").value=""; return submitCommand({kind:"cmd",text:v},numbers); }
   const m=v.match(/^#?(\d+)\s*(.*)$/);
   if(m&&byN(+m[1])){ say(+m[1],"me","feedback",m[2]||v); $("#cmdbox").value=""; toast(`已处理「${v}」· 原型`); openItem(+m[1]); }
   else toast("格式：编号 + 动作，例如 44 过 / 44 + 加上竞品"); }
@@ -363,19 +451,34 @@ function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。
 function demoBlock(on){ const i=byN(44); if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
 function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
 function render(){
+  const viewKey=S.view+":"+(S.view==="item"?S.item:S.view==="home"?S.stage:S.view==="all"?S.all:"");
+  const focused=document.activeElement, focusKey=focused?.dataset?.draft;
+  const selection=focusKey?[focused.selectionStart,focused.selectionEnd]:null;
+  for(const field of document.querySelectorAll("#main [data-draft]")) drafts.set(field.dataset.draft,field.value);
+  putHTML("#actions",commandView());
+  for(const b of document.querySelectorAll("[data-n]")) b.disabled=!!pendingFor(Number(b.dataset.n));
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
   const st=stages(), need=st.filter(s=>s.need).reduce((a,s)=>a+s.items.length,0), unread=D.inbox.filter(m=>!m.read).length;
   const tabs=[["home","现在",need],["all","全部事项",0],["inbox","消息",unread],["sys","系统",0]];
-  $("#nav").innerHTML=tabs.map(([k,l,c])=>`<button class="${S.view===k||(S.view==="item"&&S.back===k)?"on":""}" onclick="S.view='${k}';render()">${l}${c?`<b>${c}</b>`:""}</button>`).join("");
+  putHTML("#nav",tabs.map(([k,l,c])=>`<button class="${S.view===k||(S.view==="item"&&S.back===k)?"on":""}" onclick="S.view='${k}';render()">${l}${c?`<b>${c}</b>`:""}</button>`).join(""));
   const w=D.worker||{}, c=cur(), many=LIVE?(w.doing||[]).length:0;
-  $("#ai").innerHTML = many>1 ? `<span class="dot busy"></span>AI 正在同时做 ${many} 件` : c ? `<span class="dot busy"></span>${esc(c.driver||"AI")} 正在${c.n?`做 #${c.n}`:esc(c.title||"干活")}${c.step?" · "+esc(String(c.step).replace(/^\d\/4\s*/,"")):""}`
-                         : `<span class="dot"></span>AI 空闲${w.last&&w.last.n?` · 上一件 #${w.last.n} ${esc(w.last.outcome)}`:""}`;
+  putHTML("#ai",many>1 ? `<span class="dot busy"></span>AI 正在同时做 ${many} 件` : c ? `<span class="dot busy"></span>${esc(c.driver||"AI")} 正在${c.n?`做 #${c.n}`:esc(c.title||"干活")}${c.step?" · "+esc(String(c.step).replace(/^\d\/4\s*/,"")):""}`
+                         : `<span class="dot"></span>AI 空闲${w.last&&w.last.n?` · 上一件 #${w.last.n} ${esc(w.last.outcome)}`:""}`);
   $("#ai").onclick=()=>{ const n=c&&c.n||(w.last&&w.last.n); if(n&&byN(n)) openItem(n); };
-  const a=document.activeElement; if(a && ["INPUT","TEXTAREA"].includes(a.tagName) && a.closest("main") && a.value) return;
-  $("#main").innerHTML={home,all:allPage,inbox:inboxPage,sys:sysPage,item:itemPage}[S.view]();
+  const changed=putHTML("#main",{home,all:allPage,inbox:inboxPage,sys:sysPage,item:itemPage}[S.view]());
+  if(changed){
+    for(const field of document.querySelectorAll("#main [data-draft]")){
+      if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);
+      if(viewKey===renderedView&&focusKey===field.dataset.draft){
+        field.focus({preventScroll:true});
+        if(selection&&field.setSelectionRange)field.setSelectionRange(...selection);
+      }
+    }
+  }
+  renderedView=viewKey;
 }
-if(LIVE){ load(); setInterval(load, 8000); } else render();
+if(LIVE){ load(); } else render();
 </script>
 </body>
 </html>

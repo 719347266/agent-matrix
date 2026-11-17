@@ -144,10 +144,13 @@ def _append(old, line):
 
 
 class Applier:
-    def __init__(self, config, client, state, *, source, message_ref):
+    def __init__(self, config, client, state, *, source, message_ref, immediate=False, progress=None):
         from .workflow import Gateway
         self.config, self.client, self.state = config, client, state
-        self.gateway = Gateway(client, state)
+        from .monitor import save_snapshot
+        self.gateway = Gateway(client, state, on_rows=(lambda rows: save_snapshot(client.root, rows)) if immediate else None, progress=progress)
+        self.immediate = immediate
+        self.deferred = []
         self.source, self.ref = source, message_ref
         self.now = _now(config)
 
@@ -212,6 +215,17 @@ class Applier:
 
     def one(self, op, n, row):
         st, ex, name = single(row.get("状态")), single(row.get("执行方")), _title(row)
+        if getattr(self, "immediate", False) and self.state is not None:
+            # A lost HTTP receipt can be retried even if the original transition
+            # already changed which actions are allowed (notably 恢复 / 验收).
+            from .workflow import matches
+            key = self.key(op, n)
+            intent = self.state.get(key + ":intent")
+            previous = self.state.operation(key)
+            if previous and intent and intent.get("record_id") == row["record_id"] and matches(row, intent["patch"]):
+                self.gateway.update(row, intent["patch"], key, f"reply:{self.source}:{self.ref}")
+                stopped = self.stop_ai(row) if op.verb in {"complete", "no_deliverable", "cancel"} else ""
+                return f"#{n} {name} 上次操作已保存 ✓" + stopped
         owner = [{"id": self.config.owner_open_id}]
         if op.verb == "expand":
             return self.expand(row)
@@ -225,6 +239,8 @@ class Applier:
                 from .thread import forget_judgment
                 forget_judgment(self.client.root, row["record_id"])
             return f"#{n} {name} → 恢复了，回到「新进来」等你定 ✓"
+        if st == "取消" and op.verb == "cancel":
+            return f"#{n} {name} 已经标为不做 ✓" + self.stop_ai(row)
         if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete"}:
             return f"#{n} {name} 已经是{st}，没动。"
         if st == "取消" and op.verb in {"no_deliverable", "material", "complete"}:
@@ -344,6 +360,9 @@ class Applier:
             patch["交付情况"] = ["有交付"]; note = "，交付物已在"
         elif not expects_deliverable(row.get("标题")):
             patch["交付情况"] = ["无交付"]; note = "（行动项，不需要交付文件）"
+        elif getattr(self, "immediate", False):
+            patch["交付情况"] = ["待补交付"]
+            note = "，交付文件在后台查找，可以稍后补上"
         else:
             found = find_deliverable(self.client, self.config, row.get("标题"), self.now)
             if found and found.get("candidates"):
@@ -357,8 +376,10 @@ class Applier:
                 patch["交付情况"] = ["待补交付"]
                 note = f"。交付文件没找到：回「{n} + 链接」补上，没有文件就回「{n} 无交付」"
         if st == "完成" and single(row.get("交付情况")) == single(patch.get("交付情况")):
-            return f"#{n} {name} 已经是完成，没动。"
-        self.write(row, patch, op, n)
+            return f"#{n} {name} 已经完成 ✓"
+        receipt = self.write(row, patch, op, n)
+        if getattr(self, "immediate", False) and patch.get("交付情况") == ["待补交付"]:
+            self.deferred.append(receipt.get("readback") or {**row, **patch})
         return f"#{n} {name} → 完成 ✓{note}"
 
     def merge(self, row, op, n, name, into):

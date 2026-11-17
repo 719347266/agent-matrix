@@ -4,6 +4,7 @@ set -e
 cd "$(dirname "$0")"
 root="$(cd .. && pwd)"
 app="$HOME/Applications/心响.app"
+app_port="$("$root/.venv/bin/python" -c 'import sys; from pathlib import Path; from agent_matrix.config import load; p=Path(sys.argv[1]); print(load(p).app_port if p.exists() else 8765)' "$root/config.yaml")"
 build="$(mktemp -d)/心响.app"
 mkdir -p "$build/Contents/MacOS" "$build/Contents/Resources"
 cp AppIcon.icns "$build/Contents/Resources/AppIcon.icns"  # redraw with: python make_icon.py
@@ -23,6 +24,7 @@ cat > "$build/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>AgentMatrixRoot</key><string>$root</string>
+  <key>AgentMatrixAppURL</key><string>http://127.0.0.1:$app_port/</string>
 </dict></plist>
 PLIST
 codesign --force --sign - "$build" >/dev/null

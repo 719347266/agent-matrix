@@ -111,6 +111,7 @@ cp config.example.yaml config.yaml
 .venv/bin/python -m agent_matrix.worker status                  # AI 员工正在做哪件、做到哪、排队顺序
 .venv/bin/python -m agent_matrix health                         # 授权与表格自检
 .venv/bin/python -m unittest discover -s tests                  # 测试
+node tests/test_client.cjs && node tests/test_client_live.cjs    # 页面交互与断线重试
 ```
 
 ## 隐私
@@ -169,3 +170,5 @@ powershell -ExecutionPolicy Bypass -File windows\install.ps1
 - `SPEC.md`：最初的整体方案
 - `BRIEF-SPEC.md`：简报、状态、执行方、回复指令的规范
 - `FIX-待办与报告质量.md`：解决硬凑待办、报告做不完、写成小作文的修复单
+
+心响里的操作会立即显示接收和处理进度，完成后直接使用飞书读回结果更新页面。交付文件在后台查找；连续点击、刷新、断线重试共用同一操作记录。失败时点「核对并重试」，先检查上次是否已保存。

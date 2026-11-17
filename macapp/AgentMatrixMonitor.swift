@@ -8,35 +8,78 @@ import UserNotifications
 
 /// The 心响 main window: the local client served by the always-on listener (127.0.0.1 only).
 @MainActor
-final class CenterWindow: NSObject, NSWindowDelegate {
+final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     static let shared = CenterWindow()
     private var window: NSWindow?
     private var web: WKWebView?
+    private var clientURL: URL?
+    private var retries = 0
 
     private func address(_ root: String) -> URL {
-        if let data = FileManager.default.contents(atPath: root + "/state/app.json"),
-           let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let text = info["url"] as? String, let url = URL(string: text) { return url }
+        // Never read project files on the UI thread: an unavailable volume can
+        // block open() indefinitely, freezing every click and even window closing.
+        if let text = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixAppURL") as? String,
+           let url = URL(string: text), url.scheme == "http",
+           ["127.0.0.1", "localhost"].contains(url.host ?? "") { return url }
         return URL(string: "http://127.0.0.1:8765/")!
     }
 
     func show(_ root: String) {
+        clientURL = address(root)
         if window == nil {
-            let web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+            let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: WKWebViewConfiguration())
+            web.autoresizingMask = [.width, .height]
+            web.navigationDelegate = self
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             w.title = "心响"; w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = self
             w.minSize = NSSize(width: 720, height: 520)
             if !w.setFrameUsingName("XinxiangMain") { w.center() }
             w.setFrameAutosaveName("XinxiangMain")
-            web.load(URLRequest(url: address(root)))
             window = w; self.web = web
+            reload()
         } else if window?.isVisible == false {
-            web?.load(URLRequest(url: address(root)))
+            reload()
         }
         NSApp.setActivationPolicy(.regular)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func reload() {
+        guard let clientURL else { return }
+        web?.load(URLRequest(url: clientURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12))
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if webView.url?.host == clientURL?.host { retries = 0 }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        recover(webView)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if (error as NSError).code != NSURLErrorCancelled { recover(webView) }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if (error as NSError).code != NSURLErrorCancelled { recover(webView) }
+    }
+
+    private func recover(_ webView: WKWebView) {
+        // Do not leave a blank window when the local service or WebKit restarts.
+        let url = clientURL?.absoluteString ?? "http://127.0.0.1:8765/"
+        webView.loadHTMLString("""
+        <meta name="viewport" content="width=device-width"><style>:root{color-scheme:light dark}body{font:16px -apple-system;padding:32px;line-height:1.8}a{color:inherit}</style>
+        <h2>正在重新连接心响</h2><p>你的事项保存在本机和飞书，正在恢复页面。</p><a href="\(url)">重新加载</a>
+        """, baseURL: nil)
+        guard retries < 3 else { return }
+        retries += 1
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            self?.reload()
+        }
     }
 
     func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
@@ -108,6 +151,8 @@ final class Monitor: ObservableObject {
     private var lastSeen: Int
     private var lastRestart = Date.distantPast
     private var timer: Timer?
+    private var refreshing = false
+    private var restarting = false
 
     init() {
         root = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixRoot") as? String ?? ""
@@ -125,18 +170,23 @@ final class Monitor: ObservableObject {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = (env["PATH"] ?? "") + ":" + NSHomeDirectory() + "/.npm-global/bin:" + NSHomeDirectory() + "/.local/bin:/opt/homebrew/bin"
         p.environment = env
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { return nil }
+        let timeout = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30, execute: timeout)
+        defer { timeout.cancel() }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         return data
     }
 
     func refresh() {
+        guard !refreshing else { return }
+        refreshing = true
         let root = self.root
         Task.detached {
             let data = Monitor.python(root, ["agent_matrix.monitor", "--json", "--write-html"])
-            await MainActor.run { self.apply(data) }
+            await MainActor.run { self.refreshing = false; self.apply(data) }
         }
     }
 
@@ -236,12 +286,16 @@ final class Monitor: ObservableObject {
     }
 
     func restartListener(quiet: Bool = false) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = ["kickstart", "-k", "gui/\(getuid())/com.agent-matrix.listen"]
-        try? p.run(); p.waitUntilExit()
+        guard !restarting else { return }
+        restarting = true
         if !quiet { busy = "正在重启监听…" }
-        Task { try? await Task.sleep(for: .seconds(20)); self.busy = ""; self.refresh() }
+        Task.detached {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            p.arguments = ["kickstart", "-k", "gui/\(getuid())/com.agent-matrix.listen"]
+            do { try p.run(); p.waitUntilExit() } catch {}
+            await MainActor.run { self.restarting = false; self.busy = ""; self.refresh() }
+        }
     }
 
     func open(_ s: String?) { if let s, let u = URL(string: s) { NSWorkspace.shared.open(u) } }
@@ -409,6 +463,9 @@ struct Panel: View {
 
 /// Opening 心响 again (Spotlight, Launchpad, Dock) while it runs in the menu bar shows the main window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { @MainActor in CenterWindow.shared.show(Notifier.shared.root) }
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         let root = Notifier.shared.root
         Task { @MainActor in CenterWindow.shared.show(root) }
@@ -427,5 +484,11 @@ struct AgentMatrixMonitorApp: App {
             Image(systemName: monitor.symbol)
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("刷新心响") { CenterWindow.shared.reload() }
+                    .keyboardShortcut("r", modifiers: .command)
+            }
+        }
     }
 }

@@ -544,9 +544,9 @@ def main(argv=None):
             try:
                 client.verify_owner(client.auth())
                 rows = Gateway(client, state).rows()
+                save_snapshot(root, rows)
             finally:
                 state.close()
-        save_snapshot(root, rows)
         print(json.dumps({"ok": True, "rows": len(rows)}))
         return 0
     if args.test_card:

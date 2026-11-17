@@ -63,8 +63,10 @@ def visible(row):
     return not row.get('排除本人提醒')
 
 class Gateway:
-    def __init__(self, client, state):
+    def __init__(self, client, state, *, on_rows=None, progress=None):
         self.client, self.state, self.config = client, state, client.config
+        self.on_rows = on_rows
+        self.progress = progress or (lambda message: None)
         require_owned(self.config, state)
         self.coords = ['--base-token', self.config.base_token, '--table-id', self.config.tables['事项表']]
 
@@ -72,6 +74,8 @@ class Gateway:
         rows = read_records(self.client, self.state, '事项表', FIELDS)
         key = 'brief-v1:number-registry:' + self.config.tables['事项表']
         self.state.set(key, validate_registry(rows, self.state.get(key)))
+        if self.on_rows:
+            self.on_rows(rows)
         return rows
 
     def update(self, before, patch, key, source):
@@ -84,6 +88,7 @@ class Gateway:
             patch = frozen['patch']
         else:
             self.state.set(key + ':intent', {'record_id':rid, 'before':before, 'patch':patch, 'source':source})
+        self.progress('正在读取最新状态')
         fresh = next((x for x in self.rows() if x['record_id'] == rid), None)
         if not fresh:
             raise MatrixError('原事项不存在，未写入。')
@@ -98,10 +103,12 @@ class Gateway:
         if not matches(fresh, {k:v for k,v in before.items() if k not in {'record_id', '更新时间'}}):
             raise MatrixError('事项刚被修改，请重新读取后处理。')
         def write():
+            self.progress('正在保存到飞书')
             receipt = self.client.call('+record-batch-update', *self.coords, '--json',
                                       js({'update_records':{rid:patch}}), write=True)
             if receipt.get('ignored_fields'):
                 raise MatrixError('写入字段被忽略，结果待核对。')
+            self.progress('正在核对保存结果')
             actual = next((x for x in self.rows() if x['record_id'] == rid), {})
             if not matches(actual, patch):
                 raise MatrixError('写后读回尚未一致；保留待核对，不重复写入。')

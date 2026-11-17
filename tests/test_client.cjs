@@ -11,7 +11,7 @@ const fixture = {
 };
 const element = {innerHTML: "", textContent: "", className: "", classList: {add(){},remove(){}}, value:""};
 const context = vm.createContext({
-  console, Date, document: {querySelector: () => element, activeElement: null},
+  console, Date, document: {querySelector: () => element, querySelectorAll: () => [], activeElement: null},
   setTimeout: () => 1, clearTimeout(){}, setInterval: () => 1, clearInterval(){},
   window: {scrollTo(){}},
 });
