@@ -8,7 +8,7 @@ app_port="$("$root/.venv/bin/python" -c 'import sys; from pathlib import Path; f
 build="$(mktemp -d)/心响.app"
 mkdir -p "$build/Contents/MacOS" "$build/Contents/Resources"
 cp AppIcon.icns "$build/Contents/Resources/AppIcon.icns"  # redraw with: python make_icon.py
-swiftc -O -parse-as-library -target arm64-apple-macos14 AgentMatrixMonitor.swift -o "$build/Contents/MacOS/AgentMatrixMonitor"
+swiftc -O -parse-as-library -target arm64-apple-macos14 AgentMatrixMonitor.swift ClientLinks.swift -o "$build/Contents/MacOS/AgentMatrixMonitor"
 cat > "$build/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

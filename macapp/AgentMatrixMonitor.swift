@@ -14,6 +14,7 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private var web: WKWebView?
     private var clientURL: URL?
     private var retries = 0
+    private var links: ClientLinks?
 
     private func address(_ root: String) -> URL {
         // Never read project files on the UI thread: an unavailable volume can
@@ -30,6 +31,9 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
             let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: WKWebViewConfiguration())
             web.autoresizingMask = [.width, .height]
             web.navigationDelegate = self
+            let links = ClientLinks(clientURL: clientURL!)
+            self.links = links  // WKWebView keeps its UI delegate weakly.
+            web.uiDelegate = links
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             w.title = "心响"; w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = self
@@ -49,6 +53,11 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     func reload() {
         guard let clientURL else { return }
         web?.load(URLRequest(url: clientURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12))
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(links?.policy(for: navigationAction, in: webView) ?? .cancel)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
