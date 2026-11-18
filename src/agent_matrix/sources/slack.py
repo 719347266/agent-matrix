@@ -43,7 +43,8 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
     table(state)
     me = api(tok, "auth.test")
     my_id, base = me["user_id"], me["url"]
-    names = owner_words(config)
+    me_tag = "@" + (config.owner_name or "我")
+    names = owner_words(config) | {me_tag}  # a Slack @mention of the owner counts even without owner_name
     people = {}
 
     def who(uid):
@@ -74,7 +75,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
                 continue
             from_owner = m["user"] == my_id
             # Owner mentions become the owner's name so the "被点名" rule in chat_review sees them.
-            text = " ".join(m["text"].replace(f"<@{my_id}>", "@" + (config.owner_name or "我")).split())
+            text = " ".join(m["text"].replace(f"<@{my_id}>", me_tag).split())
             text = re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), text)
             scanned += 1
             sender = "我" if from_owner else who(m["user"])
