@@ -121,6 +121,13 @@ def validate(config, review, root):
         m = by_id.get(a.message_id)
         if not m:
             raise MatrixError(f"「{a.title}」引用的消息不在本批里。")
+        from .meeting_review import _loose
+        for name in ("quote", "commitment_phrase", "due_phrase"):  # same words, different spacing: use the message's own
+            value = getattr(a, name, None)
+            if value and value not in m["text"]:
+                found = _loose(value).search(m["text"]) if _loose(value) else None
+                if found:
+                    setattr(a, name, found.group(0))
         if a.quote not in m["text"]:
             raise MatrixError(f"「{a.title}」的原话不在那条消息里，不能改写。")
         if a.commitment_phrase not in m["text"]:
