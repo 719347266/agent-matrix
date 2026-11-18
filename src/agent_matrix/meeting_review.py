@@ -150,6 +150,48 @@ def validate_review(review, transcript, meta, owner_aliases=()):
     return review
 
 
+def _loose(text):
+    """A pattern for text that may differ from the source only in whitespace: the AI drops the two spaces
+    a transcript puts before each line break, or joins two lines into one."""
+    chars=re.sub(r"\s+","",str(text or ""))
+    return re.compile(r"\s*".join(re.escape(c) for c in chars)) if chars else None
+
+
+def _paragraph_with(source, quote, timestamp, limit=1500):
+    """The AI's copy of the surrounding lines is off, but the quote itself is real: take the speaker's
+    paragraph (header with the timestamp + what was said) straight from the transcript instead."""
+    pattern=_loose(quote)
+    for found in (pattern.finditer(source) if pattern else []):
+        start=source.rfind("\n\n",0,found.start()); start=0 if start<0 else start+2
+        end=source.find("\n\n",found.end()); end=len(source) if end<0 else end
+        para=source[start:end].strip("\n")
+        if timestamp and timestamp in para and len(para)<=limit:
+            return para
+    return None
+
+
+def snap(entry, source):
+    """Copy the exact source words back into an entry whose quote differs from them only in whitespace.
+    Nothing else is forgiven: a reworded or shortened quote still fails the strict check afterwards."""
+    updates={}
+    ref=entry.reference
+    if ref not in source:
+        pattern=_loose(ref)
+        found=pattern.search(source) if pattern else None
+        ref=found.group(0) if found else _paragraph_with(source,entry.quote,entry.timestamp)
+        if not ref:
+            return entry
+        updates["reference"]=ref
+    for name in ("quote","commitment_phrase","due_phrase"):
+        value=getattr(entry,name,None)
+        if value and value not in ref:
+            pattern=_loose(value)
+            found=pattern.search(ref) if pattern else None
+            if found:
+                updates[name]=found.group(0)
+    return entry.model_copy(update=updates) if updates else entry
+
+
 def repair_review(review, transcript, meta, owner_aliases=()):
     """Fix what can be fixed entry by entry, so one bad line never sinks a whole meeting.
 
@@ -157,6 +199,8 @@ def repair_review(review, transcript, meta, owner_aliases=()):
     the transcript, or an action without a commitment phrase, is dropped; an owner the transcript does not
     support becomes "unknown" (待确认); a due date without matching words is cleared. Returns (review, notes)."""
     notes, seen = [], set()
+    for name in ("decisions", "requirements", "open_questions", "waiting", "actions"):
+        setattr(review, name, [snap(e, transcript) for e in getattr(review, name)])
     def grounded(entry):
         return entry.reference in transcript and entry.quote in entry.reference and entry.timestamp in entry.reference
     waits = []
@@ -347,6 +391,13 @@ def publish(config, client, state, review):
     queue.done(review.meeting_id,receipt)
     from . import activity
     activity.log(client.root,"detect",f"会议「{meta.get('topic') or '会议'}」提取完成："+(f"新增 {len(task_ids)} 件" if task_ids else "没有新待办"))
+    dropped=[n for n in (state.get("meeting-repairs:"+review.meeting_id) or []) if n.startswith("去掉")]
+    if dropped:  # never lose what the AI found without saying so
+        from . import inbox
+        inbox.add(client.root,"meeting-dropped:"+review.meeting_id,
+                  f"⚠ 会议「{meta.get('topic') or '会议'}」有内容被校验拦掉了，可能漏了待办\n"+"\n".join(dropped[:8])
+                  +"\n原话和逐字稿对不上才会被拦。要找回，把会议名发给维护心响的 AI 看一下。",kind="system")
+        activity.log(client.root,"error",f"会议「{meta.get('topic') or '会议'}」校验拦掉了 {len(dropped)} 处内容",detail="；".join(dropped),status="failed")
     try:  # 经历层: what was decided, asked, required and left waiting, with the words (and old waiting topics come back)
         from . import memory
         memory.record_meeting(client.root,review,meta)
@@ -397,6 +448,8 @@ def main(argv=None):
                 review,repaired=repair_review(review,transcript,meta,config.owner_aliases)
                 if repaired:
                     args.review.write_text(review.model_dump_json(indent=1))
+                    key="meeting-repairs:"+review.meeting_id
+                    state.set(key,list(dict.fromkeys([*(state.get(key) or []),*repaired])))
                 validate_review(review,transcript,meta,config.owner_aliases)
                 if args.command=="validate":
                     result={"ok":True,"actions":len(kept_actions(review)),"dropped_low_confidence":len(review.actions)-len(kept_actions(review)),
