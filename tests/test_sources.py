@@ -280,16 +280,45 @@ class SlackSourceTests(unittest.TestCase):
         self.assertEqual(state.get("slack:search-cursor"), found[0]["ts"])
         self.assertEqual(slack.poll(config, root, state, now, api=api)["candidates"], 0)  # nothing new since the cursor
 
+    def test_followups_after_a_slack_item_are_read_from_slack(self):
+        from datetime import datetime
+        from types import SimpleNamespace
+        from agent_matrix.background import after_context
+        from agent_matrix.timeutil import TZ
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "Richmond"}}}
+            self.assertEqual(p["channel"], "D1")
+            return {"messages": [{"ts": "1795000500.000200", "user": "UME", "text": "合同确认好了"},
+                                 {"ts": "1795000000.000100", "user": "UR", "text": "麻烦你周五前确认一下合同"}]}
+        from agent_matrix.sources import slack
+        client = SimpleNamespace(config=Config(slack_token="xoxp-1"))
+        row = {"来源链接": "https://acme.slack.com/archives/D1/p1795000000000100", "原话引用": "", "创建时间": ""}
+        orig = slack.history
+        try:
+            slack.history = lambda config, ch, oldest, latest=None: orig(config, ch, oldest, latest, api=api)
+            later = after_context(client, row, datetime.now(TZ))
+        finally:
+            slack.history = orig
+        self.assertEqual(len(later), 1)  # the request itself is not "after"
+        self.assertTrue(later[0].endswith("本人] 合同确认好了"))
+
     def test_connect_saves_token_and_shows_identity_without_the_token(self):
         from agent_matrix import app
         from agent_matrix.config import load
         from agent_matrix.sources import slack
         root = Path(tempfile.mkdtemp())
-        api = lambda tok, method, **p: {"user_id": "UME", "user": "wang", "team": "Acme", "url": "https://acme.slack.com/"}
+        api = lambda tok, method, **p: ({"user": {"real_name": "王小明", "profile": {"real_name": "王小明", "display_name": "小明"}}}
+                                        if method == "users.info" else
+                                        {"user_id": "UME", "user": "wang", "team": "Acme", "url": "https://acme.slack.com/"})
         with self.assertRaises(MatrixError):
             slack.connect(root, "xoxb-bot-token", api=api)            # bot tokens can't read as the owner
         who = slack.connect(root, " xoxp-1234-abcd ", api=api)
-        self.assertEqual(load(root / "config.yaml").slack_token, "xoxp-1234-abcd")
+        saved = load(root / "config.yaml")
+        self.assertEqual(saved.slack_token, "xoxp-1234-abcd")
+        self.assertEqual((saved.owner_name, saved.owner_aliases), ("王小明", ["小明"]))  # "you" in Slack is recognised
         shown = app.system_info(root)["slack"]
         self.assertEqual((shown["team"], shown["tail"]), ("Acme", "abcd"))
         self.assertNotIn("xoxp", json.dumps(shown) + json.dumps(who))

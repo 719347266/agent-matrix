@@ -36,6 +36,64 @@ def permalink(base, channel, ts):
     return f"{base.rstrip('/')}/archives/{channel}/p{ts.replace('.', '')}"
 
 
+def _names(api, tok):
+    people = {}
+
+    def who(uid):
+        if uid not in people:
+            u = api(tok, "users.info", user=uid).get("user") or {}
+            people[uid] = (u.get("profile") or {}).get("display_name") or u.get("real_name") or u.get("name") or uid
+        return people[uid]
+    return who
+
+
+def learn_name(root, config, api, tok, uid):
+    """No owner name yet: take it from the Slack profile, so "you" in a message is recognised as the owner."""
+    from ..config import load, save
+    path = root / "config.yaml"
+    if config.owner_name or not path.exists():
+        return
+    u = api(tok, "users.info", user=uid).get("user") or {}
+    p = u.get("profile") or {}
+    names = list(dict.fromkeys(x.strip() for x in (p.get("real_name") or u.get("real_name"), p.get("display_name"), u.get("name"))
+                               if x and x.strip()))
+    if not names:
+        return
+    saved = load(path)
+    if not saved.owner_name:
+        saved.owner_name = names[0]
+        saved.owner_aliases = list(dict.fromkeys([*saved.owner_aliases, *names[1:]]))
+        save(path, saved)
+    config.owner_name, config.owner_aliases = saved.owner_name, saved.owner_aliases
+
+
+def link_parts(link):
+    """Slack permalink → (channel, ts), or None."""
+    m = re.search(r"slack\.com/archives/([A-Z0-9]+)/p(\d{10})(\d{6})", link or "")
+    return (m.group(1), f"{m.group(2)}.{m.group(3)}") if m else None
+
+
+def history(config, channel, oldest, latest=None, *, api=call, limit=50):
+    """[(ts, who, text)] of one conversation after `oldest` (and before `latest`), oldest first; [] if unreadable.
+    ponytail: top-level messages only; thread replies need conversations.replies, add when requests live in threads."""
+    tok = token(config)
+    if not tok:
+        return []
+    try:
+        me = api(tok, "auth.test")["user_id"]
+        who = _names(api, tok)
+        msgs = api(tok, "conversations.history", channel=channel, oldest=oldest, latest=latest, limit=limit).get("messages") or []
+        out = []
+        for m in sorted(msgs, key=lambda m: float(m["ts"])):
+            if m.get("subtype") or not m.get("user") or not m.get("text"):
+                continue
+            text = re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), m["text"])
+            out.append((m["ts"], "本人" if m["user"] == me else who(m["user"]), " ".join(text.split())))
+        return out
+    except (MatrixError, OSError, KeyError):
+        return []
+
+
 def _searched(api, tok, oldest, who):
     """Every message the owner can see since `oldest`, newest pages first: one or two calls instead of one per
     conversation. Needs the search:read scope; raises MatrixError(missing_scope) without it."""
@@ -86,15 +144,10 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
     table(state)
     me = api(tok, "auth.test")
     my_id, base = me["user_id"], me["url"]
+    learn_name(root, config, api, tok, my_id)
     me_tag = "@" + (config.owner_name or "我")
     names = owner_words(config) | {me_tag}  # a Slack @mention of the owner counts even without owner_name
-    people = {}
-
-    def who(uid):
-        if uid not in people:
-            u = api(tok, "users.info", user=uid).get("user") or {}
-            people[uid] = (u.get("profile") or {}).get("display_name") or u.get("real_name") or u.get("name") or uid
-        return people[uid]
+    who = _names(api, tok)
 
     oldest = state.get("slack:search-cursor") or str((now - timedelta(hours=since_hours)).timestamp())
     try:
@@ -177,6 +230,7 @@ def connect(root, tok, *, api=call):
     config = load(path)
     config.slack_token = tok
     save(path, config)
+    learn_name(root, config, api, tok, me["user_id"])
     who = {"team": me.get("team"), "user": me.get("user"), "url": me.get("url"), "tail": tok[-4:]}
     state = State(root / "state/state.db")
     try:
