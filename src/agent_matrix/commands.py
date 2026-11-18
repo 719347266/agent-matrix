@@ -183,13 +183,15 @@ def run_action(root, payload, request_id, progress):
             text = payload["text"]
             if payload["kind"] == "say":
                 row = next((r for r in _snapshot(root).get("rows", []) if int(r.get("编号") or 0) == payload["n"]), None)
-                if row and row.get("状态") in {"完成", "取消"}:
+                status = (row.get("状态") or [None])[0] if row and isinstance(row.get("状态"), list) else (row or {}).get("状态")
+                if row and status == "取消":
                     key = "app-say:" + request_id
                     if not state.get(key):
                         thread.add(root, row["record_id"], "me", "feedback", text)
                         state.set(key, True)
-                    return {"ok": True, "reply": f"#{payload['n']} 已记进对话，事项保持关闭"}
-                text = f"{payload['n']} + {text}"
+                    return {"ok": True, "reply": f"#{payload['n']} 已记进对话；这件事标为不做，要接着做先点「恢复」"}
+                # On a finished item, what the owner says reopens it: the AI picks up the same conversation.
+                text = f"{payload['n']} 改 {text}" if status == "完成" else f"{payload['n']} + {text}"
             ops, problems = parse(text, datetime.now(TZ).date())
             applier = Applier(config, client, state, source="cindy", message_ref="app-" + request_id,
                               immediate=True, progress=progress)

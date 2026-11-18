@@ -73,6 +73,8 @@ def parse_date(text, today):
 VERBS = [
     (r"(过|通过|可以|ok|OK|好的?)", "approve"),
     (r"(退|退回|打回)\s*[:：]?\s*(.*)", "reject"),
+    # "62 改 换成蓝色": back to the AI in the same conversation, even after it was finished (改到/改成 a date is a reschedule)
+    (r"(?:让\s*(?:AI|ai)\s*)?(?:再改|重改|修改|调整|改)(?![到成])\s*[:：]?\s*(.+)", "revise"),
     (r"(?:合并到|并入|并到|和|跟|同)\s*#?(\d{1,5})(?:\s*(?:是)?同一件(?:事)?)?", "merge"),
     (r"(不重复|不是重复|不是同一件(?:事)?|不一样)", "distinct"),
     (r"(?:完成|做完了?|搞定|done)?\s*[，,]?\s*(无交付|不需要交付|不用交付|没有交付|无文件|不用文件|没有文件)", "no_deliverable"),
@@ -117,7 +119,7 @@ def parse(text, today):
         for pattern, verb in VERBS:
             found = re.fullmatch(pattern, rest)
             if found:
-                arg = found.group(found.lastindex) if verb in {"reject", "delegate", "option", "material", "merge"} else ""
+                arg = found.group(found.lastindex) if verb in {"reject", "revise", "delegate", "option", "material", "merge"} else ""
                 if verb == "reject" and not arg.strip():
                     problems.append(f"#{numbers[0]} 退回的话，要改哪里？例如：{numbers[0]} 退 少了定价")
                     break
@@ -126,7 +128,7 @@ def parse(text, today):
         else:
             # "3个会都开完了" is chat; only a #-prefixed or short reply gets a question back.
             if hashed or len(rest) <= 6:
-                problems.append(f"没看懂「{raw}」。可回：过 / 退 意见 / 完成 / 周五 / 不做 / 我来 / AI做 / AI备 / 先做 / 继续 / 展开")
+                problems.append(f"没看懂「{raw}」。可回：过 / 退 意见 / 改 要求 / 完成 / 周五 / 不做 / 我来 / AI做 / AI备 / 先做 / 继续 / 展开")
     return ops, problems
 
 
@@ -182,7 +184,7 @@ class Applier:
     def write(self, row, patch, op, n):
         receipt = self.gateway.update(row, patch, self.key(op, n), f"reply:{self.source}:{self.ref}")
         # What the owner says about an item goes into its notebook, so whoever works on it next sees it.
-        said = {"reject": "本人退回：", "material": "本人补充：", "reschedule": "本人改期到 ", "delegate": "本人交给 "}.get(op.verb)
+        said = {"reject": "本人退回：", "revise": "本人要改：", "material": "本人补充：", "reschedule": "本人改期到 ", "delegate": "本人交给 "}.get(op.verb)
         if said and self.client is not None:
             try:
                 from .prework import add_note
@@ -239,6 +241,15 @@ class Applier:
                 from .thread import forget_judgment
                 forget_judgment(self.client.root, row["record_id"])
             return f"#{n} {name} → 恢复了，回到「新进来」等你定 ✓"
+        if op.verb == "revise":
+            if st == "取消":
+                return f"#{n} {name} 已经标为不做。要接着做，先点「恢复」。"
+            patch = {"状态": ["进行中"], "执行方": ["AI"], "进度": "按意见修改", "卡点": None,
+                     "退回意见": _append(row.get("退回意见"), f"{self.now:%m-%d} {op.arg}")}
+            if st in {"完成", "待验收"}:
+                patch.update({"验收结果": ["退回"], "完成时间": None})
+            self.write(row, patch, op, n)
+            return f"#{n} {name} → AI 在原来的对话里接着改，改好出新版本 ✓"
         if st == "取消" and op.verb == "cancel":
             return f"#{n} {name} 已经标为不做 ✓" + self.stop_ai(row)
         if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete"}:
@@ -521,7 +532,7 @@ def find_deliverable(client, config, title, now, days=21):
     return {"title": scored[0][3], "url": scored[0][4]}
 
 
-WAKE_WORKER = {"material", "reject", "ai", "first", "resume", "prep"}
+WAKE_WORKER = {"material", "reject", "revise", "ai", "first", "resume", "prep"}
 
 
 def handle(config, client, state, text, *, source, message_ref):

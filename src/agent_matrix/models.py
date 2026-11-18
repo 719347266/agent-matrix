@@ -28,7 +28,13 @@ class Config(BaseModel):
     prework_lead_days: int = Field(default=2, ge=1, le=2)
     # Real-time sources (see listen.py): chats are read as the owner and pre-filtered by code.
     chat_watch_enabled: bool = True
-    chat_review_times: list[str] = Field(default_factory=lambda: ["11:30", "14:30", "17:30", "20:30"])
+    chat_review_times: list[str] = Field(default_factory=lambda: ["11:30", "14:30", "17:30", "20:30"])  # legacy, unused
+    # When chat lines go to the AI (see chat_review.ready): @you or urgent at once; otherwise when this many
+    # lines wait, or the oldest waited this long; outside these hours only the urgent ones.
+    chat_extract_batch: int = Field(default=3, ge=1, le=50)
+    chat_extract_wait_minutes: int = Field(default=30, ge=5, le=240)
+    chat_extract_from: str = "08:30"
+    chat_extract_until: str = "22:00"
     feishu_tasks_enabled: bool = True
     # Words too common in meeting titles to link items by topic, e.g. the company name.
     topic_stopwords: list[str] = Field(default_factory=list)

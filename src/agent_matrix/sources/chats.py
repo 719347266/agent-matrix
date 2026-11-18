@@ -45,16 +45,22 @@ def _text(message):
     return " ".join(str(body or "").split())
 
 
-def classify(text, *, from_owner, chat_mode, names):
+def classify(text, *, from_owner, chat_mode, names, mentioned=False):
     """Which kind of candidate this line is, or None to drop it."""
+    if from_owner:
+        return "我的承诺" if len(text) >= 6 and COMMIT.search(text) else None
+    if mentioned:  # @you in a group: always worth a look, however short ("@你 人生模拟器反馈")
+        return "@你" if len(re.sub(r"@\S+", "", text).strip()) >= 2 else None
     if len(text) < 6:
         return None
-    if from_owner:
-        return "我的承诺" if COMMIT.search(text) else None
     to_owner = chat_mode == "p2p" or any(w in text for w in names)
-    if to_owner and (ASK.search(text) or WHEN.search(text)):
+    if to_owner and (ASK.search(text) or WHEN.search(text) or (chat_mode == "p2p" and re.search(r"[?？]", text))):
         return "找你的"
     return None
+
+
+def mentions_owner(message, owner_open_id):
+    return any(m.get("id") == owner_open_id for m in message.get("mentions") or [] if isinstance(m, dict))
 
 
 def poll(config, client, state, now, *, skip_chat_ids=()):
@@ -82,7 +88,8 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
                 continue
             scanned += 1
             from_owner = sender.get("id") == config.owner_open_id
-            kind = classify(text, from_owner=from_owner, chat_mode=chat.get("chat_mode"), names=names)
+            kind = classify(text, from_owner=from_owner, chat_mode=chat.get("chat_mode"), names=names,
+                            mentioned=not from_owner and mentions_owner(m, config.owner_open_id))
             if kind:
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
                     m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
@@ -94,7 +101,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         state.set(cursor_key, now.isoformat())
     if kept:
         from .. import activity
-        activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话，到下一个整理时间（{'、'.join(config.chat_review_times)}）统一提取")
+        activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话：@你或带时间、催办的马上提取，其余攒够几条或等满 {config.chat_extract_wait_minutes} 分钟一起提取")
     state.set("chats:last-poll", now.isoformat())
     return {"chats": len(chats), "messages_scanned": scanned, "candidates": kept}
 

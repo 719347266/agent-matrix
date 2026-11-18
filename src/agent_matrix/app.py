@@ -101,7 +101,8 @@ def build_state(root):
                 "summary": r.get("预做结果摘要"), "quote": _clean(r.get("原话引用")), "source": r.get("来源"),
                 "source_url": _url(r.get("来源链接")), "criterion": r.get("完成标准"), "extra": r.get("补充材料"),
                 "rejected": r.get("退回意见"), "parent": n_of.get(parent), "next": r.get("下一步动作"),
-                "finished": _day(r.get("完成时间")), "hidden": bool(r.get("排除本人提醒"))}
+                "finished": _day(r.get("完成时间")), "hidden": bool(r.get("排除本人提醒")),
+                "updated": str(r.get("更新时间") or "")[:19], "created": str(r.get("创建时间") or "")[:19]}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -131,7 +132,8 @@ def build_state(root):
               "last": {"n": _num(last.get("n")), "title": last.get("title"), "outcome": last.get("outcome"), "text": last.get("text"),
                        "time": str(last.get("at", ""))[11:16]} if last else None}
     box = [{"id": m["id"], "time": m["time"] if m["day"] == datetime.now(TZ).date().isoformat() else m["day"][5:] + " " + m["time"],
-            "title": m["title"], "text": m["summary"], "kind": m["kind"], "n": (m["refs"] or [None])[0], "read": m["read"]}
+            "title": m["title"], "text": m["summary"], "kind": m["kind"], "n": (m["refs"] or [None])[0], "refs": m["refs"] or [],
+            "at": str(m.get("at") or "")[:19], "read": m["read"]}
            for m in inbox.messages(root, 150)]
     judged = {n_of[rid]: j for rid, j in thread.judgments(root).items() if n_of.get(rid)}
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),

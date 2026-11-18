@@ -9,7 +9,7 @@ Same strict rules as meetings: a task needs the exact words of commitment, the o
 be the sender or be named in the line, dates only when written. No task → no message.
 """
 import argparse
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from hashlib import sha1, sha256
 import json
 from pathlib import Path
@@ -63,18 +63,50 @@ def due_slot(config, state, now):
     return None if state.get("chat-review:slot:" + slot) else slot
 
 
+URGENT = re.compile(r"今天|今晚|马上|立刻|立即|尽快|赶紧|抓紧|急|现在|等下|一会|待会|asap|ASAP|\d{1,2}[:：点]")
+
+
+def _sent(message, now):
+    try:
+        at = datetime.fromisoformat(str(message.get("sent_at") or "").replace(" ", "T"))
+        return at if at.tzinfo else at.replace(tzinfo=TZ)
+    except ValueError:
+        return now
+
+
+def ready(config, waiting, now):
+    """When the waiting chat lines go to the AI. Chats are read every 10 minutes; each extraction costs a model
+    call, so it runs only when there is something worth it:
+        @you, or someone asks you with a time or a push (今天 / 尽快 / 3点)  → at once
+        otherwise: enough lines have piled up, or the oldest has waited long enough
+        late at night only the urgent ones run; the rest wait for the morning
+    Returns why it should run now, or None."""
+    if not waiting:
+        return None
+    urgent = [m for m in waiting if m.get("kind") == "@你" or (m.get("kind") == "找你的" and URGENT.search(m.get("text") or ""))]
+    if urgent:
+        return f"有 {len(urgent)} 条 @你、带时间或催办，马上提取"
+    hour = now.strftime("%H:%M")
+    if hour < config.chat_extract_from or hour >= config.chat_extract_until:
+        return None
+    if len(waiting) >= config.chat_extract_batch:
+        return f"攒够 {len(waiting)} 条"
+    oldest = min(_sent(m, now) for m in waiting)
+    if now - oldest >= timedelta(minutes=config.chat_extract_wait_minutes):
+        return f"最早一条已经等了 {config.chat_extract_wait_minutes} 分钟"
+    return None
+
+
 def check(config, state, now):
     open_batch = state.get("chat-review:open")
     if open_batch:
         return {"ok": True, "run_model": True, "reason": "batch_open", "batch": open_batch}
     waiting = chats.pending(state)
-    slot = due_slot(config, state, now)
-    if waiting and slot:
-        return {"ok": True, "run_model": True, "reason": "batch_due", "candidates": len(waiting), "slot": slot,
+    why = ready(config, waiting, now)
+    if why:
+        return {"ok": True, "run_model": True, "reason": "batch_due", "why": why, "candidates": len(waiting),
                 "instruction": "按 prompts/chat_extract.md 处理：先 chat_review prepare，再写 review.json，validate 后 publish。"}
-    if slot and not waiting:
-        state.set("chat-review:slot:" + slot, "empty")
-    return {"ok": True, "run_model": False, "reason": "idle", "candidates": len(waiting)}
+    return {"ok": True, "run_model": False, "reason": "waiting" if waiting else "idle", "candidates": len(waiting)}
 
 
 def prepare(config, state, root, now):
