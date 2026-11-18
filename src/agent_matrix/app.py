@@ -89,6 +89,8 @@ def build_state(root):
     rows = snap.get("rows") or []
     n_of = {r.get("record_id"): _num(r.get("编号")) for r in rows}
     history = thread.history(root)
+    from .reply_timing import measure
+    timings, timing_summary = measure(history, datetime.now(TZ))
     closures = thread.closures(root)
     try:
         from . import sessions as ai_sessions
@@ -110,7 +112,7 @@ def build_state(root):
                 "finished": _day(r.get("完成时间")), "hidden": bool(r.get("排除本人提醒")),
                 "updated": str(r.get("更新时间") or "")[:19], "created": str(r.get("创建时间") or "")[:19],
                 "finished_at": str(r.get("完成时间") or "")[:16].replace("T", " "),
-                "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], [])}
+                "reply_timing": timings.get(r["record_id"]), "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], [])}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -152,7 +154,7 @@ def build_state(root):
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
                 "engine": thread.setting(root, "engine", "codex")}
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
-            "settings": settings, "judgments": judged,
+            "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,

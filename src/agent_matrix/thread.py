@@ -91,6 +91,8 @@ def classify(text):
     """Notebook line → (sender, kind, text, url): who said it and what kind of line it is."""
     t = str(text or "").strip()
     url = (URL.search(t) or [None])[0] if URL.search(t) else None
+    if t.startswith("本人要改："):
+        return "me", "feedback", t.removeprefix("本人要改："), None
     if t.startswith(("本人补充：", "本人退回：")):
         return "me", "feedback", ("退回：" if t.startswith("本人退回") else "") + t.split("：", 1)[1], None
     if t.startswith(("本人改期到", "本人交给")):
@@ -157,10 +159,13 @@ def history(root, record_ids=None):
                 return {}
             q, args = f" WHERE record_id IN ({','.join('?' * len(ids))})", tuple(ids)
         out = {}
-        for rid, at, sender, kind, text, url, driver in db.execute(
-                "SELECT record_id, at, sender, kind, text, url, driver FROM messages" + q + " ORDER BY at, id", args):
+        for rid, at, sender, kind, text, url, driver, dedupe in db.execute(
+                "SELECT record_id, at, sender, kind, text, url, driver, dedupe FROM messages" + q + " ORDER BY at, id", args):
+            if sender == "ai" and kind == "say" and (dedupe or "").startswith("note:") and text.startswith("本人要改："):
+                sender, kind, text, url = classify(text)
+                driver = None
             out.setdefault(rid, {"messages": [], "deliverables": []})["messages"].append(
-                {"at": at[5:16].replace("T", " "), "from": sender, "kind": kind, "text": text, "url": url, "driver": driver})
+                {"at": at[5:16].replace("T", " "), "iso_at": at, "from": sender, "kind": kind, "text": text, "url": url, "driver": driver})
         for rid, version, at, summary, url, confirm, assumptions, sources in db.execute(
                 "SELECT record_id, version, at, summary, url, confirm, assumptions, sources FROM deliverables" + q + " ORDER BY version", args):
             out.setdefault(rid, {"messages": [], "deliverables": []})["deliverables"].append(

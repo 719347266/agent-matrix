@@ -758,10 +758,32 @@ function closedText(i){
   if(c) return `${esc(String(c.at).slice(5,16).replace("T"," ").replace("-","/"))}，${esc(c.by)}${esc(c.how||"")}`;
   return i.finished_at?`${esc(i.finished_at.slice(5).replace("-","/"))}，完成人没有记录`:"完成人没有记录";
 }
+function durationLabel(seconds){
+  if(!Number.isFinite(seconds)||seconds<0) return "";
+  if(seconds<60) return "不到 1 分钟";
+  const minutes=Math.floor(seconds/60);
+  if(minutes<60) return minutes+" 分钟";
+  if(minutes<1440) return Math.floor(minutes/60)+" 小时"+(minutes%60?" "+minutes%60+" 分钟":"");
+  return Math.floor(minutes/1440)+" 天"+(Math.floor(minutes%1440/60)?" "+Math.floor(minutes%1440/60)+" 小时":"");
+}
+function replyTimingLine(t,done){
+  const sent=Date.parse(t.sent_at), taken=Date.parse(t.pickup_at), end=done?Date.parse(t.reply_at):Date.now();
+  const total=durationLabel((end-sent)/1000); if(!total) return "";
+  const parts=[done?"从留言到首次回复或交付："+total:"留言已等 "+total];
+  if(Number.isFinite(taken)&&sent<=taken&&taken<=end){
+    parts.push("首次处理记录距留言 "+durationLabel((taken-sent)/1000));
+  }
+  const summary=D.reply_timing_summary;
+  const ref=summary?.replies?`<details><summary>近 ${Number(summary.days)} 天的记录</summary>${Number(summary.replies)} 轮有回复，耗时中位数 ${(summary.median_reply_seconds/60).toFixed(1)} 分钟。${summary.pickups?`其中 ${Number(summary.pickups)} 轮有处理记录，首次处理距留言的中位数为 ${(summary.median_pickup_seconds/60).toFixed(1)} 分钟。`:""}</details>`:"";
+  return `<div class="${done?"reply-state":"reply-timing"}">${parts.join("；")}。${ref}</div>`;
+}
 function replyState(i){
   const th=D.threads[i.n]||[]; let k=-1;
   th.forEach((m,x)=>{ if(m.from==="me"&&m.kind!=="note") k=x; });
+  const t=i.reply_timing;
+  if(t?.reply_at) return replyTimingLine(t,true);
   if(k<0||["完成","取消"].includes(i.status)) return "";
+  if(Object.hasOwn(i,"reply_timing")&&!t) return "";
   if(th.slice(k+1).some(m=>m.kind==="deliver"||(m.from==="ai"&&["say","ask"].includes(m.kind)))) return "";
   let text, tone="";
   if(i.who!=="AI") text="已记为补充材料。这件事没有交给 AI，不会产生回复。";
@@ -770,7 +792,8 @@ function replyState(i){
   else if(i.status==="待确认") text="执行方或任务信息还待确认，尚未开工。";
   else if(D.settings?.builtin_driver===false) { text="本机 AI 已关闭，等待外部 AI 领取。"; tone="amber"; }
   else { const q=(D.worker&&D.worker.queue)||[], pos=q.indexOf(i.n); text=pos>=0?"已排队，前面有 "+pos+" 件。":"已记录，尚未收到 AI 接手回执。"; tone="amber"; }
-  return `<div class="reply-state ${tone}">${text}</div>`;
+  const expects=i.who==="AI" && i.status!=="待确认";
+  return `<div class="reply-state ${tone}">${text}${expects&&t?replyTimingLine(t,false):""}</div>`;
 }
 function sessionControl(s, css, label){
   if(!s.can_open) return "";
