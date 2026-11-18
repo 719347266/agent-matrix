@@ -114,7 +114,7 @@ def _slack(client, link, start, end=None):
     parts = slack.link_parts(link)
     if not parts or client is None:
         return None
-    lines = slack.history(client.config, parts[0], str(start.timestamp()), str(end.timestamp()) if end else None)
+    lines = slack.history(client.config, parts[0], str(start.timestamp()), str(end.timestamp()) if end else None, thread=parts[2])
     return [(float(ts), f"[{datetime.fromtimestamp(float(ts), start.tzinfo):%m-%d %H:%M} {who}] {text[:400]}")
             for ts, who, text in lines]
 
@@ -298,7 +298,7 @@ def after_context(client, row, now, limit=15):
     from .sources import slack
     if parts := slack.link_parts(_one(row.get("来源链接"))):  # Slack: everything after the message itself
         said = float(parts[1])
-        return [line[:230] for ts, line in _slack(client, _one(row.get("来源链接")), datetime.fromtimestamp(said, now.tzinfo))
+        return [line[:230] for ts, line in _slack(client, _one(row.get("来源链接")), datetime.fromtimestamp(said - 1, now.tzinfo))
                 if ts > said][:limit]
     cid = _chat_id(row)
     try:
@@ -343,14 +343,16 @@ def add_followups(client, candidates, now, per_message=10):
     for cid, msgs in by_chat.items():
         if not cid:
             continue
-        slack_link = next((m["message_id"] for m in msgs if slack.link_parts(str(m.get("message_id")))), None)
-        if slack_link:
-            sent = {m["message_id"]: float(slack.link_parts(m["message_id"])[1]) for m in msgs if slack.link_parts(str(m.get("message_id")))}
-            first = datetime.fromtimestamp(min(sent.values()) - 1, now.tzinfo)
-            later = _slack(client, slack_link, first) or []
-            for m in msgs:
-                at = sent.get(m.get("message_id"), 0)
-                m["after"] = [line for ts, line in later if ts > at][:per_message]
+        slack_msgs = [(m, slack.link_parts(str(m.get("message_id")))) for m in msgs]
+        if any(parts for _, parts in slack_msgs):
+            later = {}  # one read per thread (None = the channel itself, with its threads)
+            for m, parts in slack_msgs:
+                if not parts:
+                    continue
+                if parts[2] not in later:
+                    first = min(float(p[1]) for _, p in slack_msgs if p and p[2] == parts[2])
+                    later[parts[2]] = _slack(client, m["message_id"], datetime.fromtimestamp(first - 1, now.tzinfo)) or []
+                m["after"] = [line for ts, line in later[parts[2]] if ts > float(parts[1])][:per_message]
             continue
         start = min(_stamp(m.get("sent_at")) for m in msgs) or _stamp((now - timedelta(days=1)).isoformat())
         try:

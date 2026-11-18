@@ -298,12 +298,46 @@ class SlackSourceTests(unittest.TestCase):
         row = {"来源链接": "https://acme.slack.com/archives/D1/p1795000000000100", "原话引用": "", "创建时间": ""}
         orig = slack.history
         try:
-            slack.history = lambda config, ch, oldest, latest=None: orig(config, ch, oldest, latest, api=api)
+            slack.history = lambda config, ch, oldest, latest=None, thread=None: orig(config, ch, oldest, latest, thread=thread, api=api)
             later = after_context(client, row, datetime.now(TZ))
         finally:
             slack.history = orig
         self.assertEqual(len(later), 1)  # the request itself is not "after"
         self.assertTrue(later[0].endswith("本人] 合同确认好了"))
+
+    def test_followups_include_thread_replies(self):
+        from agent_matrix.background import after_context
+        from agent_matrix.sources import slack
+        from agent_matrix.timeutil import TZ
+        asked = "1795000000.000100"
+        calls = []
+        def api(tok, method, **p):
+            calls.append(method)
+            if method == "auth.test":
+                return {"user_id": "UME"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "Richmond"}}}
+            if method == "conversations.history":
+                return {"messages": [{"ts": asked, "user": "UR", "text": "麻烦确认合同", "reply_count": 1, "latest_reply": "1795000900.000000"}]}
+            self.assertEqual(p["ts"], asked)
+            return {"messages": [{"ts": asked, "user": "UR", "text": "麻烦确认合同", "thread_ts": asked},
+                                 {"ts": "1795000900.000000", "user": "UME", "text": "已确认", "thread_ts": asked}]}
+        orig = slack.history
+        slack.history = lambda config, ch, oldest, latest=None, thread=None: orig(config, ch, oldest, latest, thread=thread, api=api)
+        try:
+            client = SimpleNamespace(config=Config(slack_token="xoxp-1"))
+            # The request is a channel message; the owner answered in its thread.
+            later = after_context(client, {"来源链接": f"https://acme.slack.com/archives/C1/p{asked.replace('.', '')}"}, datetime.now(TZ))
+            self.assertEqual([x.split("] ")[1] for x in later], ["↳ 已确认"])
+            # The request itself sits in a thread: read that thread.
+            calls.clear()
+            link = slack.permalink("https://acme.slack.com/", "C1", "1794999000.000001", asked)
+            self.assertEqual(slack.link_parts(link), ("C1", "1794999000.000001", asked))
+            later = after_context(client, {"来源链接": link}, datetime.now(TZ))
+            self.assertNotIn("conversations.history", calls)
+            self.assertEqual([x.split("] ")[1] for x in later], ["麻烦确认合同", "已确认"])
+        finally:
+            slack.history = orig
 
     def test_connect_saves_token_and_shows_identity_without_the_token(self):
         from agent_matrix import app

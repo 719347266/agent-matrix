@@ -32,8 +32,15 @@ def call(tok, method, **params):
     return data
 
 
-def permalink(base, channel, ts):
-    return f"{base.rstrip('/')}/archives/{channel}/p{ts.replace('.', '')}"
+def permalink(base, channel, ts, thread=None):
+    link = f"{base.rstrip('/')}/archives/{channel}/p{ts.replace('.', '')}"
+    return link + f"?thread_ts={thread}&cid={channel}" if thread and thread != ts else link
+
+
+def _thread(m):
+    """The thread a message replies in (search results only carry it inside their permalink)."""
+    found = re.search(r"thread_ts=(\d+\.\d+)", m.get("permalink") or "")
+    return m.get("thread_ts") or (found.group(1) if found else None)
 
 
 def _names(api, tok):
@@ -68,28 +75,40 @@ def learn_name(root, config, api, tok, uid):
 
 
 def link_parts(link):
-    """Slack permalink → (channel, ts), or None."""
-    m = re.search(r"slack\.com/archives/([A-Z0-9]+)/p(\d{10})(\d{6})", link or "")
-    return (m.group(1), f"{m.group(2)}.{m.group(3)}") if m else None
+    """Slack permalink → (channel, ts, thread_ts or None), or None."""
+    m = re.search(r"slack\.com/archives/([A-Z0-9]+)/p(\d{10})(\d{6})(?:\?.*?thread_ts=(\d+\.\d+))?", link or "")
+    return (m.group(1), f"{m.group(2)}.{m.group(3)}", m.group(4)) if m else None
 
 
-def history(config, channel, oldest, latest=None, *, api=call, limit=50):
+MAX_THREADS = 10
+
+
+def history(config, channel, oldest, latest=None, *, thread=None, api=call, limit=50):
     """[(ts, who, text)] of one conversation after `oldest` (and before `latest`), oldest first; [] if unreadable.
-    ponytail: top-level messages only; thread replies need conversations.replies, add when requests live in threads."""
+    With `thread`: that thread's replies. Without: the channel, plus replies in its threads (marked ↳)."""
     tok = token(config)
     if not tok:
         return []
     try:
         me = api(tok, "auth.test")["user_id"]
         who = _names(api, tok)
-        msgs = api(tok, "conversations.history", channel=channel, oldest=oldest, latest=latest, limit=limit).get("messages") or []
-        out = []
+        window = {"oldest": oldest, "latest": latest, "limit": limit}
+        if thread:
+            msgs = api(tok, "conversations.replies", channel=channel, ts=thread, **window).get("messages") or []
+        else:
+            msgs = api(tok, "conversations.history", channel=channel, **window).get("messages") or []
+            busy = [m for m in msgs if m.get("reply_count") and float(m.get("latest_reply") or 0) > float(oldest)]
+            for m in busy[:MAX_THREADS]:  # ponytail: newest 10 threads per read; raise if long channels miss replies
+                msgs += api(tok, "conversations.replies", channel=channel, ts=m["ts"], **window).get("messages") or []
+        out, seen = [], set()
         for m in sorted(msgs, key=lambda m: float(m["ts"])):
-            if m.get("subtype") or not m.get("user") or not m.get("text"):
+            if m["ts"] in seen or m.get("subtype") or not m.get("user") or not m.get("text") or float(m["ts"]) <= float(oldest):
                 continue
-            text = re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), m["text"])
-            out.append((m["ts"], "本人" if m["user"] == me else who(m["user"]), " ".join(text.split())))
-        return out
+            seen.add(m["ts"])
+            text = " ".join(re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), m["text"]).split())
+            reply = not thread and m.get("thread_ts") not in (None, m["ts"])
+            out.append((m["ts"], "本人" if m["user"] == me else who(m["user"]), ("↳ " if reply else "") + text))
+        return out[:limit]
     except (MatrixError, OSError, KeyError):
         return []
 
@@ -185,7 +204,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
                 sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
                 # ponytail: the permalink is the message id, so chat_review can link back without a schema change.
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
-                    permalink(base, cid, m["ts"]), cid, cname, mode, m["user"], sender, sent, text[:500],
+                    permalink(base, cid, m["ts"], _thread(m)), cid, cname, mode, m["user"], sender, sent, text[:500],
                     json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
                 kept += 1
             history.append(f"{sender}：{text[:120]}")
