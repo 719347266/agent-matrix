@@ -239,6 +239,14 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
     docs = [d for d in related_docs(client, _one(row.get("标题")), exclude=skip_urls) if d["url"] not in known]
     if docs:
         parts += ["## 可能相关的飞书文档（按标题相近程度排）", *[f"- {d['title']} {d['url']} {d['updated']}" for d in docs], ""]
+    try:  # 记忆层: earlier meetings on the same topic (decisions, open questions, what it was waiting for)
+        from .memory import recall_lines
+        before = recall_lines(root, _one(row.get("标题")) + " " + _one(row.get("下一步动作")), limit=5,
+                              exclude_source_id=_meeting_id(row))
+    except Exception:
+        before = []
+    if before:
+        parts += ["## 这个话题以前讨论过（按相关程度排）", *before, ""]
     similar = related_items(rows, row)
     if similar:
         parts += ["## 以前和现在的同类事项（做过的交付可以直接参考）", *similar, ""]

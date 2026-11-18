@@ -22,11 +22,21 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
         if let text = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixAppURL") as? String,
            let url = URL(string: text), url.scheme == "http",
            ["127.0.0.1", "localhost"].contains(url.host ?? "") { return url }
-        return URL(string: "http://127.0.0.1:8765/")!
+        return URL(string: "http://127.0.0.1:47865/")!
     }
 
-    func show(_ root: String) {
+    func show(_ root: String, item: Int? = nil) {
         clientURL = address(root)
+        let fresh = window == nil || window?.isVisible == false
+        if let item, item > 0, !fresh, let web {
+            // already showing 心响: just open that item, no reload
+            web.evaluateJavaScript("location.hash='item-\(item)'", completionHandler: nil)
+        }
+        if let item, item > 0, fresh, let base = clientURL,
+           var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) {
+            parts.fragment = "item-\(item)"
+            clientURL = parts.url ?? base
+        }
         if window == nil {
             let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: WKWebViewConfiguration())
             web.autoresizingMask = [.width, .height]
@@ -78,7 +88,7 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
     private func recover(_ webView: WKWebView) {
         // Do not leave a blank window when the local service or WebKit restarts.
-        let url = clientURL?.absoluteString ?? "http://127.0.0.1:8765/"
+        let url = clientURL?.absoluteString ?? "http://127.0.0.1:47865/"
         webView.loadHTMLString("""
         <meta name="viewport" content="width=device-width"><style>:root{color-scheme:light dark}body{font:16px -apple-system;padding:32px;line-height:1.8}a{color:inherit}</style>
         <h2>正在重新连接心响</h2><p>你的事项保存在本机和飞书，正在恢复页面。</p><a href="\(url)">重新加载</a>
@@ -94,7 +104,8 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
 }
 
-/// System notifications; clicking one opens 心响. Falls back to a plain notification if not allowed.
+/// Alerts: a macOS notification when the system allows this app to send one; otherwise (an app without a
+/// developer signature is often never registered) 心响 shows its own banner, which always works.
 final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = Notifier()
     let root = Bundle.main.object(forInfoDictionaryKey: "AgentMatrixRoot") as? String ?? ""
@@ -103,21 +114,28 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     func setup() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { ok, _ in self.allowed = ok }
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in
+            center.getNotificationSettings { s in
+                self.allowed = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+            }
+        }
     }
 
-    func post(_ title: String, _ body: String) -> Bool {
-        guard allowed else { return false }
-        let content = UNMutableNotificationContent()
-        content.title = title; content.body = body; content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
-        return true
+    @MainActor func post(_ title: String, _ body: String, item: Int?) {
+        if allowed {
+            let content = UNMutableNotificationContent()
+            content.title = title; content.body = body; content.sound = .default
+            content.userInfo = ["n": item ?? -1]
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        } else {
+            Banner.shared.show(title: title, text: body, item: item, root: root)
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
-        let root = self.root
-        Task { @MainActor in CenterWindow.shared.show(root) }
+        let root = self.root, n = response.notification.request.content.userInfo["n"] as? Int ?? -1
+        Task { @MainActor in CenterWindow.shared.show(root, item: n > 0 ? n : nil) }
         done()
     }
 
@@ -126,6 +144,69 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         done([.banner, .sound])
     }
 }
+
+/// 心响's own notification: a small card at the top right, with a sound; click opens the item.
+@MainActor
+final class Banner {
+    static let shared = Banner()
+    private var panels: [NSPanel] = []
+    private let size = NSSize(width: 360, height: 86)
+
+    func show(title: String, text: String, item: Int?, root: String) {
+        guard let screen = NSScreen.main else { return }
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.nonactivatingPanel, .borderless],
+                            backing: .buffered, defer: false)
+        panel.level = .statusBar; panel.isFloatingPanel = true; panel.hidesOnDeactivate = false
+        panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        let close: () -> Void = { [weak self, weak panel] in if let self, let panel { self.dismiss(panel) } }
+        panel.contentView = NSHostingView(rootView: BannerView(title: title, text: text, open: {
+            CenterWindow.shared.show(root, item: item); close()
+        }, close: close))
+        panels.append(panel)
+        place(screen)
+        panel.orderFrontRegardless()
+        NSSound(named: "Glass")?.play()
+        Task { @MainActor in try? await Task.sleep(for: .seconds(12)); close() }
+    }
+
+    private func dismiss(_ panel: NSPanel) {
+        panel.orderOut(nil)
+        panels.removeAll { $0 === panel }
+        if let screen = NSScreen.main { place(screen) }
+    }
+
+    private func place(_ screen: NSScreen) {
+        let area = screen.visibleFrame, gap: CGFloat = 10
+        for (k, p) in panels.enumerated() {
+            p.setFrameOrigin(NSPoint(x: area.maxX - size.width - gap, y: area.maxY - (size.height + gap) * CGFloat(k + 1)))
+        }
+    }
+}
+
+struct BannerView: View {
+    let title: String; let text: String; let open: () -> Void; let close: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            Button(action: close) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(width: 360, height: 86, alignment: .topLeading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+    }
+}
+
+struct News: Identifiable { let id: Int; let title: String; let body: String; let n: Int?; let time: String; let read: Bool }
 
 struct Item: Identifiable { let id = UUID(); let n: Int; let label: String; let tone: String; let title: String; let note: String; let who: String; let due: String; let reply: String; let url: String?; let cmd: String?; let cmdLabel: String }
 
@@ -140,6 +221,13 @@ final class Monitor: ObservableObject {
     @Published var headline = "读取中…"
     @Published var summary = ""
     @Published var unread = 0
+    // what the one-glance menu shows (主动层)
+    @Published var focusTotal = 0
+    @Published var focusDetail = ""
+    @Published var aiLine = "读取中…"
+    @Published var aiBusy = false
+    @Published var quietLine = ""
+    @Published var recent: [News] = []
     // The AI employee: what it is doing now, what is queued, how the last one ended.
     @Published var workerState = "idle"
     @Published var workerHead = ""
@@ -250,31 +338,34 @@ final class Monitor: ObservableObject {
         if (s["auto_restart_listener"] as? Bool ?? false) && Date().timeIntervalSince(lastRestart) > 300 {
             lastRestart = Date(); restartListener(quiet: true)
         }
-        notifyNew(s["notify"] as? [[String: Any]] ?? [], latest: s["latest_event_id"] as? Int ?? 0)
-    }
-
-    private func notifyNew(_ events: [[String: Any]], latest: Int) {
-        if lastSeen == 0 || latest < lastSeen { lastSeen = latest; UserDefaults.standard.set(latest, forKey: "lastSeenEvent"); return }
-        let fresh = events.filter { ($0["id"] as? Int ?? 0) > lastSeen }.sorted { ($0["id"] as? Int ?? 0) < ($1["id"] as? Int ?? 0) }
-        for e in fresh.prefix(4) {
-            let ok = e["ok"] as? Bool ?? true, kind = e["kind"] as? String ?? "", title = e["title"] as? String ?? ""
-            switch (kind, ok) {
-            case ("send", true): post("心响", title)
-            case ("send", false): post("心响 · 消息没送到", title)
-            case ("prework", _): post("AI 有进展", title)
-            default: if !ok { post("事项中心出了点问题", title) }
-            }
+        let f = s["focus"] as? [String: Any] ?? [:]
+        focusTotal = f["total"] as? Int ?? need.count
+        focusDetail = [("验收", f["review"]), ("AI 问你", f["ask"]), ("定谁来做", f["decide"]), ("其他", f["other"])]
+            .compactMap { label, v in (v as? Int ?? 0) > 0 ? "\(label) \(v as? Int ?? 0)" : nil }.joined(separator: " · ")
+        let ai = s["ai"] as? [String: Any] ?? [:]
+        aiLine = ai["line"] as? String ?? ""; aiBusy = ai["busy"] as? Bool ?? false
+        recent = (s["recent"] as? [[String: Any]] ?? []).map {
+            News(id: $0["id"] as? Int ?? 0, title: $0["title"] as? String ?? "", body: $0["body"] as? String ?? "",
+                 n: $0["n"] as? Int, time: $0["time"] as? String ?? "", read: $0["read"] as? Bool ?? true)
         }
-        if latest > lastSeen { lastSeen = latest; UserDefaults.standard.set(latest, forKey: "lastSeenEvent") }
+        let a = s["alerts"] as? [String: Any] ?? [:]
+        quietLine = (a["quiet"] as? Bool ?? false) ? "\(a["why"] as? String ?? "你在开会")，提醒先攒着，散会后一起给你" : ""
+        notifyAlerts(a)
     }
 
-    private func post(_ title: String, _ body: String) {
-        if Notifier.shared.post(title, body) { return }
-        let esc = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", "display notification \"\(esc(body))\" with title \"\(esc(title))\""]
-        try? p.run()
+    /// Interrupt only for what the 主动层 marked important, never twice, and not while the owner is in a meeting.
+    private func notifyAlerts(_ a: [String: Any]) {
+        let items = (a["items"] as? [[String: Any]] ?? []).sorted { ($0["id"] as? Int ?? 0) < ($1["id"] as? Int ?? 0) }
+        let newest = items.last?["id"] as? Int ?? 0
+        var seen = UserDefaults.standard.integer(forKey: "lastAlertId")
+        if seen == 0 { UserDefaults.standard.set(max(newest, 1), forKey: "lastAlertId"); return }  // first run: no flood of old news
+        if a["quiet"] as? Bool ?? false { return }  // in a meeting: they wait, nothing is lost
+        let fresh = items.filter { ($0["id"] as? Int ?? 0) > seen }
+        for x in fresh.prefix(3) {
+            Notifier.shared.post(x["title"] as? String ?? "心响", x["body"] as? String ?? "", item: x["n"] as? Int)
+        }
+        if fresh.count > 3 { Notifier.shared.post("心响", "还有 \(fresh.count - 3) 条新消息，打开心响看", item: nil) }
+        if let last = fresh.last?["id"] as? Int { seen = last; UserDefaults.standard.set(seen, forKey: "lastAlertId") }
     }
 
     func run(_ label: String, _ args: [String]) {
@@ -316,7 +407,7 @@ final class Monitor: ObservableObject {
         }
     }
 
-    var symbol: String { level == "error" ? "xmark.octagon" : !need.isEmpty ? "tray.full" : level == "warn" ? "exclamationmark.triangle" : "checkmark.circle" }
+    var symbol: String { level == "error" ? "exclamationmark.triangle" : "waveform.path.ecg" }
 }
 
 func toneColor(_ t: String) -> Color {
@@ -369,104 +460,66 @@ struct Panel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Button { CenterWindow.shared.show(m.root) } label: {
-                HStack {
-                    Text("打开心响").font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    if m.unread > 0 { Text("\(m.unread) 条新消息").font(.system(size: 11)) }
-                }.frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent).controlSize(.large)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(m.headline).font(.system(size: 15, weight: .semibold))
-                    Spacer()
-                    Menu {
-                        Button("立即检查一次") { m.run("检查中…", ["agent_matrix.reply", "poll"]) }
-                        Button("给我发条测试消息") { m.run("发送中…", ["agent_matrix.monitor", "--test-send"]) }
-                        Button("给我发张测试卡片（试按钮）") { m.run("发送中…", ["agent_matrix.monitor", "--test-card"]) }
-                        Button("清掉已处理的提示") { m.run("清理中…", ["agent_matrix.monitor", "--clear-resolved", "--json"]) }
-                        Button("重启监听") { m.restartListener() }
-                        Divider()
-                        Button("退出监控") { NSApp.terminate(nil) }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .menuStyle(.borderlessButton).fixedSize()
-                }
-                Text(m.busy.isEmpty ? "\(m.summary) · \(m.updated) 更新" : m.busy).font(.system(size: 11))
-                    .foregroundStyle(m.busy.isEmpty ? Color.secondary : Color.accentColor).lineLimit(3)
-            }
-
-            ForEach(m.problems.filter { $0.level == "error" || $0.level == "warn" }) { p in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text((p.level == "setup" ? "⚙︎ " : "⚠︎ ") + p.title).font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(p.level == "error" ? .red : p.level == "setup" ? .primary : .orange)
-                    Text(p.what).font(.system(size: 11))
-                    Text("系统：" + p.done).font(.system(size: 11)).foregroundStyle(.secondary)
-                    HStack {
-                        if !p.you.isEmpty { Text("你：" + p.you).font(.system(size: 11)) }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(m.focusTotal > 0 ? "\(m.focusTotal) 件等你" : "没有要你处理的 ✓").font(.system(size: 20, weight: .bold))
                         Spacer()
-                        if p.action == "subscribe" && !p.urls.isEmpty { Button("去订阅") { m.perform(p) }.controlSize(.small) }
-                        if p.action == "restart_listener" { Button("重启监听") { m.perform(p) }.controlSize(.small) }
+                        Text("打开心响 →").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.accentColor)
+                    }
+                    if m.focusTotal > 0 { Text(m.focusDetail).font(.system(size: 12)).foregroundStyle(.secondary) }
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.10)))
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+
+            HStack(spacing: 6) {
+                Circle().fill(m.aiBusy ? Color.blue : Color.green).frame(width: 7, height: 7)
+                Text(m.aiLine).font(.system(size: 12)).lineLimit(1)
+            }
+            if !m.quietLine.isEmpty { Text(m.quietLine).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2) }
+
+            if !m.recent.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("最新").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    ForEach(m.recent) { x in
+                        Button { CenterWindow.shared.show(m.root, item: x.n) } label: {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(x.time).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(x.title).font(.system(size: 12, weight: x.read ? .regular : .semibold)).lineLimit(1)
+                                    Text(x.body).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                if !x.read { Circle().fill(Color.accentColor).frame(width: 6, height: 6).padding(.top, 5) }
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
                 }
-                .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             }
 
-            Section(title: "AI 员工") {
-                HStack(spacing: 6) {
-                    Circle().fill(m.workerState == "working" || m.workerState == "extracting" ? Color.blue
-                                  : m.workerState == "error" ? Color.red : m.workerState == "idle" ? Color.green : Color.gray)
-                        .frame(width: 7, height: 7)
-                    Text(m.workerHead).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                }
-                if !m.workerStep.isEmpty { Text(m.workerStep).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
-                if !m.workerQueue.isEmpty { Text(m.workerQueue).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2) }
-                if !m.workerLast.isEmpty { Text(m.workerLast).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2) }
-            }
-            Divider()
-            Section(title: "需要你（\(m.need.count)）") {
-                if m.need.isEmpty { Text("没有要你处理的 ✓").font(.system(size: 12)).foregroundStyle(.secondary) }
-                ForEach(m.need.prefix(6)) { Row(item: $0, m: m) }
-                if m.need.count > 6 { Text("还有 \(m.need.count - 6) 件，点「完整页面」").font(.system(size: 11)).foregroundStyle(.secondary) }
-            }
-            Divider()
-            Section(title: "正在进行（\(m.moving.count)）") {
-                if m.moving.isEmpty { Text("暂无").font(.system(size: 12)).foregroundStyle(.secondary) }
-                ForEach(m.moving.prefix(6)) { Row(item: $0, m: m) }
-                if m.moving.count > 6 { Text("还有 \(m.moving.count - 6) 件").font(.system(size: 11)).foregroundStyle(.secondary) }
-                if m.backlog > 0 { Text("另有 \(m.backlog) 件你的待办没定日期或还没到期").font(.system(size: 11)).foregroundStyle(.secondary) }
-            }
-            Divider()
-            Section(title: "最近完成（\(m.done.count)）") {
-                if m.done.isEmpty { Text("最近 7 天还没有完成的事").font(.system(size: 12)).foregroundStyle(.secondary) }
-                ForEach(m.done.prefix(4)) { Row(item: $0, m: m) }
-            }
-            Divider()
-            Section(title: "今天") {
-                if m.timeline.isEmpty { Text("今天还没有动静").font(.system(size: 12)).foregroundStyle(.secondary) }
-                ForEach(m.timeline.prefix(5)) { l in
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(l.time).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
-                        Text(l.kind).font(.system(size: 11)).foregroundStyle(.secondary)
-                        Text(l.title).font(.system(size: 11)).lineLimit(1)
-                        if !l.ok { Text("✗").font(.system(size: 11)).foregroundStyle(.red) }
-                    }
-                }
-            }
-            ForEach(m.problems.filter { $0.level == "setup" }) { p in
+            ForEach(m.problems.filter { $0.level == "error" }) { p in
                 HStack {
-                    Text("⚙︎ " + p.title).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("⚠︎ " + p.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.red).lineLimit(2)
                     Spacer()
-                    if !p.urls.isEmpty { Button("去订阅") { m.perform(p) }.controlSize(.mini) }
+                    if p.action == "restart_listener" { Button("修复") { m.perform(p) }.controlSize(.small) }
                 }
             }
+            if !m.busy.isEmpty { Text(m.busy).font(.system(size: 11)).foregroundStyle(Color.accentColor).lineLimit(2) }
+
             HStack {
-                Button("完整页面") { if let p = m.pagePath { NSWorkspace.shared.open(URL(fileURLWithPath: p)) } }
-                Button("飞书看板") { m.open(m.boardURL) }
                 Spacer()
-            }.controlSize(.small)
+                Menu {
+                    Button("立即检查一次") { m.run("检查中…", ["agent_matrix.reply", "poll"]) }
+                    Button("重启监听") { m.restartListener() }
+                    Divider()
+                    Button("退出心响") { NSApp.terminate(nil) }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize()
+            }
         }
         .padding(14)
-        .frame(width: 380)
+        .frame(width: 320)
     }
 }
 
@@ -490,7 +543,10 @@ struct AgentMatrixMonitorApp: App {
         MenuBarExtra {
             Panel(m: monitor)
         } label: {
-            Image(systemName: monitor.symbol)
+            HStack(spacing: 3) {
+                Image(systemName: monitor.symbol)
+                if monitor.focusTotal > 0 { Text("\(monitor.focusTotal)") }
+            }
         }
         .menuBarExtraStyle(.window)
         .commands {

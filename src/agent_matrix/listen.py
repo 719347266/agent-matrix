@@ -45,6 +45,31 @@ def log(*parts):
     print(datetime.now(TZ).strftime("%m-%d %H:%M:%S"), *parts, flush=True)
 
 
+def backup_loop(root, path):
+    """心响 keeps the items on this computer; this copies every change to the Feishu table in the background,
+    in its own thread, so a slow or failing Feishu never holds up a click or another timer."""
+    from . import itemstore
+    client, wait = None, 3
+    while True:
+        time.sleep(wait)
+        try:
+            config = load(path)
+            if not itemstore.enabled(config) or not itemstore.imported(root) or not itemstore.status(root)["pending"]:
+                wait = 3
+                continue
+            if client is None:
+                client = Feishu(config, root)
+                client.use_local_items = False  # this one writes the Feishu table itself
+                client.verify_owner(client.auth())
+            out = itemstore.backup(root, client)
+            if out["pushed"]:
+                log("backup", out["pushed"], "→ 飞书", "· 还剩", out["pending"])
+            wait = 3 if out["pushed"] or not out["pending"] else 60
+        except Exception as exc:
+            client, wait = None, 60
+            log("backup failed", type(exc).__name__, str(exc)[:160])
+
+
 class Consumer(threading.Thread):
     """Keeps one `lark-cli event consume` alive and forwards each event line."""
 
@@ -287,6 +312,14 @@ class Listener:
             self.wake_worker(load(self.path))
         if self.every("schedule", 60):
             self.fixed_times()
+        if self.every("memory", 600):
+            try:  # 未决: waiting items whose date has come (local only, no model)
+                from . import memory
+                told = memory.waiting_due(self.root)
+                if told:
+                    log("memory", "waiting due", told)
+            except Exception as exc:
+                log("memory failed", type(exc).__name__, str(exc)[:200])
         for name, job in jobs:
             try:
                 result = self.locked(job)
@@ -305,6 +338,7 @@ class Listener:
             Consumer(key, identity, self.inbox, self.status, config.lark_binary).start()
         from .app import start_background
         served = start_background(self.root, config)
+        threading.Thread(target=backup_loop, args=(self.root, self.path), daemon=True, name="xinxiang-backup").start()
         log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:

@@ -141,7 +141,7 @@ async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return; D=data; TODAY=D.today; failing=false; syncCommands(); }
   catch(e){ if(seq!==loadSequence)return; failing=true; }
-  render();
+  if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item
   clearTimeout(refreshTimer);
   refreshTimer=setTimeout(load,commands().some(waiting)?1500:8000);
 }
@@ -384,7 +384,14 @@ function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
   <div class="acts" style="margin-top:10px"><button class="btn pri" onclick="copyGuide()">复制接入说明</button></div></div>
   <h2 style="margin-top:26px">系统</h2><div class="list" style="padding:14px 16px"><div class="kv">
   <div>本机常驻程序</div><div>${esc(s.listener||"运行中")}</div>
-  <div>飞书推送</div><div>${esc(s.subs||"")}</div><div>飞书消息</div><div>只发 08:30 早报、21:00 晚报</div><div>数据在哪</div><div>事项：飞书多维表格；对话、交付版本、时间线：本机</div></div></div>`; }
+  <div>飞书推送</div><div>${esc(s.subs||"")}</div><div>飞书消息</div><div>只发 08:30 早报、21:00 晚报</div><div>数据在哪</div><div>${storeLine(s.store||{})}</div></div></div>`; }
+function storeLine(t){
+  if(!t.local) return "事项：飞书多维表格；对话、交付版本、时间线：本机";
+  const b=t.failed?`<b style="color:#b42318">${t.failed} 条没备份上</b> <button class="btn" onclick="retryBackup()">重试</button>`
+    :t.pending?`还有 ${t.pending} 条正在备份`:`已全部备份${t.ok_at?`（${esc(t.ok_at)}）`:""}`;
+  return `全部在本机，点了立刻生效。飞书多维表格做备份：${b}`;
+}
+async function retryBackup(){ try{ await api("/api/backup/retry",{}); toast("已重新排队备份"); }catch(e){ toast("暂时连不上服务"); } load(); }
 
 /* ---------- one item, one story ---------- */
 function openItem(n, from){ S.back=from||S.view; S.item=n; S.view="item"; render(); window.scrollTo(0,0); }
@@ -393,6 +400,30 @@ function stateTag(i){
   if(i.status==="待验收") return ["等你验收","need"]; if(i.status==="待确认") return ["等你定","need"];
   if(i.status==="完成") return ["已完成","done"]; if(i.status==="取消") return ["不做",""]; if(i.who==="AI") return ["AI 排队","ai"]; return [i.status,""];
 }
+/* 记忆层: what was said about this topic before (decisions, open questions, what it was waiting for) */
+function pastOf(i){
+  const past=(D.history||{})[i.n]||[];
+  if(!past.length) return "";
+  return `<div class="src" style="margin-top:8px"><div class="meta" style="font-weight:600">这个话题以前讨论过</div>${past.map(m=>
+    `<div style="margin-top:6px"><span class="meta">${esc(m.at)} ${esc(m.source)} · ${esc(m.label)}</span><br>${esc(m.text)}${m.wait_for?`<span class="meta">（等：${esc(m.wait_for)}）</span>`:""}${m.quote?`<q>${esc(m.quote)}</q>`:""}</div>`).join("")}</div>`;
+}
+function memPage(){
+  const M=D.memory||{rules:[],waiting:[],recent:[]};
+  const rules=(M.rules||[]).map(r=>`<div class="row" style="cursor:default"><div class="main"><div class="title" style="white-space:normal">${esc(r.rule)}</div>
+    <div class="meta">${esc(r.source==="seed"?"你说过的":r.source)} · ${esc(r.why||"")}</div></div><button class="btn" onclick="ruleOp({remove:${r.id}})">删掉</button></div>`).join("");
+  const waiting=(M.waiting||[]).map(m=>`<div class="row" style="cursor:default"><div class="main"><div class="title" style="white-space:normal">${esc(m.text)}</div>
+    <div class="meta">等：${esc(m.wait_for||"")}${m.due?` · ${esc(m.due.slice(5))} 到期`:""} · ${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?" · 已提醒过你":""}</div>${m.quote?`<q class="meta">${esc(m.quote)}</q>`:""}</div>
+    <button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button></div>`).join("");
+  const recent=(M.recent||[]).map(m=>`<div class="row" style="cursor:default"><div class="main"><div class="title" style="white-space:normal">${esc(m.text)}</div>
+    <div class="meta">${esc(m.label)} · ${esc(m.source)} ${esc(m.at)}</div></div></div>`).join("");
+  return `<h2>记忆</h2><p class="hint">AI 记住的东西都在这里：你的规矩，所有 AI 干活前都会先读；会上说"等条件再定"的事，条件到了或话题再出现时会提醒你。</p>
+  <div class="group">你的规矩（${(M.rules||[]).length}）</div><div class="list">${rules||'<div class="empty">还没有</div>'}
+    <div class="inline" style="padding:12px 16px"><input id="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>
+  <div class="group">等条件再定的事（${(M.waiting||[]).length}）</div><div class="list">${waiting||'<div class="empty">没有在等条件的事</div>'}</div>
+  <div class="group">最近会上定的和没定的</div><div class="list">${recent||'<div class="empty">还没有记录</div>'}</div>`;
+}
+async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
+function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); ruleOp({add:v}); }
 function itemPage(){
   const i=byN(S.item); const [tag,cls]=stateTag(i);
   const parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
@@ -403,7 +434,7 @@ function itemPage(){
   return `<button class="back" onclick="S.view=S.back==='item'?'home':S.back;render()">← 返回</button>
   <div class="ih"><h1><span style="color:var(--ink3);font-weight:500">#${i.n}</span> ${esc(i.title)}</h1><span class="state ${cls}">${tag}</span></div>
   <div class="meta" style="color:var(--ink2);font-size:13px">${esc([whoText(i),due(i),i.due_note?"改到 "+i.due_note:""].filter(Boolean).join(" · "))}</div>
-  <div class="sec"><div class="k">1</div><div><h3>从哪来</h3>${src}</div></div>
+  <div class="sec"><div class="k">1</div><div><h3>从哪来</h3>${src}${pastOf(i)}</div></div>
   <div class="sec"><div class="k">2</div><div><h3>AI 对话和交付</h3>${thread(i)}</div></div>
   <div class="sec"><div class="k hot">3</div><div><h3>现在</h3>${nowBox(i)}</div></div>`;
 }
@@ -460,13 +491,13 @@ function render(){
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
   const st=stages(), need=st.filter(s=>s.need).reduce((a,s)=>a+s.items.length,0), unread=D.inbox.filter(m=>!m.read).length;
-  const tabs=[["home","现在",need],["all","全部事项",0],["inbox","消息",unread],["sys","系统",0]];
+  const tabs=[["home","现在",need],["all","全部事项",0],["inbox","消息",unread],["mem","记忆",0],["sys","系统",0]];
   putHTML("#nav",tabs.map(([k,l,c])=>`<button class="${S.view===k||(S.view==="item"&&S.back===k)?"on":""}" onclick="S.view='${k}';render()">${l}${c?`<b>${c}</b>`:""}</button>`).join(""));
   const w=D.worker||{}, c=cur(), many=LIVE?(w.doing||[]).length:0;
   putHTML("#ai",many>1 ? `<span class="dot busy"></span>AI 正在同时做 ${many} 件` : c ? `<span class="dot busy"></span>${esc(c.driver||"AI")} 正在${c.n?`做 #${c.n}`:esc(c.title||"干活")}${c.step?" · "+esc(String(c.step).replace(/^\d\/4\s*/,"")):""}`
                          : `<span class="dot"></span>AI 空闲${w.last&&w.last.n?` · 上一件 #${w.last.n} ${esc(w.last.outcome)}`:""}`);
   $("#ai").onclick=()=>{ const n=c&&c.n||(w.last&&w.last.n); if(n&&byN(n)) openItem(n); };
-  const changed=putHTML("#main",{home,all:allPage,inbox:inboxPage,sys:sysPage,item:itemPage}[S.view]());
+  const changed=putHTML("#main",{home,all:allPage,inbox:inboxPage,mem:memPage,sys:sysPage,item:itemPage}[S.view]());
   if(changed){
     for(const field of document.querySelectorAll("#main [data-draft]")){
       if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);
@@ -478,6 +509,15 @@ function render(){
   }
   renderedView=viewKey;
 }
+// "#item-61" (from a notification, the menu or a link) opens that item directly.
+function openFromHash(){
+  const m=location.hash.match(/^#item-(\d+)$/);
+  if(!m||!D||!byN(+m[1])) return false;
+  history.replaceState(null,"",location.pathname+location.search);
+  openItem(+m[1]);
+  return true;
+}
+window.addEventListener("hashchange",()=>{ if(D) openFromHash(); });
 if(LIVE){ load(); } else render();
 </script>
 </body>

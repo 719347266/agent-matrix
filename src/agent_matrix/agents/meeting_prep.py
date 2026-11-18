@@ -81,6 +81,20 @@ def build(config, rows, event, queue, root, now):
             blocks.append(brief_v1._block(f"上次（{when:%m-%d}）这个会留下的事", "blue", items,
                                           max(0, len(open_) - 5), fill="blue-50"))
 
+    # 记忆层: what the last meeting on this topic decided, left open, or is waiting for, with the words.
+    try:
+        from .. import memory
+        past = [m for m in memory.moments(root, limit=400)
+                if m["kind"] in {"decision", "open_question", "waiting"} and prev and m["source_id"] == prev["meeting_id"]]
+        past = past or memory.recall(root, topic, limit=4)
+        lines = [{"tag": "markdown", "content": f"**{memory.KIND_LABEL.get(m['kind'], '')}**：{m['text'][:60]}"
+                  + (f"（等：{m['wait_for']}）" if m.get("wait_for") else ""), "text_size": "notation"}
+                 for m in sorted(past, key=lambda m: {"waiting": 0, "open_question": 1, "decision": 2}.get(m["kind"], 3))[:5]]
+        if lines:
+            blocks.append(brief_v1._block("上次讨论到这里", "purple", lines))
+    except Exception:
+        pass
+
     # Brand or company words that appear in many titles are configured locally (config.topic_stopwords).
     keys = {k for k in _keywords(topic) if not any(w in k for w in config.topic_stopwords)}
     related = [r for r in rows if r["record_id"] not in listed and brief_v1.visible(r)

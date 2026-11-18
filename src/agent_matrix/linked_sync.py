@@ -70,6 +70,9 @@ class LinkedGateway:
         self.client, self.state = client, state
         self.config, self.root = client.config, client.root
         require_owned(self.config, state)
+        from .itemstore import enabled
+        if enabled(self.config):  # this old one-shot tool reads the Feishu table itself; the items now live locally
+            raise MatrixError("事项已改存本机（item_store: local），这个旧工具不再适用；飞书任务由心响自动同步。")
         self.table_id = self.config.tables["事项表"]
         self.coords = ["--base-token", self.config.base_token, "--table-id", self.table_id]
         self.links = {}

@@ -142,7 +142,7 @@ class Commands:
                 if not row:
                     self.working = False
                     return
-                self.update(row["id"], "running", "正在连接飞书")
+                self.update(row["id"], "running", "正在保存")
             try:
                 result = self.execute(self.root, json.loads(row["payload"]), row["id"],
                                       lambda message: self.update(row["id"], "running", message))
@@ -167,12 +167,16 @@ def run_action(root, payload, request_id, progress):
     from .state import State, exclusive_lock
     from . import activity, thread
 
+    from contextlib import nullcontext
+    from .itemstore import enabled
     config = load(root / "config.yaml")
     client = Feishu(config, root)
-    progress("正在连接飞书")
-    client.verify_owner(client.auth())
-    progress("正在等待其他后台操作结束")
-    with exclusive_lock(root / "state", wait=45):
+    local = enabled(config)  # items on this computer: saved at once, Feishu gets it in the background
+    if not local:
+        progress("正在连接飞书")
+        client.verify_owner(client.auth())
+        progress("正在等待其他后台操作结束")
+    with nullcontext() if local else exclusive_lock(root / "state", wait=45):
         state = State(root / "state/state.db")
         try:
             require_owned(config, state)

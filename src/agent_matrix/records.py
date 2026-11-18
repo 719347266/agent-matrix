@@ -18,6 +18,16 @@ def ensure_fields(client, table_name, fields):
 
 
 def read_records(client, state, table_name, fields):
+    """The item table comes from the local store when `item_store: local` (instant); others from Feishu."""
+    from . import itemstore
+    require_owned(client.config,state)
+    if table_name=="事项表" and itemstore.enabled(client.config) and getattr(client,"use_local_items",True):
+        itemstore.ensure(client,state)
+        return itemstore.rows(client.root,fields)
+    return read_remote(client,state,table_name,fields)
+
+
+def read_remote(client, state, table_name, fields):
     require_owned(client.config,state)
     if table_name not in client.config.tables:
         raise MatrixError("表格不属于当前项目绑定范围。")

@@ -36,7 +36,10 @@ class Config(BaseModel):
     # Where messages to the owner go: "local" = the local client's inbox (Feishu is only the database),
     # "feishu" = Feishu private chat as before.
     notify_channel: Literal["local", "feishu"] = "local"
-    app_port: int = Field(default=8765, ge=1024, le=65535)
+    # Where the items live: "local" = state/items.db on this computer (instant clicks), with the Feishu
+    # table kept as a backup written in the background; "feishu" = read and write the Feishu table directly.
+    item_store: Literal["local", "feishu"] = "feishu"
+    app_port: int = Field(default=47865, ge=1024, le=65535)  # 8765 is a common dev port; keep 心响 out of its way
     worker_enabled: bool = True
     worker_codex: str = ""          # path to the codex command; empty = find it (PATH, then the Cindy bundle)
     worker_model: str = "gpt-6-astra"

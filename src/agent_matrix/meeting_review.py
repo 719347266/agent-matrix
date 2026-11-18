@@ -40,6 +40,13 @@ class Action(Grounded):
     same_as: int | None = None
 
 
+class Waiting(Grounded):
+    """Left open on purpose until a condition is met: "先保留，等周五数据出来再定"."""
+    wait_for: str = Field(min_length=1,max_length=60)      # what it waits for, in plain words
+    due_date: str | None = None                            # only when the words give a date
+    due_phrase: str | None = None
+
+
 MIN_CONFIDENCE=0.8
 
 
@@ -51,6 +58,7 @@ class Review(BaseModel):
     actions: list[Action] = Field(default_factory=list)
     requirements: list[Grounded] = Field(default_factory=list)
     open_questions: list[Grounded] = Field(default_factory=list)
+    waiting: list[Waiting] = Field(default_factory=list)
     # Accepted for older files only; never stored, shown or turned into tasks.
     suggestions: list[str] = Field(default_factory=list,exclude=True)
 
@@ -117,7 +125,7 @@ def validate_review(review, transcript, meta, owner_aliases=()):
     if review.meeting_id!=meta["meeting_id"] or sha256(transcript.encode()).hexdigest()!=review.transcript_sha256:
         raise MatrixError("提取结果的会议或逐字稿指纹不一致。")
     seen=set()
-    for entry in [*review.decisions,*review.actions,*review.requirements,*review.open_questions]:
+    for entry in [*review.decisions,*review.actions,*review.requirements,*review.open_questions,*review.waiting]:
         if entry.reference not in transcript or entry.quote not in entry.reference or entry.timestamp not in entry.reference:
             raise MatrixError("原话或时间戳未在对应原文片段中找到，拒绝写入。")
     for action in review.actions:
@@ -135,7 +143,68 @@ def validate_review(review, transcript, meta, owner_aliases=()):
         if key in seen:
             raise MatrixError("提取结果含重复待办，请先合并。")
         seen.add(key)
+    for w in review.waiting:
+        if w.due_date and (not w.due_phrase or w.due_phrase not in w.reference
+                           or w.due_date!=resolve_due(w.due_phrase,parse_time(meta["start_time"]).date())):
+            raise MatrixError("等待条件的日期与原话不一致，不能猜填。")
     return review
+
+
+def repair_review(review, transcript, meta, owner_aliases=()):
+    """Fix what can be fixed entry by entry, so one bad line never sinks a whole meeting.
+
+    The evidence rules stay strict (validate_review still runs after this): an entry whose quote is not in
+    the transcript, or an action without a commitment phrase, is dropped; an owner the transcript does not
+    support becomes "unknown" (待确认); a due date without matching words is cleared. Returns (review, notes)."""
+    notes, seen = [], set()
+    def grounded(entry):
+        return entry.reference in transcript and entry.quote in entry.reference and entry.timestamp in entry.reference
+    waits = []
+    for w in review.waiting:
+        if not grounded(w):
+            notes.append(f"去掉一条原话对不上的等待条件"); continue
+        if w.due_date:
+            try:
+                ok = bool(w.due_phrase and w.due_phrase in w.reference
+                          and w.due_date == resolve_due(w.due_phrase, parse_time(meta["start_time"]).date()))
+            except Exception:
+                ok = False
+            if not ok:
+                w = w.model_copy(update={"due_date": None, "due_phrase": None})
+        waits.append(w)
+    review.waiting = waits
+    for name in ("decisions", "requirements", "open_questions"):
+        kept = [e for e in getattr(review, name) if grounded(e)]
+        if len(kept) < len(getattr(review, name)):
+            notes.append(f"去掉 {len(getattr(review, name)) - len(kept)} 条原话对不上的{ {'decisions': '结论', 'requirements': '需求', 'open_questions': '问题'}[name] }")
+        setattr(review, name, kept)
+    actions = []
+    for a in review.actions:
+        if not grounded(a):
+            notes.append(f"去掉「{a.title}」：原话对不上"); continue
+        if a.commitment_phrase not in a.reference:
+            notes.append(f"去掉「{a.title}」：没有承接字眼"); continue
+        if a.owner_name and not owner_is_grounded(a, transcript, owner_aliases if a.owner_name == meta.get("owner_name") else ()):
+            # Not provably the owner's: it is someone else's business, kept hidden, never handed to the owner or the AI.
+            notes.append(f"「{a.title}」负责人对不上（{a.owner_name}），当作别人的事，不列给你")
+            a = a.model_copy(update={"owner_name": None, "direction": "others", "executor": "别人"})
+        if a.due_date:
+            ok = bool(a.due_phrase and a.due_phrase in a.reference)
+            if ok:
+                try:
+                    ok = a.due_date == resolve_due(a.due_phrase, parse_time(meta["start_time"]).date())
+                except Exception:
+                    ok = False
+            if not ok:
+                notes.append(f"「{a.title}」截止日留空（原话里没有对应的日期说法）")
+                a = a.model_copy(update={"due_date": None, "due_phrase": None})
+        key = re.sub(r"\s+", "", a.title).casefold()
+        if key in seen:
+            notes.append(f"去掉重复的「{a.title}」"); continue
+        seen.add(key)
+        actions.append(a)
+    review.actions = actions
+    return review, notes
 
 
 def task_fields(action, config, meta):
@@ -144,8 +213,11 @@ def task_fields(action, config, meta):
              and action.owner_name==config.owner_name)
     if own:
         executor="AI" if action.executor=="AI" else "我"
+    elif action.direction=="mine" and not action.owner_name:
+        executor=action.executor if action.executor in {"我","AI"} else "我"  # the owner's, only the name was not said
     else:
-        executor="别人" if action.direction in {"others","others_to_me"} or action.owner_name else (action.executor or "我")
+        # Someone else's, or not provably the owner's: not the owner's business (hidden unless promised to the owner).
+        executor="别人"
     hidden=executor=="别人" and action.direction!="others_to_me"
     ready=bool(action.due_date) and (own or executor=="别人")
     status="未开始" if ready else "待确认"
@@ -275,6 +347,11 @@ def publish(config, client, state, review):
     queue.done(review.meeting_id,receipt)
     from . import activity
     activity.log(client.root,"detect",f"会议「{meta.get('topic') or '会议'}」提取完成："+(f"新增 {len(task_ids)} 件" if task_ids else "没有新待办"))
+    try:  # 经历层: what was decided, asked, required and left waiting, with the words (and old waiting topics come back)
+        from . import memory
+        memory.record_meeting(client.root,review,meta)
+    except Exception as exc:
+        activity.log(client.root,"error","会议经历没存进记忆",detail=f"{type(exc).__name__}: {exc}"[:200],status="failed")
     return {"ok":True,"meeting_id":review.meeting_id,"task_ids":task_ids,
             "dropped_low_confidence":len(review.actions)-len(kept_actions(review)),
             "message":line,"message_id":find_value(receipt,"message_id")}
@@ -314,14 +391,20 @@ def main(argv=None):
                 row=MeetingQueue(state).get(review.meeting_id)
                 if not row or not row["transcript_path"]:
                     raise MatrixError("未找到已准备的逐字稿。")
-                validate_review(review,(path.parent/row["transcript_path"]).read_text(),
-                                {**row["metadata"],"owner_name":config.owner_name},config.owner_aliases)
+                transcript=(path.parent/row["transcript_path"]).read_text()
+                meta={**row["metadata"],"owner_name":config.owner_name}
+                # Salvage the good entries first; then the strict evidence check runs as before.
+                review,repaired=repair_review(review,transcript,meta,config.owner_aliases)
+                if repaired:
+                    args.review.write_text(review.model_dump_json(indent=1))
+                validate_review(review,transcript,meta,config.owner_aliases)
                 if args.command=="validate":
                     result={"ok":True,"actions":len(kept_actions(review)),"dropped_low_confidence":len(review.actions)-len(kept_actions(review)),
                             "remote_writes":0,"brief_line":summary_line(review,config,row["metadata"])}
                 else:
                     client=Feishu(config,path.parent); client.verify_owner(client.auth())
                     result=publish(config,client,state,review)
+                result["repaired"]=repaired
                 print(js(result))
             finally:
                 state.close()

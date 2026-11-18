@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 root="$(cd .. && pwd)"
 app="$HOME/Applications/心响.app"
-app_port="$("$root/.venv/bin/python" -c 'import sys; from pathlib import Path; from agent_matrix.config import load; p=Path(sys.argv[1]); print(load(p).app_port if p.exists() else 8765)' "$root/config.yaml")"
+app_port="$("$root/.venv/bin/python" -c 'import sys; from pathlib import Path; from agent_matrix.config import load; p=Path(sys.argv[1]); print(load(p).app_port if p.exists() else 47865)' "$root/config.yaml")"
 build="$(mktemp -d)/心响.app"
 mkdir -p "$build/Contents/MacOS" "$build/Contents/Resources"
 cp AppIcon.icns "$build/Contents/Resources/AppIcon.icns"  # redraw with: python make_icon.py
