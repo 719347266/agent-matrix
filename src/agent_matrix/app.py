@@ -202,7 +202,7 @@ def system_info(root):
         config = load(Path(root) / "config.yaml")
         found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
         mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
-        record = {"mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
+        record = {"review_every": config.chat_review_every_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
                   "notion": bool(config.notion_database_id), "notion_url": notion_url}
     except Exception:
         found, record = {}, {}
@@ -329,6 +329,11 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "engine", body["engine"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
+                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):  # config.yaml: the listener reads it there
+                    from .config import load, save
+                    config = load(root / "config.yaml")
+                    config.chat_review_every_minutes = body["chat_review_every_minutes"]
+                    save(root / "config.yaml", config)
                 if "auto_assign" in body:
                     thread.set_setting(root, "auto_assign", bool(body["auto_assign"]))
                     if body["auto_assign"]:  # judge the waiting items right away

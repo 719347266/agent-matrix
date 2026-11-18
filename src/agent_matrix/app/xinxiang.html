@@ -513,9 +513,13 @@ function slackBlock(me){
   const t=S.slackTry, lines=t&&t.lines?t.lines.map(m=>`<div class="row flat"><div class="main"><div class="title">${esc(m.text)}</div><div class="meta"><span>${esc(m.kind)}</span><span>${esc(m.chat_name)}</span><span>${esc(m.sent_at)}</span><span>${esc(m.sender_name)}</span><a href="${esc(m.message_id)}" target="_blank" rel="noopener">原消息</a></div></div></div>`).join(""):"";
   const result=!t?"":t.busy?`<div class="list"><div class="empty">正在读 Slack…最多要一分钟</div></div>`:t.error?`<div class="list"><div class="empty">${esc(t.error)}</div></div>`:
     `<div class="group">最近 24 小时<span class="aside">看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑不写表）</span></div><div class="list">${lines||'<div class="empty">没有筛中的话</div>'}</div>`;
-  const head=`<div class="head" style="margin-top:34px"><h2>接入来源</h2></div>`;
+  const r=(D.system||{}).record||{}, every=r.review_every??5;
+  const pace=`<div class="group">聊天里的话多久整理成事项</div><div class="chips" style="margin-top:6px">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"只在固定时间"]].map(([m,l])=>
+    `<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>
+    <p class="hint" style="margin-top:6px">${every?`有新的话、且离上一轮满 ${every} 分钟就整理，没有就继续等。每轮会用一次本机 AI。`:`每天 ${esc((r.review_times||[]).join("、"))} 各整理一次。`}</p>`;
+  const head=`<div class="head" style="margin-top:34px"><h2>接入来源</h2></div>${pace}`;
   if(me) return `${head}<div class="guide" style="margin-top:14px"><div><b>Slack</b> · 已连接 · ${esc(me.team||"")} · @${esc(me.user||"")} · 令牌 …${esc(me.tail||"")}</div>
-    <p class="hint">每分钟搜一次你能看到的新消息，和飞书聊天一样只留跟你有关的话，有新的就每 5 分钟整理一次。</p>
+    <p class="hint">每分钟搜一次你能看到的新消息，和飞书聊天一样只留跟你有关的话，按上面的频率整理成事项。</p>
     <div class="acts"><button class="btn pri" onclick="slackTry()">试跑最近 24 小时</button><button class="btn" onclick="slackOff()">断开</button></div></div>${result}`;
   return `${head}<div class="guide" style="margin-top:14px"><div><b>Slack</b> · 未连接</div>
     <p class="hint">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</p>
