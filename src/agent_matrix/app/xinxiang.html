@@ -851,18 +851,29 @@ function engineTag(s){ const e=s.engine; return `<span class="eng ${e}">${e==="g
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
   const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",0,""],["sys","设置",0,""]];
-  const w=D.worker||{}, run=LIVE?(Array.isArray(D.running)?D.running:[]):doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false})), busy=run.length>0;
+  const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false})), busy=run.length>0;
   const rows=run.map(s=>{ const it=s.n&&byN(s.n);
-    return `<div class="sess">${engineTag(s)}${it?`<button class="t" onclick="openItem(${it.n})">#${it.n} ${esc(it.title)}</button>`:`<span class="t">${esc(s.title)}</span>`}${sessionControl(s,"go","打开")}<span class="s">${esc(String(s.step||"").replace(/^\d\/4\s*/,""))}${s.minutes!=null?`，${s.minutes} 分钟`:""}</span></div>`; }).join("");
+    return `<div class="sess">${engineTag(s)}${it?`<button class="t" onclick="openItem(${it.n})">#${it.n} ${esc(it.title)}</button>`:`<span class="t">${esc(s.title)}</span>`}${sessionControl(s,"go","打开")}<span class="s">${esc(String(s.step||(s.local?(it?"已关联事项":"未关联事项"):"")).replace(/^\d\/4\s*/,""))}${s.minutes!=null?`，${s.minutes} 分钟`:""}</span>${s.local&&!it?localBindControl(s):""}</div>`; }).join("");
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
   return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${S.view===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
     `<div class="aicard ${busy?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${busy?`AI 会话进行中 ${run.length}`:"AI 空闲"}</div>${busy?rows:idle}</div>`;
+}
+function localBindControl(s){
+  if(S.bindKey!==s.key) return `<button class="go" data-key="${esc(s.key)}" onclick="S.bindKey=this.dataset.key;render()">关联事项</button>`;
+  const options=D.items.filter(i=>!i.hidden).map(i=>`<option value="${i.n}">#${i.n} ${esc(i.title)}</option>`).join("");
+  return `<div style="grid-column:1/-1;display:flex;gap:4px"><select id="bind-item" aria-label="选择事项" style="min-width:0;flex:1"><option value="">选择事项</option>${options}</select><button class="go" onclick="bindLocal()">确定</button><button class="go" onclick="S.bindKey=null;render()">取消</button></div>`;
+}
+async function bindLocal(){
+  const n=Number($("#bind-item")?.value);
+  if(!n) return toast("先选一个事项");
+  try{ await api("/api/session/associate",{key:S.bindKey,n}); S.bindKey=null; await load(); toast("已关联 #"+n); }
+  catch(e){ toast(e.message||"没有关联成功"); }
 }
 async function openSession(job, running){
   if(!LIVE) return toast("原型里不能打开");
   if(running&&!confirm("这段对话 AI 正在用。现在打开接着聊，可能打断它这一轮。仍要打开吗？")) return;
   try{ const r=await api("/api/session/open",{job},20000);
-    if(r.link) window.open(r.link,"_blank","noopener"); else toast("已在终端里打开这段对话，可以直接和它说");
+    if(r.link) window.open(r.link,"_blank","noopener"); else toast(r.opened==="cindy"?"已打开 Cindy 原对话":"已在终端里打开原对话");
   }catch(e){ toast(e.message||"打不开这段对话"); }
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }

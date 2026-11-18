@@ -122,6 +122,10 @@ def build_state(root):
         if dv and not any(m["kind"] == "deliver" for m in msgs):
             msgs += [{"at": v["at"], "from": "ai", "kind": "deliver", "text": v["summary"] or "交付", "url": v["url"], "driver": "AI"} for v in dv]
         threads[n], deliverables[n] = msgs, dv
+    from . import local_sessions
+    external = local_sessions.view(root, sessions_of, running_sessions, items)
+    for item in items:
+        item["sessions"] = sessions_of.get(item["rid"], [])
     from . import drive
     ws, running = read_status(root), is_running(root)
     jobs = drive.open_jobs(root)
@@ -152,7 +156,7 @@ def build_state(root):
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,
-            "worker": worker, "inbox": box, "running": running_sessions, "system": {**system_info(root), "store": store_info(root)}}
+            "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external, "system": {**system_info(root), "store": store_info(root)}}
 
 
 def store_info(root):
@@ -379,6 +383,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 except OSError:
                     return self._send(400, {"ok": False, "reply": "连不上 Slack，检查网络后再试。"})
+            if path == "/api/session/associate":
+                from . import local_sessions
+                from .models import MatrixError
+                try:
+                    result = local_sessions.associate(root, str(body.get("key") or ""), int(body.get("n") or 0))
+                    return self._send(200, {"ok": True, **result})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/session/open":
                 from .config import load
                 from .models import MatrixError

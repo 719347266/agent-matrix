@@ -144,14 +144,21 @@ def command(root, config, job_id):
 def open_session(root, config, job_id):
     """Open one conversation so the owner can keep talking to it: a link → returned for the browser;
     a local GPT / Claude conversation → a Terminal window that resumes it."""
+    if job_id.startswith("local:"):
+        from .local_sessions import open_local
+        return open_local(root, config, job_id[6:])
     job = _job(root, job_id)
     engine, session, link = _session_of(job)
     if link:
         return {"link": link}
     line = command(root, config, job_id)
+    open_terminal(line)
+    return {"opened": "terminal", "engine": engine}
+
+
+def open_terminal(line):
     script = 'on run argv\n tell application "Terminal"\n do script (item 1 of argv)\n activate\n end tell\nend run'
     try:
         subprocess.run(["osascript", "-e", script, line], check=True, capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
         raise MatrixError("未能在终端中打开原对话，请检查终端是否可用以及系统的自动化权限。") from exc
-    return {"opened": "terminal", "engine": engine}
