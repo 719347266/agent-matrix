@@ -55,7 +55,11 @@ def _times(config):
 
 
 def due_slot(config, state, now):
-    """The latest review time already passed today that has no batch yet."""
+    """The latest review time already passed today that has no batch yet; or, every N minutes, "every"."""
+    every = getattr(config, "chat_review_every_minutes", 0)
+    if every:
+        last = state.get("chat-review:last")
+        return None if last and now - datetime.fromisoformat(last) < timedelta(minutes=every) else "every"
     passed = [t for t in _times(config) if now.time() >= time.fromisoformat(t)]
     if not passed:
         return None
@@ -74,11 +78,11 @@ def _sent(message, now):
         return now
 
 
-def ready(config, waiting, now):
-    """When the waiting chat lines go to the AI. Chats are read every 10 minutes; each extraction costs a model
+def ready(config, waiting, now, slot=None):
+    """When the waiting chat lines go to the AI. Chats are read every few minutes; each extraction costs a model
     call, so it runs only when there is something worth it:
         @you, or someone asks you with a time or a push (今天 / 尽快 / 3点)  → at once
-        otherwise: enough lines have piled up, or the oldest has waited long enough
+        otherwise at the pace chosen on the 系统 page: every N minutes (chat_review_every_minutes), or the fixed times
         late at night only the urgent ones run; the rest wait for the morning
     Returns why it should run now, or None."""
     if not waiting:
@@ -89,11 +93,10 @@ def ready(config, waiting, now):
     hour = now.strftime("%H:%M")
     if hour < config.chat_extract_from or hour >= config.chat_extract_until:
         return None
-    if len(waiting) >= config.chat_extract_batch:
-        return f"攒够 {len(waiting)} 条"
-    oldest = min(_sent(m, now) for m in waiting)
-    if now - oldest >= timedelta(minutes=config.chat_extract_wait_minutes):
-        return f"最早一条已经等了 {config.chat_extract_wait_minutes} 分钟"
+    if slot == "every":
+        return f"离上一轮满 {config.chat_review_every_minutes} 分钟"
+    if slot:
+        return f"到了整理时间 {slot[-5:]}"
     return None
 
 
@@ -102,10 +105,13 @@ def check(config, state, now):
     if open_batch:
         return {"ok": True, "run_model": True, "reason": "batch_open", "batch": open_batch}
     waiting = chats.pending(state)
-    why = ready(config, waiting, now)
+    slot = due_slot(config, state, now)
+    why = ready(config, waiting, now, slot)
     if why:
-        return {"ok": True, "run_model": True, "reason": "batch_due", "why": why, "candidates": len(waiting),
+        return {"ok": True, "run_model": True, "reason": "batch_due", "why": why, "candidates": len(waiting), "slot": slot,
                 "instruction": "按 prompts/chat_extract.md 处理：先 chat_review prepare，再写 review.json，validate 后 publish。"}
+    if slot and slot != "every" and not waiting:
+        state.set("chat-review:slot:" + slot, "empty")
     return {"ok": True, "run_model": False, "reason": "waiting" if waiting else "idle", "candidates": len(waiting)}
 
 
@@ -129,7 +135,9 @@ def prepare(config, state, root, now):
               "review_path": str(folder / "review.json"), "messages": len(waiting)}
     state.set("chat-review:open", result)
     slot = due_slot(config, state, now)
-    if slot:
+    if getattr(config, "chat_review_every_minutes", 0):
+        state.set("chat-review:last", now.isoformat())  # an urgent round also restarts the regular pace
+    elif slot:
         state.set("chat-review:slot:" + slot, batch)
     return result
 
@@ -186,7 +194,8 @@ def task_fields(config, a, m):
     fields = {"标题": a.title, "类型": ["临时"], "状态": [status], "执行方": [executor],
               "进度": {"未开始": "0/1 等对方" if executor == "别人" else "0/1 未开始", "待确认": "0/1 待确认"}[status],
               "下一步动作": a.title, "来源": ["聊天"],
-              "来源链接": f"https://applink.feishu.cn/client/chat/open?openChatId={m['chat_id']}",
+              "来源链接": m["message_id"] if m["message_id"].startswith("https://")  # Slack permalink
+                          else f"https://applink.feishu.cn/client/chat/open?openChatId={m['chat_id']}",
               "原话引用": f"[{m['chat_name']} {m.get('sent_at') or ''} {m['sender_name']}] {m['text'][:300]}"}
     if executor == "别人" and m["kind"] != "找你的":
         fields["排除本人提醒"] = True

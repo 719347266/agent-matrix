@@ -47,6 +47,15 @@ def _db(root):
     db.execute("""CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT, n INTEGER, ref TEXT,
         folder TEXT, driver TEXT, status TEXT NOT NULL, step TEXT, rounds INTEGER NOT NULL DEFAULT 0, lease_until TEXT,
         created TEXT NOT NULL, updated TEXT NOT NULL, progress_at TEXT)""")
+    # Serialize migration only when upgrading an older DB. Polling is read-only afterwards.
+    cols = {c[1] for c in db.execute("PRAGMA table_info(jobs)")}
+    if not {"session", "link"} <= cols:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            cols = {c[1] for c in db.execute("PRAGMA table_info(jobs)")}
+            for col in ("session", "link"):
+                if col not in cols:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
     return db
 
 
@@ -368,7 +377,9 @@ def _prepare_chat(root, config, driver):
 
 def _history_text(root, record_id, limit=30):
     from . import thread as conversation
-    msgs = conversation.history(root, [record_id]).get(record_id, {}).get("messages", [])[-limit:]
+    all_messages = conversation.history(root, [record_id]).get(record_id, {}).get("messages", [])
+    # Both personal notes and historical closure events may contain the owner's private text.
+    msgs = [m for m in all_messages if m["kind"] not in {"note", "closed"}][-limit:]
     who = {"me": "本人", "ai": "AI", "system": "系统"}
     return "\n".join(f"- {m['at']} {m.get('driver') if m['from'] == 'ai' and m.get('driver') else who.get(m['from'], '')}：{m['text'][:400]}"
                      for m in msgs)
@@ -399,13 +410,12 @@ def _prepare_item(root, config, driver, skip=()):
         extra += ["", "## 这件事之前的对话（心响保存；可能是别的 AI 做的，接着往下，不要从头来）", history]
     if changes:
         extra += ["", "## 本人新补充的要求（这一轮必须照做）", *[f"- {c}" for c in changes]]
-    thread_file = item.workdir / ".thread"
     return {"id": f"item-{item.rid}-{item.version[:8]}", "kind": "item", "title": item.title, "n": int(str(item.n)) if item.n else None,
             "folder": str(item.workdir), "ref": {"record_id": item.rid, "version": item.version},
             "output": ["交付.md", "结果.json"], "lease_until": _lease(ITEM_LEASE_MINUTES),
             "instructions": base + "\n".join(extra),
             # the built-in GPT resumes its own conversation instead of re-reading everything
-            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if thread_file.is_file() else base}
+            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
 
 
 def next_job(root, config, driver, *, skip=()):
@@ -623,7 +633,7 @@ def _submit_triage(root, job):
                     "done": [f"{n} 完成", f"{n} + {url}"] if url else [f"{n} 无交付"]}.get(decision, [])
         ok = True
         for command in commands:
-            run = subprocess.run([sys.executable, "-m", "agent_matrix.reply", "--text", command], cwd=root, capture_output=True,
+            run = subprocess.run([sys.executable, "-m", "agent_matrix.reply", "--text", command, "--source", "ai"], cwd=root, capture_output=True,
                                  text=True, encoding="utf-8", timeout=180)
             ok = ok and "✓" in (run.stdout or "")
         if not ok:
@@ -667,7 +677,8 @@ GUIDE = """# 接入心响：任何 AI 都可以驱动
 
 你是本人的 AI 员工。循环做下面几步，直到没有活：
 
-1. 运行 `{cmd} next --driver "<你的名字>"`。返回 `{{"idle": true}}` 就结束。
+1. 运行 `{cmd} next --driver "<你的名字>" --session "<你这段对话的编号或链接>"`。返回 `{{"idle": true}}` 就结束。
+   `--session` 让本人在心响里看到你在做哪件事，并能直接打开你这段对话；没有就省略。
 2. 返回的 JSON 里有 `folder`（工作文件夹）、`instructions`（这件活的完整说明）、`output`（要写出的文件）。
    进入 folder，按 instructions 做；需要飞书资料时用 `lark-cli`（只读）。
 3. 按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
@@ -684,6 +695,7 @@ def main(argv=None):
     p.add_argument("command", choices=["next", "step", "say", "submit", "ask", "release", "guide", "status"])
     p.add_argument("--driver", default=os.environ.get("XINXIANG_DRIVER") or "外部 AI")
     p.add_argument("--job"); p.add_argument("--text"); p.add_argument("--question"); p.add_argument("--tried")
+    p.add_argument("--session", default=os.environ.get("XINXIANG_SESSION"), help="你这段对话的编号或能打开它的链接")
     p.add_argument("--config", type=Path, default=Path("config.yaml"))
     args = p.parse_args(argv)
     path = args.config.resolve()
@@ -701,10 +713,16 @@ def main(argv=None):
         config = load(path)
         if args.command == "next":
             job = next_job(root, config, args.driver)
+            if job and args.session:
+                from .sessions import bind
+                bind(root, job["id"], args.session)
             out = public(job) if job else {"idle": True}
         elif not args.job:
             raise MatrixError("需要 --job。")
         elif args.command == "step":
+            if args.session:
+                from .sessions import bind
+                bind(root, args.job, args.session)
             out = step(root, config, args.job, args.text)
         elif args.command == "say":
             out = say(root, args.job, args.text, args.driver)

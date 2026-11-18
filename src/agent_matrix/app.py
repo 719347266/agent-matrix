@@ -89,6 +89,12 @@ def build_state(root):
     rows = snap.get("rows") or []
     n_of = {r.get("record_id"): _num(r.get("编号")) for r in rows}
     history = thread.history(root)
+    closures = thread.closures(root)
+    try:
+        from . import sessions as ai_sessions
+        sessions_of, running_sessions = ai_sessions.by_item(root), ai_sessions.running(root)
+    except Exception:
+        sessions_of, running_sessions = {}, []
     items, threads, deliverables = [], {}, {}
     for r in rows:
         n = n_of.get(r.get("record_id"))
@@ -102,7 +108,9 @@ def build_state(root):
                 "source_url": _url(r.get("来源链接")), "criterion": r.get("完成标准"), "extra": r.get("补充材料"),
                 "rejected": r.get("退回意见"), "parent": n_of.get(parent), "next": r.get("下一步动作"),
                 "finished": _day(r.get("完成时间")), "hidden": bool(r.get("排除本人提醒")),
-                "updated": str(r.get("更新时间") or "")[:19], "created": str(r.get("创建时间") or "")[:19]}
+                "updated": str(r.get("更新时间") or "")[:19], "created": str(r.get("创建时间") or "")[:19],
+                "finished_at": str(r.get("完成时间") or "")[:16].replace("T", " "),
+                "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], [])}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -137,13 +145,14 @@ def build_state(root):
            for m in inbox.messages(root, 150)]
     judged = {n_of[rid]: j for rid, j in thread.judgments(root).items() if n_of.get(rid)}
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
-                "builtin_driver": bool(thread.setting(root, "builtin_driver", True))}
+                "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
+                "engine": thread.setting(root, "engine", "codex")}
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,
-            "worker": worker, "inbox": box, "system": {**system_info(root), "store": store_info(root)}}
+            "worker": worker, "inbox": box, "running": running_sessions, "system": {**system_info(root), "store": store_info(root)}}
 
 
 def store_info(root):
@@ -187,15 +196,27 @@ def system_info(root):
         db = sqlite3.connect(f"file:{Path(root) / 'state/state.db'}?mode=ro", uri=True, timeout=5)
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
+        slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
+        notion_url = json.loads((db.execute("SELECT value FROM kv WHERE key='notion:url'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat = {}, None
+        status, beat, slack, notion_url = {}, None, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
     except (TypeError, ValueError):
         pass
-    return {"listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    from .config import load
+    from .worker import claude_binary, codex_binary
+    try:
+        config = load(Path(root) / "config.yaml")
+        found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
+        mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
+        record = {"review_every": config.chat_review_every_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
+                  "notion": bool(config.notion_database_id), "notion_url": notion_url}
+    except Exception:
+        found, record = {}, {}
+    return {"engines": found, "slack": slack, "record": record, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -314,8 +335,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
             if path == "/api/settings":
                 from . import thread
+                if body.get("engine") in {"codex", "claude"}:
+                    thread.set_setting(root, "engine", body["engine"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
+                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):  # config.yaml: the listener reads it there
+                    from .config import load, save
+                    config = load(root / "config.yaml")
+                    config.chat_review_every_minutes = body["chat_review_every_minutes"]
+                    save(root / "config.yaml", config)
                 if "auto_assign" in body:
                     thread.set_setting(root, "auto_assign", bool(body["auto_assign"]))
                     if body["auto_assign"]:  # judge the waiting items right away
@@ -323,6 +351,42 @@ class Handler(BaseHTTPRequestHandler):
                         from .worker import kick
                         kick(root, load(root / "config.yaml"), force=True)
                 return self._send(200, {"ok": True})
+            if path in ("/api/store", "/api/notion/connect"):
+                from .models import MatrixError
+                from . import itemstore, notion
+                try:
+                    if path == "/api/notion/connect":
+                        return self._send(200, {"ok": True, **notion.connect(root, body.get("token"), body.get("page"))})
+                    return self._send(200, {"ok": True, "mode": itemstore.choose(root, body.get("mode"))})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except OSError:
+                    return self._send(400, {"ok": False, "reply": "连不上 Notion，检查网络后再试。"})
+            if path.startswith("/api/slack/"):
+                from .config import load
+                from .models import MatrixError
+                from .sources import slack
+                try:
+                    if path == "/api/slack/connect":
+                        return self._send(200, {"ok": True, **slack.connect(root, body.get("token"))})
+                    if path == "/api/slack/disconnect":
+                        slack.disconnect(root)
+                        return self._send(200, {"ok": True})
+                    if path == "/api/slack/try":
+                        hours = min(max(float(body.get("hours") or 24), 1), 168)
+                        return self._send(200, {"ok": True, **slack.dry_run(load(root / "config.yaml"), hours=hours)})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except OSError:
+                    return self._send(400, {"ok": False, "reply": "连不上 Slack，检查网络后再试。"})
+            if path == "/api/session/open":
+                from .config import load
+                from .models import MatrixError
+                from . import sessions as ai_sessions
+                try:
+                    return self._send(200, {"ok": True, **ai_sessions.open_session(root, load(root / "config.yaml"), str(body.get("job") or ""))})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/read":
                 from . import inbox
                 inbox.mark_read(root, None if body.get("all") else [int(x) for x in body.get("ids") or []])

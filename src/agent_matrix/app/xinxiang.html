@@ -182,6 +182,39 @@ button:disabled{opacity:.5;cursor:wait}
 .composer .bot{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--ink3)}
 .composer .bot .btn{margin-left:auto}
 .spacer{height:20px}
+.props{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 16px;margin-top:4px}
+.prop{min-width:0}.prop .k{font-size:11.5px;color:var(--ink3);margin-bottom:2px}
+.prop .v{font-size:13px;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.prop .v.muted{color:var(--ink3)}
+.tabs{display:flex;gap:2px;padding:14px 24px 0;border-bottom:1px solid var(--line2)}
+.tab{border:0;background:none;padding:6px 10px 9px;color:var(--ink2);font-size:13px;position:relative}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink);font-weight:600}
+.tab.on:after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+.tab .n{color:var(--ink3);font-weight:500;margin-left:4px}
+.d-body{padding:16px 24px 0}
+.m.note .bub{background:var(--amber-soft);border-radius:10px}
+.sys.closed{color:var(--green);font-weight:500}
+.reply-state{margin-top:12px;padding:9px 12px;border-radius:10px;font-size:12.5px;line-height:1.6;background:var(--hover);color:var(--ink2)}
+.reply-state.blue{background:var(--blue-soft);color:var(--ink)}.reply-state.amber{background:var(--amber-soft);color:var(--ink)}
+.seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--hover);margin-bottom:8px}
+.seg button{border:0;background:none;border-radius:6px;padding:3px 10px;font-size:12.5px;color:var(--ink2)}
+.seg button.on{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.composer.note textarea{background:var(--amber-soft);border-color:transparent}
+.composer .bot .btns{margin-left:auto;display:flex;gap:6px}
+.composer .bot .btn{margin-left:0}
+.eng{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:5px;font-size:11px;font-weight:650;background:var(--gray-soft);color:var(--ink2);flex:none}
+.eng.gpt{background:#e7f6ef;color:#16794c}.eng.claude{background:#fbeee6;color:#b4532a}
+:root[data-theme=dark] .eng.gpt{background:#173326;color:#4cc38a}:root[data-theme=dark] .eng.claude{background:#3a2419;color:#e8936a}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .eng.gpt{background:#173326;color:#4cc38a}:root:not([data-theme=light]) .eng.claude{background:#3a2419;color:#e8936a}}
+.sess{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 8px;align-items:center;width:100%;border:0;background:none;padding:6px 0;text-align:left;border-top:1px solid var(--line2)}
+.sess:first-of-type{border-top:0}
+.sess .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);font-size:12.5px}
+.sess .s{grid-column:2/4;font-size:11.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess button.t{border:0;background:none;padding:0;text-align:left;cursor:pointer}
+.sess .go{border:0;background:none;color:var(--brand);font-size:12px;padding:0 2px}
+.sess:hover .t{color:var(--brand)}
+@container (max-width:520px){.props{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .solo{background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column}
 .solo .d-head{position:static;border-radius:12px 12px 0 0}
 .solo .composer{border-radius:0 0 12px 12px}
@@ -215,7 +248,8 @@ button:disabled{opacity:.5;cursor:wait}
   .topbar{flex-wrap:wrap;padding:10px 16px;top:49px}.search{flex-basis:100%}
   .content{padding:12px 16px 80px}
   .inline{padding-left:12px}
-  .callout{margin:12px 14px 0}.d-head,.d-sec,.composer{padding-left:14px;padding-right:14px}
+  .callout{margin:12px 14px 0}.d-head,.d-sec,.d-body,.composer{padding-left:14px;padding-right:14px}.tabs{padding-left:10px}
+  .props{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 </style>
@@ -248,8 +282,8 @@ let D = /*__DATA__*/null;            /* the prototype embeds data here; the app 
 const TOKEN = /*__TOKEN__*/"";
 const LIVE = !D;
 let TODAY = (D && D.today) || new Date().toISOString().slice(0,10);
-async function api(path, body){
-  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),12000);
+async function api(path, body, ms=12000){
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),ms);
   try {
     const r=await fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Xinxiang-Token":TOKEN},
       ...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
@@ -277,7 +311,7 @@ function announce(){
   newestSeen=top;
   const n=unreadCount(); document.title=n?`(${n}) 心响`:"心响";
 }
-const S = {view:null, item:null, inline:null, q:"", all:"进行中", doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
+const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"进行中", doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
 // Requests stay visible across refreshes; an ambiguous transport error keeps the
 // same ID for reconciliation instead of creating another write.
 const localCommands = new Map();
@@ -314,8 +348,8 @@ async function submitCommand(body,numbers,existing=null){
     const r=await api("/api/commands",{...body,request_id:id});
     localCommands.delete(id); localCommands.set(r.command.id,r.command);
     const box=$("#saybox");
-    if(box&&numbers.length===1&&box.dataset.draft==="say-"+numbers[0]&&box.value.trim()&&body.text.endsWith(box.value.trim())){
-      box.value=""; drafts.delete("say-"+numbers[0]);
+    if(box&&numbers.length===1&&box.dataset?.draft?.endsWith("-"+numbers[0])&&box.value.trim()&&body.text.endsWith(box.value.trim())){
+      drafts.delete(box.dataset.draft); box.value="";
     }
   } catch(e) {
     c.status=e.confirmed?"failed":"unknown";
@@ -432,7 +466,7 @@ function detailButtons(i){
 }
 function btn(i,[label,k,cls,ph]){ return `<button data-n="${i.n}" ${pendingFor(i.n)?"disabled aria-busy=\"true\"":""} class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
 function act(n,k,ph,el){
-  if(k==="focus"){ if(S.item!==n) openItem(n); setTimeout(()=>$("#saybox")?.focus(),30); return; }
+  if(k==="focus"){ S.mode="ai"; if(S.item!==n) openItem(n); else render(); setTimeout(()=>$("#saybox")?.focus(),30); return; }
   if(pendingFor(n))return;
   if(ph){ S.inline={n,k,ph};render();$("#inline-"+n)?.focus();return; }
   apply(n,k,null);
@@ -589,25 +623,91 @@ function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
   const seen=(w.drivers||[]).map(d=>`<div class="row flat"><span class="ud"></span><span class="who ai">AI</span><div style="min-width:0"><div class="t">${esc(d.driver)}</div><div class="s">最近 ${esc(d.last)}，做完 ${d.done||0} 件${d.open?`，正在做 ${d.open} 件`:""}</div></div><div></div><div></div></div>`).join("");
   return `<div class="sec-h">通用</div><div class="list"><div class="kv">
     <div>外观</div><div class="chips" style="margin:0">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>
-    <div>数据在哪</div><div>${storeLine(s.store||{})}</div>
+    <div>数据在哪</div><div>${storeLine(s.store||{}, (s.record||{}).mode)}</div>
     <div>本机常驻程序</div><div>${esc(s.listener||"运行中")}</div>
     <div>飞书推送</div><div>${esc(s.subs||"")}</div>
     <div>飞书消息</div><div>只发 08:30 早报、21:00 晚报；其余都在心响里，并弹系统提醒</div></div></div>
+  ${recordBlock(s.record||{})}
+  ${sourcesBlock(s.slack)}
   <div class="sec-h">谁来驱动</div><p class="hint">任何 AI 都能接入：本机 GPT、Claude、Cindy、Cursor……能运行命令的都行。每件事的对话存在心响里，换谁来做都接得上。</p>
-  <div class="switch ${builtin?"on":""}" role="switch" aria-checked="${builtin}" tabindex="0" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 GPT 也来干活</b><br><span>${builtin?"开着：有活就自动做，最多同时 10 件。":"关着：只等外部 AI 来领活。"}</span></div></div>
+  <div class="switch ${builtin?"on":""}" role="switch" aria-checked="${builtin}" tabindex="0" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 AI 也来干活</b><br><span>${builtin?"开着：有活就自动做，最多同时 10 件。":"关着：只等外部 AI 来领活。"}</span></div></div>
+  ${engineChoice(st.engine||"codex", s.engines||{})}
   <div class="sec-h">最近接入过的 AI</div><div class="list">${seen||'<div class="empty">还没有记录</div>'}</div>
   <div class="sec-h">让任何 AI 接入<span class="aside">把下面这段发给它</span></div>
   <div class="list guide"><pre id="guide">${esc(D.guide||"")}</pre><button class="btn pri" onclick="copyGuide()">复制接入说明</button></div>`; }
-function storeLine(t){
+function recordBlock(r){
+  const mode=r.mode||"feishu", opts=[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]];
+  const say={feishu:"事项存在本机，点了立刻生效；飞书多维表格在后台备份，手机上也能看。需要先装好 lark-cli 并初始化。",
+    notion:"事项存在本机，点了立刻生效；Notion 里的「心响事项」数据库在后台同步，手机上也能看。在 Notion 里改的内容会被下一次同步覆盖。",
+    device:"事项只存在这台电脑上，不需要飞书，也不同步到别处。"}[mode];
+  const form=(S.pickNotion||(mode==="notion"&&!r.notion))?`<div class="inline" style="flex-wrap:wrap;padding:12px 0 0;background:none;border:0"><input id="notiontok" type="password" autocomplete="off" placeholder="Integration Secret（ntn_…）"><input id="notionpage" autocomplete="off" placeholder="共享给它的页面链接" onkeydown="if(event.key==='Enter')notionOn()"><button class="btn pri" onclick="notionOn()">连接</button></div>
+    <p class="hint" style="margin:8px 0 0">在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> 新建 Internal integration，复制 Secret；再打开一个页面，右上角 ··· → Connections 加上它，Share → Copy link 粘过来。心响会在这个页面下建「心响事项」数据库。</p>`:"";
+  return `<div class="sec-h">事项记在哪</div><div class="list guide"><div class="chips" style="margin:0">${opts.map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>
+    <p class="hint" style="margin:8px 0 0">${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}</p>${form}</div>`;
+}
+async function pickStore(mode){
+  const r=(D.system||{}).record||{};
+  if(mode===r.mode) return;
+  if(mode==="notion"&&!r.notion){ S.pickNotion=true; return render(); }
+  if(mode==="device"&&!confirm("改成只存本机？之后的事项不再同步到别处。")) return;
+  try{ await api("/api/store",{mode},60000); S.pickNotion=false; toast("已切换"); load(); }catch(e){ toast(e.message); }
+}
+async function notionOn(){
+  const tok=$("#notiontok"), page=$("#notionpage");
+  if(!tok.value.trim()) return tok.focus(); if(!page.value.trim()) return page.focus();
+  if(!LIVE) return toast("原型里不能连接");
+  try{ await api("/api/notion/connect",{token:tok.value.trim(),page:page.value.trim()},60000); tok.value=""; S.pickNotion=false; toast("已连接 Notion，事项开始同步"); load(); }
+  catch(e){ toast(e.name==="AbortError"?"连 Notion 超时了，再试一次":e.message); }
+}
+const SLACK_SCOPES="search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
+function sourcesBlock(me){
+  const r=(D.system||{}).record||{}, every=r.review_every??5, t=S.slackTry;
+  const pace=`<div class="kv"><div>聊天多久整理一次</div><div><div class="chips" style="margin:0">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"只在固定时间"]].map(([m,l])=>
+    `<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>
+    <div class="hint" style="margin:6px 0 0">${every?`@你、带时间或催办的话马上整理；其余有新的、且离上一轮满 ${every} 分钟就整理。22:00 以后只处理紧急的。`:`@你、带时间或催办的话马上整理；其余每天 ${esc((r.review_times||[]).join("、"))} 各整理一次。`}每轮用一次本机 AI。</div></div></div>`;
+  const lines=t&&t.lines?t.lines.map(m=>`<div class="row flat ev"><span class="ud"></span><span class="pill" style="justify-self:start">${esc(m.kind)}</span><div style="min-width:0"><div class="t wrap">${esc(m.text)}</div><div class="s">${esc(m.chat_name)}　${esc(m.sent_at)}　${esc(m.sender_name)}</div></div><div></div><div class="acts"><a class="btn link" href="${esc(m.message_id)}" target="_blank" rel="noopener">原消息</a></div></div>`).join(""):"";
+  const result=!t?"":t.busy?`<div class="list" style="margin-top:8px"><div class="empty">正在读 Slack，最多要一分钟</div></div>`:t.error?`<div class="list" style="margin-top:8px"><div class="empty">${esc(t.error)}</div></div>`:
+    `<div class="sec-h">最近 24 小时<span class="aside">看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑，不建事项）</span></div><div class="list">${lines||'<div class="empty">没有筛中的话</div>'}</div>`;
+  const slack=me?`<div class="kv" style="border-top:1px solid var(--line2)"><div>Slack</div><div>已连接 ${esc(me.team||"")}，@${esc(me.user||"")}，令牌 …${esc(me.tail||"")}
+      <div class="hint" style="margin:4px 0 8px">每分钟搜一次你能看到的新消息，和飞书聊天一样只留跟你有关的话。</div><div class="acts"><button class="btn pri" onclick="slackTry()">试跑最近 24 小时</button><button class="btn" onclick="slackOff()">断开</button></div></div></div>`
+    :`<div class="kv" style="border-top:1px solid var(--line2)"><div>Slack</div><div>未连接
+      <div class="hint" style="margin:4px 0 8px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</div>
+      <div class="inline" style="padding:0;background:none;border:0"><input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button></div></div></div>`;
+  return `<div class="sec-h">接入来源</div><div class="list">${pace}${slack}</div>${result}`;
+}
+async function slackOn(){
+  const box=$("#slacktok"), tok=box&&box.value.trim(); if(!tok) return box&&box.focus();
+  if(!LIVE) return toast("原型里不能连接");
+  try{ const r=await api("/api/slack/connect",{token:tok},30000); box.value=""; drafts.delete("slack-token"); toast(`已连接 ${r.team||""}`); load(); }
+  catch(e){ toast(e.name==="AbortError"?"连 Slack 超时了，再试一次":e.message); }
+}
+async function slackOff(){
+  if(!confirm("断开 Slack？已经收进来的事项不受影响。")) return;
+  try{ await api("/api/slack/disconnect",{}); S.slackTry=null; toast("已断开"); load(); }catch(e){ toast(e.message); }
+}
+async function slackTry(){
+  S.slackTry={busy:true}; render();
+  try{ S.slackTry=await api("/api/slack/try",{hours:24},90000); }
+  catch(e){ S.slackTry={error:e.name==="AbortError"?"读 Slack 超时了，稍后再试":e.message}; }
+  render();
+}
+function engineChoice(cur, found){
+  const opts=[["codex","GPT","codex 命令行"],["claude","Claude","claude 命令行"]];
+  return `<div class="list"><div class="kv"><div>本机 AI 用哪个</div><div><div class="chips" style="margin:0">${opts.map(([k,l,cmd])=>
+    `<button class="chip ${cur===k?"on":""}" onclick="setSetting('engine','${k}')">${l}${found[k]===false?"（没找到 "+cmd+"）":""}</button>`).join("")}</div>
+    <div class="hint" style="margin:6px 0 0">切换后，下一件活开始用新的 AI。做到一半的事会带着之前的对话交给它，接着往下做。两个都不加载你自己的插件和配置，只能写自己的工作文件夹，可以联网。</div></div></div></div>`;
+}
+function storeLine(t, mode){
   if(!t.local) return "事项：飞书多维表格；对话、交付版本、时间线：本机";
+  if(mode==="device") return "全部在本机，不同步到别处";
   const b=t.failed?`<b class="late">${t.failed} 条没备份上</b> <button class="btn" onclick="retryBackup()">重试</button>`
     :t.pending?`还有 ${t.pending} 条正在备份`:`已全部备份${t.ok_at?`（${esc(t.ok_at)}）`:""}`;
-  return `全部在本机，点了立刻生效。飞书多维表格做备份：${b}`;
+  return `全部在本机，点了立刻生效。${mode==="notion"?"Notion 同步":"飞书多维表格做备份"}：${b}`;
 }
 async function retryBackup(){ try{ await api("/api/backup/retry",{}); toast("已重新排队备份"); }catch(e){ toast("暂时连不上服务"); } load(); }
 
 /* ---------- one item: what it is, what to do now, the whole conversation ---------- */
-function openItem(n){ if(!byN(n)) return; S.item=n; S.inline=null; markItemRead(n); render(); const d=$("#detail"); if(d) d.scrollTop=0; if(!wide()) window.scrollTo(0,0); }
+function openItem(n){ if(!byN(n)) return; if(S.item!==n){ S.tab="talk"; S.mode="ai"; } S.item=n; S.inline=null; markItemRead(n); render(); const d=$("#detail"); if(d) d.scrollTop=0; if(!wide()) window.scrollTo(0,0); }
 function closeItem(){ S.item=null; S.inline=null; render(); }
 function pastOf(i){
   const past=(D.history||{})[i.n]||[];
@@ -628,7 +728,8 @@ function thread(i){
   const flush=()=>{ if(steps.length){ out.push(`<div class="m"><div class="who-line"><b>AI</b>干活的步骤</div><div class="steps">${steps.map(s=>`${esc(s.at.slice(6))} ${esc(s.text)}`).join("　/　")}</div></div>`); steps=[]; } };
   for(const m of th){
     if(m.kind==="step"){ steps.push(m); continue; } flush();
-    if(m.from==="system"){ out.push(`<div class="sys">${esc(m.at)}　${linkify(m.text)}</div>`); continue; }
+    if(m.from==="system"){ out.push(`<div class="sys ${m.kind==="closed"?"closed":""}">${m.kind==="closed"?"✓ ":""}${esc(m.at)}　${linkify(m.text)}</div>`); continue; }
+    if(m.kind==="note"){ out.push(`<div class="m me note"><div class="who-line"><b>你的备注</b>${esc(m.at)}</div><div class="bub">${linkify(m.text)}</div></div>`); continue; }
     const who=m.from==="me"?"你":(m.driver||"AI");
     let body=`<div class="bub">${linkify(m.text)}</div>`;
     if(m.kind==="deliver"){ const v=dv[k]||{v:k+1,summary:m.text,url:m.url}; k++;
@@ -639,7 +740,7 @@ function thread(i){
   }
   flush();
   if(isWorking(i)){ const c=jobOf(i); out.push(`<div class="m"><div class="who-line"><b>${esc(c.driver||"AI")}</b>现在</div><div class="steps">${esc(c.step||"在做")}…</div></div>`); }
-  return out.length?`<div class="thread">${out.join("")}</div>`:`<div class="hint" style="margin:0">还没有对话。在下面说一句，AI 就从这件事开始。</div>`;
+  return out.length?`<div class="thread">${out.join("")}</div>`:`<div class="hint" style="margin:0">还没有对话。在下面说一句，AI 就从这件事开始；只想自己记一笔，切到「写备注」。</div>`;
 }
 function nowText(i){
   if(blockedAI(i)) return [`AI 卡住了，问你：<b>${esc(i.blocker)}</b>${i.tried?`<div class="hint" style="margin:4px 0 0">它已经试过：${esc(i.tried)}</div>`:""}`,"red"];
@@ -652,30 +753,88 @@ function nowText(i){
   if(i.who==="我") return [`这是你的事${due(i)?"，"+due(i):""}。要 AI 帮忙，点「交给 AI」。`,""];
   return ["别人在做，到期前会提醒你跟进。",""];
 }
-function itemView(i){
-  const [what,tone]=nowText(i), parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
-  const dvs=(D.deliverables[i.n]||[]).length, d=due(i), reopen=["完成","待验收"].includes(i.status);
-  const src=`<div class="src">
+function closedText(i){
+  const c=i.closed; if(!["完成","取消"].includes(i.status)) return "";
+  if(c) return `${esc(String(c.at).slice(5,16).replace("T"," ").replace("-","/"))}，${esc(c.by)}${esc(c.how||"")}`;
+  return i.finished_at?`${esc(i.finished_at.slice(5).replace("-","/"))}，完成人没有记录`:"完成人没有记录";
+}
+function replyState(i){
+  const th=D.threads[i.n]||[]; let k=-1;
+  th.forEach((m,x)=>{ if(m.from==="me"&&m.kind!=="note") k=x; });
+  if(k<0||["完成","取消"].includes(i.status)) return "";
+  if(th.slice(k+1).some(m=>m.kind==="deliver"||(m.from==="ai"&&["say","ask"].includes(m.kind)))) return "";
+  let text, tone="";
+  if(i.who!=="AI") text="已记为补充材料。这件事没有交给 AI，不会产生回复。";
+  else if(isWorking(i)){ const c=jobOf(i); text=esc(c.driver||"AI")+" 已接手："+esc(String(c.step||"处理中").replace(/^\d\/4\s*/,""))+"。完成本轮后回复。"; tone="blue"; }
+  else if(blockedAI(i)) {text="AI 遇到阻碍："+esc(i.blocker||"等待补充材料");tone="amber";}
+  else if(i.status==="待确认") text="执行方或任务信息还待确认，尚未开工。";
+  else if(D.settings?.builtin_driver===false) { text="本机 AI 已关闭，等待外部 AI 领取。"; tone="amber"; }
+  else { const q=(D.worker&&D.worker.queue)||[], pos=q.indexOf(i.n); text=pos>=0?"已排队，前面有 "+pos+" 件。":"已记录，尚未收到 AI 接手回执。"; tone="amber"; }
+  return `<div class="reply-state ${tone}">${text}</div>`;
+}
+function sessionControl(s, css, label){
+  if(!s.can_open) return "";
+  if(s.link && /^https?:\/\//i.test(s.link)) return `<a class="${css}" href="${esc(s.link)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${label}</a>`;
+  return `<button class="${css}" data-job="${esc(s.job)}" onclick="event.stopPropagation();openSession(this.dataset.job,${s.status==="open"})">${label}</button>`;
+}
+function sessionsTab(i){
+  const list=i.sessions||[];
+  if(!list.length) return `<div class="hint" style="margin:0">这件事还没有绑定 AI 会话。</div>`;
+  return `<p class="hint" style="margin:0 0 10px">本机 GPT / Claude 的对话会在终端里打开，接着原来的上下文和它说；外部 AI 报了链接的，直接打开链接。</p><div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
+    <div style="min-width:0"><div class="t">${esc(s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>正在做</span>':""}</div><div class="s">第一次 ${esc(s.first)}，最近 ${esc(s.started)}，共 ${s.rounds||1} 轮${s.session?`　编号 ${esc(String(s.session).slice(0,13))}…`:""}</div></div>
+    <div></div><div class="acts">${s.can_open?sessionControl(s,"btn","打开对话"):'<span class="hint" style="margin:0">没有记下对话编号</span>'}</div></div>`).join("")}</div>`;
+}
+function sourceTab(i){
+  const parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
+  return `<div class="src">
     <div><span class="k">来源</span>${esc(i.source||"手动添加")}${i.source_url?`　<a href="${esc(i.source_url)}" target="_blank" rel="noopener">打开原处 ↗</a>`:""}</div>
-    ${i.quote?`<div class="quote">${esc(i.quote.slice(0,280))}</div>`:""}
+    ${i.quote?`<div class="quote">${esc(i.quote.slice(0,400))}</div>`:""}
     <div><span class="k">要做</span>${esc(i.next||i.title)}</div>${i.criterion?`<div><span class="k">做到算完</span>${esc(i.criterion)}</div>`:""}
     ${parent?`<div><span class="k">关联</span>给 <a href="#" onclick="openItem(${parent.n});return false">#${parent.n} ${esc(parent.title)}</a> 备的材料</div>`:""}
     ${kids.length?`<div><span class="k">关联</span>AI 在帮你备材料：${kids.map(k=>`<a href="#" onclick="openItem(${k.n});return false">#${k.n}</a>`).join("、")}</div>`:""}
     ${pastOf(i)}</div>`;
+}
+function composer(i){
+  const note=S.mode==="note", reopen=["完成","待验收"].includes(i.status), closed=["完成","取消"].includes(i.status);
+  const ph=note?"写给自己的备注，不会发给 AI。比如：已电话确认，按 B 方案"
+    :reopen?"告诉 AI 要改什么，它在原来的对话里接着改，交新版本":"接着和 AI 说这件事；也可以直接说「完成了」「周五」「不做」";
+  const hint=note?"只记在这件事里，AI 收不到":(i.who==="AI"||reopen)?"AI 接手后，进度会显示在对话里":"你的事：记成补充材料，AI 不回复";
+  const btns=note?`<button data-n="${i.n}" class="btn" onclick="sendNote(false)">保存备注</button>${closed?"":`<button data-n="${i.n}" class="btn pri" onclick="sendNote(true)">备注并完成</button>`}`
+    :`<button data-n="${i.n}" class="btn pri" onclick="sendSay()">发送给 AI</button>`;
+  return `<div class="composer ${note?"note":""}"><div class="seg" role="tablist"><button class="${note?"":"on"}" onclick="S.mode='ai';render();$('#saybox')?.focus()">发给 AI</button><button class="${note?"on":""}" onclick="S.mode='note';render();$('#saybox')?.focus()">写备注</button></div>
+    <textarea id="saybox" data-draft="${note?"note":"say"}-${i.n}" aria-label="${note?"写备注":"和 AI 说这件事"}" placeholder="${ph}" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();${note?"sendNote(false)":"sendSay()"}}"></textarea>
+    <div class="bot"><span>${hint}，⌘↩ ${note?"保存":"发送"}</span><span class="btns">${btns}</span></div></div>`;
+}
+function itemView(i){
+  const [what,tone]=nowText(i), dvs=(D.deliverables[i.n]||[]).length, d=due(i), tab=S.tab||"talk";
+  const talk=(D.threads[i.n]||[]).filter(m=>m.from!=="system"&&m.kind!=="step").length, sess=(i.sessions||[]).length;
+  const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
+    ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
+    [i.status==="取消"?"关闭":"完成",closedText(i)],
+    ["交付",dvs||i.url?`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}`:""],
+    ["来源",`${esc(i.source||"手动")}${i.source_url?`<a href="${esc(i.source_url)}" target="_blank" rel="noopener">原处 ↗</a>`:""}`],
+    ["更新",esc(ago(i.updated))]];
   return `<div class="d-head"><div class="d-top"><span class="num">#${i.n}</span>${pill(i)}
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
-    <div class="props"><span>${avatar(i)}${esc(whoText(i))}</span>${d?`<span class="${late(i)?"late":""}"><em>截止</em>${esc(d)}</span>`:""}${i.due_note?`<span><em>改到</em>${esc(i.due_note)}</span>`:""}
-      ${dvs?`<span><em>交付</em>v${dvs}</span>`:""}${i.updated?`<span><em>更新</em>${esc(ago(i.updated))}</span>`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开交付 ↗</a>`:""}</div></div>
+    <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
-    <div class="d-sec"><h3>和 AI 的对话</h3>${thread(i)}</div>
-    <div class="d-sec"><h3>从哪来</h3>${src}</div><div class="spacer"></div>
-    <div class="composer"><textarea id="saybox" data-draft="say-${i.n}" aria-label="和 AI 说这件事" placeholder="${reopen?"告诉 AI 要改什么，它在原来的对话里接着改，交新版本":"接着和 AI 说这件事，比如：预算按 600 一天重算；加上竞品"}" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))sendSay()"></textarea>
-      <div class="bot"><span>${reopen?"发送后 AI 会接着改":"AI 会在这件事的对话里看到"}，⌘↩ 发送</span><button data-n="${i.n}" ${pendingFor(i.n)?"disabled":""} class="btn pri" onclick="sendSay()">发送</button></div></div>`;
+    <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
+    <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
+    ${composer(i)}`;
 }
 function sendSay(){
   const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus();
+  if(LIVE){ if(pendingFor(S.item)) return; return submitCommand({kind:"say",n:S.item,text:t},[S.item]); }
   const i=byN(S.item); apply(S.item, ["完成","待验收"].includes(i.status)?"revise":"add", t);
+}
+function sendNote(complete){
+  const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus();
+  const n=S.item;
+  if(LIVE){ if(pendingFor(n)) return; return submitCommand({kind:"note",n,text:t,complete:!!complete},[n]); }
+  say(n,"me","note",t); $("#saybox").value=""; drafts.delete("note-"+n);
+  const i=byN(n); if(complete&&!["完成","取消"].includes(i.status)){ i.status="完成"; i.finished=TODAY; i.closed={by:"你",how:"标记完成",at:new Date().toISOString(),note:t}; }
+  toast(complete?"备注已记下，标为完成（原型）":"备注已记下（原型）"); render();
 }
 
 /* ---------- frame ---------- */
@@ -688,14 +847,23 @@ const ICON={
   all:'<path d="M5.5 4.5h8M5.5 8h8M5.5 11.5h8"/><circle cx="2.8" cy="4.5" r=".6"/><circle cx="2.8" cy="8" r=".6"/><circle cx="2.8" cy="11.5" r=".6"/>',
   mem:'<path d="M8 3.2c-2.6 0-4.5 1.8-4.5 4.1 0 1.4.7 2.6 1.9 3.3V13h5.2v-2.4c1.2-.7 1.9-1.9 1.9-3.3 0-2.3-1.9-4.1-4.5-4.1z"/><path d="M6.4 13h3.2"/>',
   sys:'<circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/>'};
+function engineTag(s){ const e=s.engine; return `<span class="eng ${e}">${e==="gpt"?"GPT":e==="claude"?"Claude":esc(String(s.driver||"AI").slice(0,6))}</span>`; }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
   const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",0,""],["sys","设置",0,""]];
-  const w=D.worker||{}, list=doingList(), busy=list.length>0;
-  const lines=busy?list.slice(0,3).map(d=>`<button class="l" onclick="openItem(${d.n})">#${d.n} ${esc((byN(d.n)||{}).title||d.title||"")}<span>　${esc(String(d.step||"").replace(/^\d\/4\s*/,""))}</span></button>`).join("")
-    :(w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`);
+  const w=D.worker||{}, run=LIVE?(Array.isArray(D.running)?D.running:[]):doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false})), busy=run.length>0;
+  const rows=run.map(s=>{ const it=s.n&&byN(s.n);
+    return `<div class="sess">${engineTag(s)}${it?`<button class="t" onclick="openItem(${it.n})">#${it.n} ${esc(it.title)}</button>`:`<span class="t">${esc(s.title)}</span>`}${sessionControl(s,"go","打开")}<span class="s">${esc(String(s.step||"").replace(/^\d\/4\s*/,""))}${s.minutes!=null?`，${s.minutes} 分钟`:""}</span></div>`; }).join("");
+  const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
   return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${S.view===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
-    `<div class="aicard ${busy?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${busy?`AI 正在做 ${list.length} 件`:"AI 空闲"}</div>${lines}</div>`;
+    `<div class="aicard ${busy?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${busy?`AI 会话进行中 ${run.length}`:"AI 空闲"}</div>${busy?rows:idle}</div>`;
+}
+async function openSession(job, running){
+  if(!LIVE) return toast("原型里不能打开");
+  if(running&&!confirm("这段对话 AI 正在用。现在打开接着聊，可能打断它这一轮。仍要打开吗？")) return;
+  try{ const r=await api("/api/session/open",{job},20000);
+    if(r.link) window.open(r.link,"_blank","noopener"); else toast("已在终端里打开这段对话，可以直接和它说");
+  }catch(e){ toast(e.message||"打不开这段对话"); }
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
 const TITLES={inbox:"收件箱",todo:"等我处理",doing:"进行中",done:"已完成",all:"全部事项",mem:"记忆",sys:"设置"};

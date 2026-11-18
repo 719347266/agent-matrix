@@ -226,6 +226,8 @@ def _check(root, module, tries=6):
 
 class CodexRun:
     """One `codex exec` turn in a folder, streamed so the panel can follow it."""
+    THREAD_FILE = ".thread"
+    NAME = "本机 GPT"
 
     def __init__(self, config, workdir, *, thread=None, effort=None, timeout_minutes=None, ephemeral=False):
         self.config, self.workdir, self.thread = config, Path(workdir), thread
@@ -370,7 +372,7 @@ class CodexRun:
         if kind == "thread.started" and event.get("thread_id"):
             self.thread = event["thread_id"]
             if not self.ephemeral:
-                (self.workdir / ".thread").write_text(self.thread)
+                (self.workdir / self.THREAD_FILE).write_text(self.thread)
         elif kind == "turn.completed":
             for k, v in (event.get("usage") or {}).items():
                 self.usage[k] = self.usage.get(k, 0) + (v or 0)
@@ -381,6 +383,66 @@ class CodexRun:
             self.messages += 1
         if on_event:
             on_event(event)
+
+
+def claude_binary(config):
+    return getattr(config, "worker_claude", "") or shutil.which("claude")
+
+
+class ClaudeRun(CodexRun):
+    """One `claude -p` turn, same contract as CodexRun. Like GPT: without the owner's CLAUDE.md, plugins,
+    hooks and MCP (--safe-mode); writes only inside the folder, network allowed (OS sandbox)."""
+    THREAD_FILE = ".claude-session"
+    NAME = "本机 Claude"
+    SANDBOX = json.dumps({"sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False,
+                                      "network": {"allowedDomains": ["*"]}}})
+
+    def argv(self):
+        binary = claude_binary(self.config)
+        if not binary:
+            raise MatrixError("找不到 Claude 命令行（claude）。在 config.yaml 的 worker_claude 写上它的路径。")
+        argv = [binary, "-p", "--safe-mode", "--output-format", "stream-json", "--verbose",
+                "--permission-mode", "dontAsk", "--allowedTools", "Bash Read Write Edit Glob Grep WebFetch WebSearch",
+                "--settings", self.SANDBOX]
+        if self.config.worker_claude_model:
+            argv += ["--model", self.config.worker_claude_model]
+        if self.effort in {"low", "medium", "high", "xhigh", "max"}:
+            argv += ["--effort", self.effort]
+        if self.thread:
+            argv += ["--resume", self.thread]
+        if self.ephemeral:
+            argv.append("--no-session-persistence")
+        return argv
+
+    def _event(self, line, on_event):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return
+        kind = event.get("type")
+        if kind == "system" and event.get("subtype") == "init" and event.get("session_id"):
+            self.thread = event["session_id"]
+            if not self.ephemeral:
+                (self.workdir / self.THREAD_FILE).write_text(self.thread)
+        elif kind == "assistant":
+            for part in (event.get("message") or {}).get("content") or []:
+                if part.get("type") == "tool_use" and part.get("name") == "Bash":
+                    self.commands += 1
+                elif part.get("type") == "text":
+                    self.messages += 1
+        elif kind == "result":
+            for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
+                self.usage[k] = self.usage.get(k, 0) + ((event.get("usage") or {}).get(k) or 0)
+            if event.get("result"):  # codex writes its last message with -o; claude reports it here
+                (self.workdir / ".last.txt").write_text(event["result"], encoding="utf-8")
+        if on_event:
+            on_event(event)
+
+
+def engine(root):
+    """Which local AI the built-in driver uses, chosen on the 系统 page."""
+    from . import thread as conversation
+    return ClaudeRun if conversation.setting(Path(root), "engine", "codex") == "claude" else CodexRun
 
 
 # ---- checking what came back ----------------------------------------------------------------------------
@@ -532,7 +594,7 @@ class Item:
     def prepare_folder(self, client, rows, row, notes):
         from . import background
         keep = record_copy(self.root, self.rid)
-        for name in (".thread", "交付.md", ".seen.json"):  # carry the conversation over if the folder moved
+        for name in (".thread", ".claude-session", "交付.md", ".seen.json"):  # carry the conversation over if the folder moved
             if (keep / name).is_file() and not (self.workdir / name).is_file():
                 shutil.copyfile(keep / name, self.workdir / name)
         previous = None
@@ -595,7 +657,7 @@ class Item:
             return
         if text:
             from . import thread as conversation
-            conversation.add(self.root, self.rid, "ai", "say", text[:3000], driver="本机 GPT")
+            conversation.add(self.root, self.rid, "ai", "say", text[:3000], driver=engine(self.root).NAME)
         (self.workdir / ".last.txt").unlink(missing_ok=True)
 
     def defer(self, reason, tokens):
@@ -625,7 +687,7 @@ class Item:
         from .prework import add_note, notify, publish_markdown
         self.show("交付中", "建飞书文档")
         keep = record_copy(self.root, self.rid)
-        for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".seen.json"):
+        for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".claude-session", ".seen.json"):
             if (self.workdir / name).is_file():
                 shutil.copyfile(self.workdir / name, keep / name)
         with project(self.root, self.config) as (client, state):
@@ -709,28 +771,32 @@ def run_item_job(root, config, job):
     write_status(root, kind="item", record_id=item.rid, n=job.get("n"), title=(job.get("title") or "")[:26],
                  stage="找背景", step="读任务单和背景", item_started=now().isoformat(timespec="seconds"),
                  stage_at=now().isoformat(timespec="seconds"))
-    thread_file, timed = item.workdir / ".thread", item.workdir / ".timed_out"
+    Run = engine(root)
+    thread_file, timed = item.workdir / Run.THREAD_FILE, item.workdir / ".timed_out"
     thread = thread_file.read_text().strip() if thread_file.is_file() else None
     prompt, seen, result = (job["builtin_prompt"] if thread else job["instructions"]), {}, {}
     stop = lambda: drive.get(root, job["id"])["status"] != "open"
     for _ in range(MAX_FIX_ROUNDS + 1):
-        run = CodexRun(config, item.workdir, thread=thread).run(prompt, on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
+        run = Run(config, item.workdir, thread=thread).run(prompt, on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
         if not run.stopped and not stop() and thread and not run.messages and not run.timed_out and run.returncode:
             # the old conversation cannot be resumed: start a new one, the history comes with the instructions
             thread_file.unlink(missing_ok=True)
             thread = None
-            run = CodexRun(config, item.workdir).run(job["instructions"], on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
+            run = Run(config, item.workdir).run(job["instructions"], on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
         if run.stopped or stop():
             item.release()
             from .prework import add_note
-            add_note(root, item.rid, "本轮已停止，本机 GPT 停下了")
+            add_note(root, item.rid, f"本轮已停止，{Run.NAME}停下了")
             return {"status": "cancelled"}
         thread = run.thread or thread
+        if thread:
+            from .sessions import bind
+            bind(root, job["id"], thread)
         item.mirror_reply()
         if run.timed_out or not thread:
             if run.timed_out:
                 timed.write_text(now().isoformat())
-            item.defer(f"这一轮超时（{config.worker_timeout_minutes} 分钟），下一轮接着做" if run.timed_out else "GPT 没有启动成功，稍后重试", 0)
+            item.defer(f"这一轮超时（{config.worker_timeout_minutes} 分钟），下一轮接着做" if run.timed_out else f"{Run.NAME}没有启动成功，稍后重试", 0)
             drive._close(root, drive.get(root, job["id"]), "released")
             return {"status": "deferred"}
         timed.unlink(missing_ok=True)
@@ -750,10 +816,14 @@ def run_job(root, config, job):
     write_status(root, kind=job["kind"], stage=job.get("title") or job["kind"], step="", n=None, title=(job.get("title") or "")[:26],
                  stage_at=now().isoformat(timespec="seconds"))
     folder = Path(job["folder"])
-    run = CodexRun(config, folder, effort=config.extract_effort, timeout_minutes=15).run(job["instructions"])
+    Run = engine(root)
+    run = Run(config, folder, effort=config.extract_effort, timeout_minutes=15).run(job["instructions"])
+    if run.thread:
+        from .sessions import bind
+        bind(root, job["id"], run.thread)
     result = drive.submit(root, config, job["id"])
     if result.get("status") == "fix" and run.thread:
-        CodexRun(config, folder, thread=run.thread, effort=config.extract_effort, timeout_minutes=10).run(
+        Run(config, folder, thread=run.thread, effort=config.extract_effort, timeout_minutes=10).run(
             f"程序检查没通过：{result['problem']}\n改好 {'、'.join(job.get('output') or [])} 再结束。")
         result = drive.submit(root, config, job["id"])
     if result.get("status") == "fix":
@@ -772,7 +842,8 @@ def run_loop(root, config, *, max_jobs=200):
         return {"ok": True, "jobs": 0, "builtin": "off"}
     if os.name != "nt":
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(143)))
-    os.environ["XINXIANG_DRIVER"] = "本机 GPT"
+    name = engine(root).NAME
+    os.environ["XINXIANG_DRIVER"] = name
     width = max(1, min(20, int(getattr(config, "worker_concurrency", 10) or 1)))
     take, active, failed, counter = threading.Lock(), {}, set(), {"n": 0}
 
@@ -782,9 +853,9 @@ def run_loop(root, config, *, max_jobs=200):
                 if counter["n"] >= max_jobs:
                     return
                 try:
-                    job = drive.next_job(root, config, "本机 GPT", skip=set(failed))
+                    job = drive.next_job(root, config, name, skip=set(failed))
                 except (MatrixError, MatrixBusy, OSError) as exc:
-                    activity.log(root, "error", "本机 GPT 领活出错", detail=str(exc)[:300], status="failed")
+                    activity.log(root, "error", f"{name}领活出错", detail=str(exc)[:300], status="failed")
                     job = None
                 if job:
                     active[job["id"]], counter["n"] = job, counter["n"] + 1
@@ -800,7 +871,7 @@ def run_loop(root, config, *, max_jobs=200):
                 if job.get("ref", {}).get("record_id"):
                     with take:
                         failed.add(job["ref"]["record_id"])
-                activity.log(root, "error", f"本机 GPT 处理「{str(job.get('title'))[:16]}」出错", detail=str(exc)[:300], status="failed")
+                activity.log(root, "error", f"{name}处理「{str(job.get('title'))[:16]}」出错", detail=str(exc)[:300], status="failed")
                 try:
                     drive.release(root, config, job["id"])
                 except Exception:

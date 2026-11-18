@@ -119,7 +119,7 @@ class DriveTests(unittest.TestCase):
 
         class Done:
             stdout = "✓"
-        with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[-1]) or Done()):
+        with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[argv.index("--text") + 1]) or Done()):
             out = drive.submit(self.root, self.config, job["id"])
         self.assertEqual(commands, ["47 AI备", "49 AI做"])
         self.assertEqual([a["n"] for a in out["applied"]], [47, 49, 50])
@@ -160,7 +160,7 @@ class MoreTriageTests(unittest.TestCase):
 
             class Done:
                 stdout = "✓"
-            with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[-1]) or Done()):
+            with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[argv.index("--text") + 1]) or Done()):
                 out = drive.submit(root, Config(), job["id"])
             self.assertEqual(commands, ["47 完成", "47 + https://x/docx/a", "50 不做", "51 无交付"])
             self.assertEqual([a["n"] for a in out["applied"]], [47, 50, 51])

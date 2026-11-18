@@ -146,7 +146,7 @@ def _append(old, line):
 
 
 class Applier:
-    def __init__(self, config, client, state, *, source, message_ref, immediate=False, progress=None):
+    def __init__(self, config, client, state, *, source, message_ref, immediate=False, progress=None, note=None):
         from .workflow import Gateway
         self.config, self.client, self.state = config, client, state
         from .monitor import save_snapshot
@@ -154,7 +154,18 @@ class Applier:
         self.immediate = immediate
         self.deferred = []
         self.source, self.ref = source, message_ref
+        self.note = note  # the owner's note when closing ("备注并完成")
         self.now = _now(config)
+
+    def closed(self, row, how):
+        """Remember who closed it: the owner (心响, Feishu reply, 豚豚) or the AI judging it already done."""
+        if self.client is None:
+            return
+        try:
+            from .thread import closed
+            closed(self.client.root, row["record_id"], "AI" if self.source == "ai" else "你", how, self.note)
+        except Exception:
+            pass
 
     def rows(self):
         return self.gateway.rows()
@@ -262,6 +273,7 @@ class Applier:
             from .prework import _draft_url
             self.write(row, {"状态": ["完成"], "验收结果": ["通过"], "完成时间": self.now.isoformat(), "进度": "完成",
                              "交付情况": ["有交付" if _draft_url(row.get("交付物链接")) else "待补交付"]}, op, n)
+            self.closed(row, "验收通过")
             unlocked = self.unlock_parent(row, n)
             return f"#{n} {name} → 完成 ✓" + (f"；#{unlocked} 可以开始了" if unlocked else "")
         if op.verb == "reject":
@@ -274,6 +286,7 @@ class Applier:
             return self.complete(row, op, n, name, st, no_file=op.verb == "no_deliverable") + self.stop_ai(row)
         if op.verb == "cancel":
             self.write(row, {"状态": ["取消"], "进度": "不做"}, op, n)
+            self.closed(row, "判断不用做" if self.source == "ai" else "标为不做")
             return f"#{n} {name} → 不做了 ✓" + self.stop_ai(row)
         if op.verb == "reschedule":
             from .workflow import day
@@ -389,6 +402,8 @@ class Applier:
         if st == "完成" and single(row.get("交付情况")) == single(patch.get("交付情况")):
             return f"#{n} {name} 已经完成 ✓"
         receipt = self.write(row, patch, op, n)
+        if st != "完成":
+            self.closed(row, ("判断已经办完" if self.source == "ai" else "标记完成") + ("（无交付）" if no_file else ""))
         if getattr(self, "immediate", False) and patch.get("交付情况") == ["待补交付"]:
             self.deferred.append(receipt.get("readback") or {**row, **patch})
         return f"#{n} {name} → 完成 ✓{note}"
@@ -658,7 +673,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="处理本人对事项的回复指令")
     p.add_argument("command", nargs="?", default="text", choices=["text", "poll", "check"])
     p.add_argument("--text")
-    p.add_argument("--source", default="cindy", choices=["cindy", "feishu"])
+    p.add_argument("--source", default="cindy", choices=["cindy", "feishu", "ai"])
     p.add_argument("--message-ref")
     p.add_argument("--config", type=Path, default=Path("config.yaml"))
     args = p.parse_args(argv)

@@ -58,7 +58,13 @@ class Feishu:
         from . import itemstore
         return self.use_local_items and itemstore.enabled(self.config) and itemstore.is_items_table(self.config, args)
 
+    def feishu_free(self):
+        from . import itemstore
+        return itemstore.feishu_free(self.config)
+
     def _exec(self, args, *, auth=False, manifest=False):
+        if self.feishu_free():
+            raise MatrixError("没接飞书：事项记在 Notion 或本机，这一步要用飞书，已跳过。")
         scope = permission_scope(args)
         # A later failure must supersede any earlier success in this same run.
         self.authorized_scopes.discard(scope)
@@ -93,6 +99,9 @@ class Feishu:
         return d if auth else d.get("data", {})
 
     def auth(self, _retry=True):
+        if self.feishu_free():  # nothing to verify: no Feishu account is used
+            ok = {"status": "ready", "available": True, "verified": True}
+            return {"app_id": self.config.app_id, "user": dict(ok), "bot": dict(ok)}
         raw = self._exec(["auth", "status", "--json", "--verify"], auth=True)
         raw = raw.get("data", raw)
         user = raw.get("identities", {}).get("user", {})
@@ -142,7 +151,7 @@ class Feishu:
         """Send an interactive card (display + open-url buttons only) to the owner."""
         if not self.can_message_self:
             raise MatrixError("尚未核验当前机器人与账号绑定，不发送消息。")
-        if not self.config.owner_open_id.startswith("ou_"):
+        if not self.config.owner_open_id.startswith("ou_") and (channel or self.config.notify_channel) != "local":
             raise MatrixError("尚未绑定本人 open_id，不发送消息。")
         argv = ["im", "+messages-send", "--user-id", self.config.owner_open_id, "--msg-type", "interactive",
                 "--content", json.dumps(card, ensure_ascii=False), "--idempotency-key", key,
@@ -184,7 +193,7 @@ class Feishu:
     def send_self(self, text, key, channel=None):
         if not self.can_message_self:
             raise MatrixError("尚未核验当前机器人与账号绑定，不发送消息。")
-        if not self.config.owner_open_id.startswith("ou_"):
+        if not self.config.owner_open_id.startswith("ou_") and (channel or self.config.notify_channel) != "local":
             raise MatrixError("尚未绑定本人 open_id，不发送消息。")
         # No recipient argument is exposed to agents or CLI callers.
         # Text links like [打开](url) only render in a post message; plain text stays text.

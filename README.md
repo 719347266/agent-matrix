@@ -11,6 +11,12 @@
 - **宁缺毋滥。** 一条待办必须有原话里承接的字眼，负责人要么是说话的人，要么在原话里被点了名，日期必须写明。没有待办的会议不发任何消息。
 - **你是最后一关。** AI 做的事只有你回"过"才算完成。每次写表都会读回核对，结果不确定时不会自动重试。
 
+## 查看事项和 AI 原对话
+
+- 事项详情里的「写备注」只留在本机；「备注并完成」同时记录完成人和时间。旧事项没有操作人记录时会如实显示。
+- 左栏显示心响里已接手且仍在运行的工作。详情的「AI 会话」保留历史；本机 Codex、Claude 可回到原对话，外部 AI 用 `next --driver 名称 --session 对话链接` 绑定。没有上报可打开地址的会话仅显示状态，不会打开无关对话。
+- 「发给 AI」区分记录、排队、接手和等待补充。设置里可以管理 Slack、事项存放位置、本机 AI 和聊天整理频率。
+
 ## 心响：本机客户端
 
 所有消息和操作都在本机的"心响"里，事项也存在本机（点了立刻生效），飞书多维表格在后台做备份；飞书消息只收早报和晚报。架构见 [心响架构.md](心响架构.md)。
@@ -81,7 +87,7 @@
 
 需要 Python 3.11+、已登录的 `lark-cli`（npm 包 `@larksuite/cli`）、已登录的 GPT 命令行 `codex`（AI 员工用它干活；找不到时在 `config.yaml` 写 `worker_codex: <路径>`），以及一个能跑定时脚本的宿主（launchd、Windows 计划任务或任何 AI 宿主都行）。
 
-AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
+AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。本机 AI 可以在心响「系统」页切换成 Claude（用本机的 `claude` 命令行，同样不加载你的插件、钩子、MCP 和 CLAUDE.md，只能写工作文件夹，可以联网）；对应可调项 `worker_claude`（命令路径，默认从 PATH 找）、`worker_claude_model`（如 opus、sonnet，默认用账号默认模型）。GPT 的可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e .
@@ -93,6 +99,10 @@ cp config.example.yaml config.yaml
 ```
 
 实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`；卡片按钮要在"事件与回调 → 回调配置"里开启 `card.action.trigger`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
+
+**事项记在哪**：心响「系统 → 事项记在哪」可选飞书多维表格、Notion 或只存本机（`item_store: local / notion / device`）。选 Notion 或本机时完全不需要飞书：飞书会议、群聊、任务这几个来源随之关闭，Slack 照常。Notion 要一个 Internal integration 的 Secret 和一个共享给它的页面，心响在页面下建「心响事项」数据库并单向同步，在 Notion 里改的内容会被下一次同步覆盖。
+
+**Slack（可选）**：在 `config.yaml` 写 `slack_token: xoxp-...`（或设环境变量 `SLACK_USER_TOKEN`），常驻监听每分钟用搜索拉一次新的 Slack 消息，按和飞书聊天一样的规则过滤，到整理时间一起提取，来源链接直接跳回那条 Slack 消息。用户 token 需要这些权限：`search:read`（一次搜出所有新消息；没有它就退回逐个会话读，只读前 25 个）`channels:history` `groups:history` `im:history` `mpim:history` `channels:read` `groups:read` `im:read` `mpim:read` `users:read`。
 
 宿主需要配置的定时任务：
 

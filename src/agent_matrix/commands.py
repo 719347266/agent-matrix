@@ -65,10 +65,10 @@ class Commands:
         if not text:
             raise ValueError("没有内容。")
         kind = body.get("kind", "cmd")
-        if kind not in {"cmd", "say"}:
+        if kind not in {"cmd", "say", "note"}:
             raise ValueError("不支持这个操作。")
-        n = int(body.get("n") or 0) if kind == "say" else None
-        if kind == "say":
+        n = int(body.get("n") or 0) if kind in {"say", "note"} else None
+        if kind in {"say", "note"}:
             if n < 1:
                 raise ValueError("缺少事项编号。")
             numbers = [n]
@@ -80,7 +80,10 @@ class Commands:
         request_id = str(body.get("request_id") or uuid4().hex)
         if not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", request_id):
             raise ValueError("请求编号无效。")
-        payload = json.dumps({"kind": kind, "text": text, "n": n}, ensure_ascii=False, sort_keys=True)
+        payload = {"kind": kind, "text": text, "n": n}
+        if kind == "note" and body.get("complete"):
+            payload["complete"] = True
+        payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute("SELECT * FROM commands WHERE id=?", (request_id,)).fetchone()
@@ -181,6 +184,22 @@ def run_action(root, payload, request_id, progress):
         try:
             require_owned(config, state)
             text = payload["text"]
+            note = None
+            if payload["kind"] == "note":
+                # A note is for the owner's own record: it never goes to the AI. "备注并完成" closes the item with it.
+                row = next((r for r in _snapshot(root).get("rows", []) if int(r.get("编号") or 0) == payload["n"]), None)
+                if not row:
+                    return {"ok": False, "reply": f"#{payload['n']} 找不到这件事"}
+                status = (row.get("状态") or [None])[0] if isinstance(row.get("状态"), list) else row.get("状态")
+                closing = bool(payload.get("complete")) and status not in {"完成", "取消"}
+                key = "app-note:" + request_id
+                if not state.get(key):
+                    thread.add(root, row["record_id"], "me", "note", text, dedupe=key)
+                    state.set(key, True)
+                if not closing:
+                    extra = f"（这件事已经{status}）" if payload.get("complete") else "，没有发给 AI"
+                    return {"ok": True, "reply": f"#{payload['n']} 备注已记下 ✓{extra}"}
+                text, note = f"{payload['n']} 完成", text
             if payload["kind"] == "say":
                 row = next((r for r in _snapshot(root).get("rows", []) if int(r.get("编号") or 0) == payload["n"]), None)
                 status = (row.get("状态") or [None])[0] if row and isinstance(row.get("状态"), list) else (row or {}).get("状态")
@@ -190,11 +209,14 @@ def run_action(root, payload, request_id, progress):
                         thread.add(root, row["record_id"], "me", "feedback", text)
                         state.set(key, True)
                     return {"ok": True, "reply": f"#{payload['n']} 已记进对话；这件事标为不做，要接着做先点「恢复」"}
-                # On a finished item, what the owner says reopens it: the AI picks up the same conversation.
-                text = f"{payload['n']} 改 {text}" if status == "完成" else f"{payload['n']} + {text}"
+                # A short action ("完成了", "周五", "不做") runs as that action. Other words go to the AI:
+                # on a finished item they reopen it, and the AI picks up the same conversation.
+                text = say_text(payload["n"], text)
+                if status in {"完成", "待验收"} and " + " in text:
+                    text = f"{payload['n']} 改 {payload['text'].strip()}"
             ops, problems = parse(text, datetime.now(TZ).date())
             applier = Applier(config, client, state, source="cindy", message_ref="app-" + request_id,
-                              immediate=True, progress=progress)
+                              immediate=True, progress=progress, note=note)
             progress("正在读取事项")
             lines = [line for op in ops for line in applier.apply(op)]
             for line in lines:
@@ -206,6 +228,17 @@ def run_action(root, payload, request_id, progress):
                     "reply": "\n".join([*lines, *problems]), "deferred": applier.deferred}
         finally:
             state.close()
+
+
+def say_text(n, text):
+    """What the item box sends: a short action for this item ("完成了", "1 完成", "周五") runs as that action;
+    anything else is material for the AI ("预算按 600 一天重算")."""
+    from .reply import parse
+    short = re.sub(rf"^#?{n}\s+", "", text).rstrip("了啦吧。！!～~ ")
+    ops, problems = parse(f"{n} {short}", datetime.now(TZ).date())
+    if short and ops and not problems and all(set(op.numbers) == {n} for op in ops):
+        return f"{n} {short}"
+    return f"{n} + {text}"
 
 
 def enrich_deliverables(root, rows, request_id):

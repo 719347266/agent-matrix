@@ -1,5 +1,5 @@
 """Real-time sources: chat pre-filter, chat extraction rules, Feishu task mapping, listener replies."""
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import tempfile
@@ -58,8 +58,28 @@ class ChatReviewTests(unittest.TestCase):
 
     def test_review_runs_only_at_set_times(self):
         state = SimpleNamespace(get=lambda key, default=None: None)
-        self.assertIsNone(due_slot(CONFIG, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ)))
-        self.assertEqual(due_slot(CONFIG, state, datetime(2026, 11, 17, 15, 0, tzinfo=TZ)), "2026-11-17T14:30")
+        fixed = CONFIG.model_copy(update={"chat_review_every_minutes": 0})
+        self.assertIsNone(due_slot(fixed, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ)))
+        self.assertEqual(due_slot(fixed, state, datetime(2026, 11, 17, 15, 0, tzinfo=TZ)), "2026-11-17T14:30")
+
+    def test_review_runs_every_five_minutes_when_lines_wait(self):
+        from agent_matrix.chat_review import check, prepare
+        from agent_matrix.sources.chats import table
+        from agent_matrix.state import State
+        state = State(self.root / "state.db")
+        table(state)
+        at = datetime(2026, 11, 17, 10, 0, tzinfo=TZ)
+        self.assertFalse(check(CONFIG, state, at)["run_model"])          # nothing waiting: keep waiting
+        state.db.execute("INSERT INTO chat_candidates VALUES ('m1','c','群','group','u','陈','2026-11-17 10:00','麻烦明天发我','[]','找你的','pending',NULL)")
+        state.db.commit()
+        self.assertTrue(check(CONFIG, state, at)["run_model"])           # due at once: no round yet
+        prepare(CONFIG, state, self.root, at)
+        state.set("chat-review:open", None)
+        state.db.execute("INSERT INTO chat_candidates VALUES ('m2','c','群','group','u','陈','2026-11-17 10:01','麻烦后天发我','[]','找你的','pending',NULL)")
+        state.db.commit()
+        self.assertFalse(check(CONFIG, state, at + timedelta(minutes=4))["run_model"])  # within 5 minutes of the last round
+        self.assertTrue(check(CONFIG, state, at + timedelta(minutes=5))["run_model"])
+        state.close()
 
 
 class FeishuTaskTests(unittest.TestCase):
@@ -192,3 +212,149 @@ class SameThingTests(unittest.TestCase):
         out = [line for op in parse("31 不重复", date(2026, 11, 17))[0] for line in a.apply(op)]
         self.assertIn("不是重复", out[0])
         self.assertIn("3-31", store["merge:distinct"])
+
+
+class SlackSourceTests(unittest.TestCase):
+    def test_slack_lines_land_in_chat_candidates_with_permalink(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.sources.chats import pending
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        state = State(root / "state.db")
+        replies = {
+            "auth.test": {"user_id": "UME", "url": "https://acme.slack.com/"},
+            "users.conversations": {"channels": [{"id": "C1", "name": "ops", "updated": 2},
+                                                 {"id": "D1", "is_im": True, "user": "UCHEN", "updated": 1}]},
+            "users.info": {"user": {"profile": {"display_name": "陈一凡"}}},
+        }
+        history = {"C1": [{"ts": "1795400000.000100", "user": "UCHEN", "text": "<@UME> 周五前帮忙把投放预算定一下"},
+                          {"ts": "1795400001.000100", "user": "UCHEN", "text": "周五前帮忙把投放预算定一下"},  # not addressed
+                          {"ts": "1795400002.000100", "bot_id": "B1", "text": "<@UME> 明天记得发周报"}],
+                   "D1": [{"ts": "1795400003.000200", "user": "UCHEN", "text": "能不能明天把数据发我"}]}
+        def api(tok, method, **p):
+            if method == "search.messages":
+                raise MatrixError("Slack search.messages 失败：missing_scope")  # token without search:read
+            return {"messages": history[p["channel"]]} if method == "conversations.history" else replies[method]
+        config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
+        out = slack.poll(config, root, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api)
+        self.assertEqual((out["candidates"], out["via"]), (2, "list"))
+        rows = {r["chat_name"]: r for r in pending(state)}
+        self.assertEqual(rows["Slack · ops"]["message_id"], "https://acme.slack.com/archives/C1/p1795400000000100")
+        self.assertIn("@王小明", rows["Slack · ops"]["text"])
+        self.assertEqual(rows["Slack · 陈一凡"]["chat_mode"], "p2p")
+        self.assertEqual(state.get("slack:cursor:C1"), "1795400002.000100")
+        self.assertEqual(slack.poll(CONFIG, root, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api), "no_token")
+        a = ChatAction(message_id=rows["Slack · ops"]["message_id"], title="定投放预算", quote="周五前帮忙把投放预算定一下",
+                       commitment_phrase="帮忙把投放预算定一下", owner_name="王小明", executor="我", confidence=0.9)
+        self.assertEqual(chat_fields(CONFIG, a, rows["Slack · ops"])["来源链接"], rows["Slack · ops"]["message_id"])
+
+    def test_search_finds_new_lines_in_any_conversation_and_moves_one_cursor(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.sources.chats import pending
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        state = State(root / "state.db")
+        now = datetime(2026, 11, 17, 10, 0, tzinfo=TZ)
+        t = now.timestamp()
+        found = [  # newest first, as search returns them
+            {"ts": f"{t - 60:.6f}", "user": "UME", "text": "我明天下午3点前把报价单整理好发给 Tom",
+             "channel": {"id": "DSELF", "is_im": True, "name": "UME"}},
+            {"ts": f"{t - 120:.6f}", "user": "UCHEN", "text": "<@UME> 麻烦周五前确认一下合同", "channel": {"id": "C9", "name": "sales"}},
+            {"ts": f"{t - 180:.6f}", "user": "UCHEN", "text": "周五前确认一下合同", "channel": {"id": "C9", "name": "sales"}},
+            {"ts": f"{t - 3 * 3600:.6f}", "user": "UCHEN", "text": "<@UME> 老消息，明天记得", "channel": {"id": "C9", "name": "sales"}},
+        ]
+        calls = []
+        def api(tok, method, **p):
+            calls.append(method)
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"real_name": {"UME": "王小明", "UCHEN": "陈一凡"}[p["user"]]}}
+            return {"messages": {"matches": found, "paging": {"pages": 1}}}
+        config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
+        out = slack.poll(config, root, state, now, api=api)
+        self.assertEqual((out["candidates"], out["via"]), (2, "search"))
+        self.assertNotIn("conversations.history", calls)
+        kinds = {r["chat_name"]: r["kind"] for r in pending(state)}
+        self.assertEqual(kinds, {"Slack · 王小明": "我的承诺", "Slack · sales": "找你的"})
+        self.assertEqual(state.get("slack:search-cursor"), found[0]["ts"])
+        self.assertEqual(slack.poll(config, root, state, now, api=api)["candidates"], 0)  # nothing new since the cursor
+
+    def test_followups_after_a_slack_item_are_read_from_slack(self):
+        from datetime import datetime
+        from types import SimpleNamespace
+        from agent_matrix.background import after_context
+        from agent_matrix.timeutil import TZ
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "Richmond"}}}
+            self.assertEqual(p["channel"], "D1")
+            return {"messages": [{"ts": "1795000500.000200", "user": "UME", "text": "合同确认好了"},
+                                 {"ts": "1795000000.000100", "user": "UR", "text": "麻烦你周五前确认一下合同"}]}
+        from agent_matrix.sources import slack
+        client = SimpleNamespace(config=Config(slack_token="xoxp-1"))
+        row = {"来源链接": "https://acme.slack.com/archives/D1/p1795000000000100", "原话引用": "", "创建时间": ""}
+        orig = slack.history
+        try:
+            slack.history = lambda config, ch, oldest, latest=None, thread=None: orig(config, ch, oldest, latest, thread=thread, api=api)
+            later = after_context(client, row, datetime.now(TZ))
+        finally:
+            slack.history = orig
+        self.assertEqual(len(later), 1)  # the request itself is not "after"
+        self.assertTrue(later[0].endswith("本人] 合同确认好了"))
+
+    def test_followups_include_thread_replies(self):
+        from agent_matrix.background import after_context
+        from agent_matrix.sources import slack
+        from agent_matrix.timeutil import TZ
+        asked = "1795000000.000100"
+        calls = []
+        def api(tok, method, **p):
+            calls.append(method)
+            if method == "auth.test":
+                return {"user_id": "UME"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "Richmond"}}}
+            if method == "conversations.history":
+                return {"messages": [{"ts": asked, "user": "UR", "text": "麻烦确认合同", "reply_count": 1, "latest_reply": "1795000900.000000"}]}
+            self.assertEqual(p["ts"], asked)
+            return {"messages": [{"ts": asked, "user": "UR", "text": "麻烦确认合同", "thread_ts": asked},
+                                 {"ts": "1795000900.000000", "user": "UME", "text": "已确认", "thread_ts": asked}]}
+        orig = slack.history
+        slack.history = lambda config, ch, oldest, latest=None, thread=None: orig(config, ch, oldest, latest, thread=thread, api=api)
+        try:
+            client = SimpleNamespace(config=Config(slack_token="xoxp-1"))
+            # The request is a channel message; the owner answered in its thread.
+            later = after_context(client, {"来源链接": f"https://acme.slack.com/archives/C1/p{asked.replace('.', '')}"}, datetime.now(TZ))
+            self.assertEqual([x.split("] ")[1] for x in later], ["↳ 已确认"])
+            # The request itself sits in a thread: read that thread.
+            calls.clear()
+            link = slack.permalink("https://acme.slack.com/", "C1", "1794999000.000001", asked)
+            self.assertEqual(slack.link_parts(link), ("C1", "1794999000.000001", asked))
+            later = after_context(client, {"来源链接": link}, datetime.now(TZ))
+            self.assertNotIn("conversations.history", calls)
+            self.assertEqual([x.split("] ")[1] for x in later], ["麻烦确认合同", "已确认"])
+        finally:
+            slack.history = orig
+
+    def test_connect_saves_token_and_shows_identity_without_the_token(self):
+        from agent_matrix import app
+        from agent_matrix.config import load
+        from agent_matrix.sources import slack
+        root = Path(tempfile.mkdtemp())
+        api = lambda tok, method, **p: ({"user": {"real_name": "王小明", "profile": {"real_name": "王小明", "display_name": "小明"}}}
+                                        if method == "users.info" else
+                                        {"user_id": "UME", "user": "wang", "team": "Acme", "url": "https://acme.slack.com/"})
+        with self.assertRaises(MatrixError):
+            slack.connect(root, "xoxb-bot-token", api=api)            # bot tokens can't read as the owner
+        who = slack.connect(root, " xoxp-1234-abcd ", api=api)
+        saved = load(root / "config.yaml")
+        self.assertEqual(saved.slack_token, "xoxp-1234-abcd")
+        self.assertEqual((saved.owner_name, saved.owner_aliases), ("王小明", ["小明"]))  # "you" in Slack is recognised
+        shown = app.system_info(root)["slack"]
+        self.assertEqual((shown["team"], shown["tail"]), ("Acme", "abcd"))
+        self.assertNotIn("xoxp", json.dumps(shown) + json.dumps(who))
+        slack.disconnect(root)
+        self.assertEqual((load(root / "config.yaml").slack_token, app.system_info(root)["slack"]), ("", None))

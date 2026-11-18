@@ -101,7 +101,9 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         state.set(cursor_key, now.isoformat())
     if kept:
         from .. import activity
-        activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话：@你或带时间、催办的马上提取，其余攒够几条或等满 {config.chat_extract_wait_minutes} 分钟一起提取")
+        pace = (f"其余 {config.chat_review_every_minutes} 分钟内统一提取" if config.chat_review_every_minutes
+                else f"其余到下一个整理时间（{'、'.join(config.chat_review_times)}）统一提取")
+        activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话：@你或带时间、催办的马上提取，{pace}")
     state.set("chats:last-poll", now.isoformat())
     return {"chats": len(chats), "messages_scanned": scanned, "candidates": kept}
 

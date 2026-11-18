@@ -34,6 +34,8 @@ def _db(root):
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS judgments (record_id TEXT PRIMARY KEY, at TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT);
+        CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, at TEXT NOT NULL,
+            by TEXT NOT NULL, how TEXT, note TEXT);
     """)
     return db
 
@@ -58,6 +60,31 @@ def add(root, record_id, sender, kind, text, *, url=None, driver=None, at=None, 
 
 
 URL = re.compile(r"https?://[^\s；;，,)）]+")
+
+
+def closed(root, record_id, by, how, note=None, at=None):
+    """Who closed an item and how (你 / AI / 飞书任务 · 标记完成 / 验收通过 / 标为不做), with the owner's note.
+    Also one line in the item's conversation, so the story shows it."""
+    at = at or _now()
+    db = _db(root)
+    try:
+        with db:
+            db.execute("INSERT INTO closures (record_id, at, by, how, note) VALUES (?,?,?,?,?)",
+                       (record_id, at, by, how, (note or "").strip()[:2000] or None))
+    finally:
+        db.close()
+    add(root, record_id, "system", "closed", f"{by}{how}", at=at)
+
+
+def closures(root):
+    """The latest closure of every item: {record_id: {by, how, at, note}}."""
+    db = _db(root)
+    try:
+        return {rid: {"by": by, "how": how, "at": at, "note": note}
+                for rid, by, how, at, note in db.execute(
+                    "SELECT record_id, by, how, at, note FROM closures WHERE id IN (SELECT max(id) FROM closures GROUP BY record_id)")}
+    finally:
+        db.close()
 
 
 def classify(text):

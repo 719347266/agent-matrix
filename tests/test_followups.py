@@ -30,16 +30,16 @@ class ChatCatchTests(unittest.TestCase):
     def test_a_question_in_a_private_chat_is_kept(self):
         self.assertEqual(classify("这个版本你看过了吗？", from_owner=False, chat_mode="p2p", names=self.names), "找你的")
 
-    def test_urgent_or_at_you_goes_at_once_the_rest_waits_for_a_batch_or_half_an_hour(self):
-        self.assertIsNone(ready(CONFIG, [], NOW))
+    def test_urgent_or_at_you_goes_at_once_the_rest_follows_the_chosen_pace(self):
+        self.assertIsNone(ready(CONFIG, [], NOW, "every"))
         self.assertIsNotNone(ready(CONFIG, [line("小王，今天下班前把数据发我")], NOW))
         self.assertIsNotNone(ready(CONFIG, [line("人生模拟器反馈", kind="@你")], NOW))
-        self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW))                       # one calm line waits
-        self.assertIsNotNone(ready(CONFIG, [line("小王，帮忙看下这个需求", minutes_ago=31)], NOW))     # …at most 30 minutes
-        self.assertIsNotNone(ready(CONFIG, [line("帮忙看下 A"), line("帮忙看下 B"), line("帮忙看下 C")], NOW))
+        self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW))                # not due yet: waits
+        self.assertIsNotNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW, "every"))    # the pace came round
+        self.assertIsNotNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW, "2026-11-18T14:30"))
         night = NOW.replace(hour=23)
-        self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求", minutes_ago=90)], night))       # late: morning
-        self.assertIsNotNone(ready(CONFIG, [line("小王，马上回我一下")], night))                        # unless urgent
+        self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], night, "every"))      # late: morning
+        self.assertIsNotNone(ready(CONFIG, [line("小王，马上回我一下")], night))                 # unless urgent
 
 
 class ReviseTests(unittest.TestCase):

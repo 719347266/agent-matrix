@@ -93,6 +93,11 @@ def sync(config, client, state, now, *, notify=True):
             gateway.update(row, {"状态": ["完成"], "进度": "完成", "完成时间": task.get("completed_at") or now.isoformat()},
                            f"feishu-task-done:{row['record_id']}", "feishu-task")
             completed.append(row["record_id"])
+            try:
+                from ..thread import closed
+                closed(client.root, row["record_id"], "你", "在飞书任务里勾了完成")
+            except Exception:
+                pass
     if merged:
         from .. import activity
         activity.log(client.root, "detect", "飞书任务：" + "、".join(f"#{n}" for n in merged) + " 是已有的事，已关联，不重复建")

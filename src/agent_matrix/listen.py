@@ -57,6 +57,14 @@ def backup_loop(root, path):
             if not itemstore.enabled(config) or not itemstore.imported(root) or not itemstore.status(root)["pending"]:
                 wait = 3
                 continue
+            if config.item_store in ("notion", "device"):
+                from . import notion
+                out = itemstore.backup(root, push=notion.push(config) if config.item_store == "notion" else lambda *a: None,
+                                       target="Notion ")
+                if out["pushed"] and config.item_store == "notion":
+                    log("backup", out["pushed"], "→ Notion", "· 还剩", out["pending"])
+                wait = 3 if out["pushed"] or not out["pending"] else 60
+                continue
             if client is None:
                 client = Feishu(config, root)
                 client.use_local_items = False  # this one writes the Feishu table itself
@@ -275,7 +283,9 @@ class Listener:
 
     def timers(self):
         jobs = []
-        if self.every("minute", 60):
+        from .itemstore import feishu_free
+        no_feishu = feishu_free(load(self.path))  # Feishu meetings, chats and tasks need Feishu; Slack does not
+        if self.every("minute", 60) and not no_feishu:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
@@ -296,14 +306,19 @@ class Listener:
                 monitor.save_snapshot(self.root, rows)
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
-        if self.every("chats", 600):
+        if self.every("chats", 600) and not no_feishu:
             def chat_poll(config, client, state):
                 from .sources import chats
                 if not config.chat_watch_enabled:
                     return "off"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
-        if self.every("tasks", 900):
+        if self.every("slack", 60):  # search: ~2 calls per poll, well under Slack limits
+            def slack_poll(config, client, state):
+                from .sources import slack
+                return slack.poll(config, self.root, state, datetime.now(TZ)) if config.chat_watch_enabled else "off"
+            jobs.append(("slack", slack_poll))
+        if self.every("tasks", 900) and not no_feishu:
             def tasks(config, client, state):
                 from .sources import feishu_tasks
                 return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if config.feishu_tasks_enabled else "off"
@@ -334,7 +349,8 @@ class Listener:
 
     def run(self):
         config = load(self.path)
-        for key, identity in EVENTS:
+        from .itemstore import feishu_free
+        for key, identity in [] if feishu_free(config) else EVENTS:
             Consumer(key, identity, self.inbox, self.status, config.lark_binary).start()
         from .app import start_background
         served = start_background(self.root, config)

@@ -5,12 +5,12 @@ const clone=x=>JSON.parse(JSON.stringify(x));
 const base={today:"2026-11-17",items:[{n:1,title:"测试",status:"进行中",who:"我"}],threads:{},deliverables:{},inbox:[],worker:{},settings:{},judgments:{},commands:[]};
 function harness(fetch,storage=new Map()){
   const elements=new Map();
-  const document={activeElement:null,querySelectorAll:()=>[],querySelector:s=>{
-    if(!elements.has(s))elements.set(s,{innerHTML:"",value:"",classList:{add(){},remove(){}},textContent:""});
+  const document={documentElement:{dataset:{}},addEventListener(){},activeElement:null,querySelectorAll:()=>[],querySelector:s=>{
+    if(!elements.has(s))elements.set(s,{innerHTML:"",value:"",dataset:{},classList:{add(){},remove(){},toggle(){}},textContent:""});
     return elements.get(s);
   }};
   const context=vm.createContext({console,Date,AbortController,fetch,document,
-    sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)}, window:{scrollTo(){}},
+    sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)}, location:{hash:""},window:{innerWidth:1440,scrollTo(){},addEventListener(){}},
     setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}});
   vm.runInContext(raw.replace("/*__DATA__*/null",JSON.stringify(base)).replace("const LIVE = !D;","const LIVE = true;")
     .replace("if(LIVE){ load(); } else render();","render();"),context);
@@ -87,11 +87,21 @@ const response=data=>({ok:true,status:200,json:async()=>clone(data)});
   // macOS can leave a textarea focused when a navigation button is clicked.
   const navigation=harness(async()=>response(clone(base)));
   navigation.run('openItem(1); document.activeElement={tagName:"TEXTAREA",value:"尚未发送",dataset:{draft:"say-1"},closest:()=>true}; S.view="all"; render();');
-  assert.match(navigation.elements.get("#main").innerHTML,/全部事项/);
+  assert.match(navigation.elements.get("#ttl").innerHTML,/全部事项/);
   let writes=0, markup=navigation.elements.get("#main").innerHTML;
   Object.defineProperty(navigation.elements.get("#main"),"innerHTML",{get:()=>markup,set:v=>{writes++;markup=v}});
   navigation.run('for(let i=0;i<20;i++)render()');
   assert.equal(writes,0,"unchanged polling must not replace the page DOM");
 
+  const live=harness(async()=>response(clone(base)));
+  live.run('D.items[0].who="AI"; D.threads[1]=[{from:"me",kind:"feedback",text:"改一下"}]; D.worker.queue=[2,1]');
+  assert.match(live.run('replyState(byN(1))'), /已排队，前面有 1 件/);
+  live.run('D.worker.doing=[{n:1,kind:"item",driver:"Claude",step:"2/4 阅读资料"}]; D.threads[1].push({from:"ai",kind:"step",text:"阅读资料"});');
+  assert.match(live.run('replyState(byN(1))'), /Claude 已接手：阅读资料/);
+  live.run('D.threads[1].push({from:"ai",kind:"say",text:"做好了"})');
+  assert.equal(live.run('replyState(byN(1))'),"");
+  live.run('D.running=[{job:"one",n:1,engine:"other",driver:"Cindy",can_open:true,step:"阅读"}]');
+  assert.match(live.run('sideHTML()'),/Cindy/);
+  assert.match(live.run('sideHTML()'),/打开/);
   console.log("Live client checks passed: immediate feedback, double click, verified success, lost acknowledgement, reload, safe retry, stale response.");
 })().catch(e=>{console.error(e);process.exitCode=1});
