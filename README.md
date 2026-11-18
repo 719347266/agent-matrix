@@ -94,6 +94,8 @@ cp config.example.yaml config.yaml
 
 实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`；卡片按钮要在"事件与回调 → 回调配置"里开启 `card.action.trigger`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
 
+**事项记在哪**：心响「系统 → 事项记在哪」可选飞书多维表格、Notion 或只存本机（`item_store: local / notion / device`）。选 Notion 或本机时完全不需要飞书：飞书会议、群聊、任务这几个来源随之关闭，Slack 照常。Notion 要一个 Internal integration 的 Secret 和一个共享给它的页面，心响在页面下建「心响事项」数据库并单向同步，在 Notion 里改的内容会被下一次同步覆盖。
+
 **Slack（可选）**：在 `config.yaml` 写 `slack_token: xoxp-...`（或设环境变量 `SLACK_USER_TOKEN`），常驻监听每 10 分钟读一次你最近活跃的 25 个 Slack 会话，按和飞书聊天一样的规则过滤，到整理时间一起提取，来源链接直接跳回那条 Slack 消息。用户 token 需要这些权限：`channels:history` `groups:history` `im:history` `mpim:history` `channels:read` `groups:read` `im:read` `mpim:read` `users:read`。
 
 宿主需要配置的定时任务：

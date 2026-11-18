@@ -39,6 +39,9 @@ def find_value(data, key):
 
 
 def require_owned(config, state):
+    from .itemstore import feishu_free
+    if feishu_free(config):
+        return  # items in Notion or only on this computer: no Feishu table is ever written
     if not config.base_token or state.get("owned_base") != config.base_token:
         raise MatrixError("目标 Base 没有本项目的创建凭据；拒绝写入其他表格。")
 

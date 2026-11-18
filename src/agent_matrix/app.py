@@ -187,9 +187,10 @@ def system_info(root):
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
         slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
+        notion_url = json.loads((db.execute("SELECT value FROM kv WHERE key='notion:url'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat, slack = {}, None, None
+        status, beat, slack, notion_url = {}, None, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
@@ -200,9 +201,12 @@ def system_info(root):
     try:
         config = load(Path(root) / "config.yaml")
         found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
+        mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
+        record = {"mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
+                  "notion": bool(config.notion_database_id), "notion_url": notion_url}
     except Exception:
-        found = {}
-    return {"engines": found, "slack": slack, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+        found, record = {}, {}
+    return {"engines": found, "slack": slack, "record": record, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -332,6 +336,17 @@ class Handler(BaseHTTPRequestHandler):
                         from .worker import kick
                         kick(root, load(root / "config.yaml"), force=True)
                 return self._send(200, {"ok": True})
+            if path in ("/api/store", "/api/notion/connect"):
+                from .models import MatrixError
+                from . import itemstore, notion
+                try:
+                    if path == "/api/notion/connect":
+                        return self._send(200, {"ok": True, **notion.connect(root, body.get("token"), body.get("page"))})
+                    return self._send(200, {"ok": True, "mode": itemstore.choose(root, body.get("mode"))})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except OSError:
+                    return self._send(400, {"ok": False, "reply": "连不上 Notion，检查网络后再试。"})
             if path.startswith("/api/slack/"):
                 from .config import load
                 from .models import MatrixError

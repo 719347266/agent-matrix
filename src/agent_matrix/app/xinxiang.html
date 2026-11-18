@@ -483,6 +483,31 @@ function inboxPage(){
 }
 function readMsg(id){ const m=D.inbox.find(x=>x.id===id); m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); if(m.n&&byN(m.n)) openItem(m.n,"inbox"); else render(); }
 function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); render(); }
+function recordBlock(r){
+  const mode=r.mode||"feishu", opts=[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]];
+  const say={feishu:"事项存在本机，点了立刻生效；飞书多维表格在后台备份，手机上也能看。需要先装好 lark-cli 并初始化。",
+    notion:"事项存在本机，点了立刻生效；Notion 里的「心响事项」数据库在后台同步，手机上也能看。在 Notion 里改的内容会被下一次同步覆盖。",
+    device:"事项只存在这台电脑上，不需要飞书，也不同步到别处。"}[mode];
+  const form=(S.pickNotion||(mode==="notion"&&!r.notion))?`<div class="inline" style="flex-wrap:wrap;padding:12px 0 0"><input id="notiontok" type="password" autocomplete="off" placeholder="Integration Secret（ntn_…）"><input id="notionpage" autocomplete="off" placeholder="共享给它的页面链接" onkeydown="if(event.key==='Enter')notionOn()"><button class="btn pri" onclick="notionOn()">连接</button></div>
+    <p class="hint">在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> 新建 Internal integration，复制 Secret；再打开一个页面，右上角 ··· → Connections 加上它，Share → Copy link 粘过来。心响会在这个页面下建「心响事项」数据库。</p>`:"";
+  return `<div class="head" style="margin-top:34px"><h2>事项记在哪</h2></div><div class="guide" style="margin-top:14px">
+    <div class="chips" style="margin:0">${opts.map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>
+    <p class="hint">${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}</p>${form}</div>`;
+}
+async function pickStore(mode){
+  const r=(D.system||{}).record||{};
+  if(mode===r.mode) return;
+  if(mode==="notion"&&!r.notion){ S.pickNotion=true; return render(); }
+  if(mode==="device"&&!confirm("改成只存本机？之后的事项不再同步到别处。")) return;
+  try{ await api("/api/store",{mode},60000); S.pickNotion=false; toast("已切换"); load(); }catch(e){ toast(e.message); }
+}
+async function notionOn(){
+  const tok=$("#notiontok"), page=$("#notionpage");
+  if(!tok.value.trim()) return tok.focus(); if(!page.value.trim()) return page.focus();
+  if(!LIVE) return toast("原型里不能连接");
+  try{ await api("/api/notion/connect",{token:tok.value.trim(),page:page.value.trim()},60000); tok.value=""; S.pickNotion=false; toast("已连接 Notion，事项开始同步"); load(); }
+  catch(e){ toast(e.name==="AbortError"?"连 Notion 超时了，再试一次":e.message); }
+}
 const SLACK_SCOPES="channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
 function slackBlock(me){
   const t=S.slackTry, lines=t&&t.lines?t.lines.map(m=>`<div class="row flat"><div class="main"><div class="title">${esc(m.text)}</div><div class="meta"><span>${esc(m.kind)}</span><span>${esc(m.chat_name)}</span><span>${esc(m.sent_at)}</span><span>${esc(m.sender_name)}</span><a href="${esc(m.message_id)}" target="_blank" rel="noopener">原消息</a></div></div></div>`).join(""):"";
@@ -494,7 +519,7 @@ function slackBlock(me){
     <div class="acts"><button class="btn pri" onclick="slackTry()">试跑最近 24 小时</button><button class="btn" onclick="slackOff()">断开</button></div></div>${result}`;
   return `${head}<div class="guide" style="margin-top:14px"><div><b>Slack</b> · 未连接</div>
     <p class="hint">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</p>
-    <div class="inline"><input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button></div></div>`;
+    <div class="inline" style="padding:12px 0 0"><input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button></div></div>`;
 }
 async function slackOn(){
   const box=$("#slacktok"), tok=box&&box.value.trim(); if(!tok) return box&&box.focus();
@@ -530,16 +555,18 @@ function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
   <div class="group">最近接入过的 AI</div><div class="list">${seen||'<div class="empty">还没有记录</div>'}</div>
   <div class="group">让任何 AI 接入<span class="aside">把下面这段发给它</span></div>
   <div class="guide"><pre id="guide">${esc(D.guide||"")}</pre><button class="btn pri" onclick="copyGuide()">复制接入说明</button></div>
+  ${recordBlock(s.record||{})}
   ${slackBlock(s.slack)}
   <div class="head" style="margin-top:34px"><h2>系统</h2></div><div class="kv" style="margin-top:14px">
   <div>外观</div><div class="chips" style="margin:0"><button class="chip ${t!=="light"?"on":""}" onclick="setTheme('night')">夜色</button><button class="chip ${t==="light"?"on":""}" onclick="setTheme('light')">日光</button></div>
   <div>本机常驻程序</div><div>${esc(s.listener||"运行中")}</div>
-  <div>飞书推送</div><div>${esc(s.subs||"")}</div><div>飞书消息</div><div>只发 08:30 早报、21:00 晚报</div><div>数据在哪</div><div>${storeLine(s.store||{})}</div></div>`; }
-function storeLine(t){
+  <div>飞书推送</div><div>${esc(s.subs||"")}</div><div>飞书消息</div><div>只发 08:30 早报、21:00 晚报</div><div>数据在哪</div><div>${storeLine(s.store||{}, (s.record||{}).mode)}</div></div>`; }
+function storeLine(t, mode){
   if(!t.local) return "事项：飞书多维表格；对话、交付版本、时间线：本机";
+  if(mode==="device") return "全部在本机，不同步到别处";
   const b=t.failed?`<b class="late">${t.failed} 条没备份上</b> <button class="btn" onclick="retryBackup()">重试</button>`
     :t.pending?`还有 ${t.pending} 条正在备份`:`已全部备份${t.ok_at?`（${esc(t.ok_at)}）`:""}`;
-  return `全部在本机，点了立刻生效。飞书多维表格做备份：${b}`;
+  return `全部在本机，点了立刻生效。${mode==="notion"?"Notion 同步":"飞书多维表格做备份"}：${b}`;
 }
 async function retryBackup(){ try{ await api("/api/backup/retry",{}); toast("已重新排队备份"); }catch(e){ toast("暂时连不上服务"); } load(); }
 
