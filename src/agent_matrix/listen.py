@@ -313,7 +313,7 @@ class Listener:
                     return "off"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
-        if self.every("slack", 600):
+        if self.every("slack", 60):  # search: ~2 calls per poll, well under Slack limits
             def slack_poll(config, client, state):
                 from .sources import slack
                 return slack.poll(config, self.root, state, datetime.now(TZ)) if config.chat_watch_enabled else "off"
