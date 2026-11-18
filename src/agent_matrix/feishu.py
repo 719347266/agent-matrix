@@ -52,6 +52,11 @@ class Feishu:
         self.runner = runner or subprocess.run
         self.can_message_self = False
         self.authorized_scopes = set()
+        self.use_local_items = True  # the backup sets False to write the Feishu table itself
+
+    def local_items(self, args):
+        from . import itemstore
+        return self.use_local_items and itemstore.enabled(self.config) and itemstore.is_items_table(self.config, args)
 
     def _exec(self, args, *, auth=False, manifest=False):
         scope = permission_scope(args)
@@ -121,6 +126,9 @@ class Feishu:
         allowed = WRITES if write else READS
         if command not in allowed or "--yes" in args:
             raise MatrixError("命令不在当前框架允许范围内。")
+        if command in {"+record-batch-update", "+record-batch-create"} and self.local_items(args):
+            from . import itemstore
+            return itemstore.apply_call(self, command, args)  # 心响 local store; Feishu gets it via backup
         argv = ["base", command, *args, "--as", "user", "--format", "json"]
         if write:
             try:
@@ -152,7 +160,7 @@ class Feishu:
             activity.log(self.root, "send", receipt["title"] or title, status="ok", ref=receipt["message_id"])
             return receipt
         try:  # Feishu messages (the 08:30 / 21:00 briefs) keep a copy in the local inbox too
-            inbox.add(self.root, "feishu:" + key, content)
+            inbox.add(self.root, "feishu:" + key, content, kind="brief" if str(key).startswith("brief") else None)
         except Exception:
             pass
         try:

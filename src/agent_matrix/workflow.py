@@ -103,7 +103,7 @@ class Gateway:
         if not matches(fresh, {k:v for k,v in before.items() if k not in {'record_id', '更新时间'}}):
             raise MatrixError('事项刚被修改，请重新读取后处理。')
         def write():
-            self.progress('正在保存到飞书')
+            self.progress('正在保存')
             receipt = self.client.call('+record-batch-update', *self.coords, '--json',
                                       js({'update_records':{rid:patch}}), write=True)
             if receipt.get('ignored_fields'):

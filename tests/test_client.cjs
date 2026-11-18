@@ -11,9 +11,10 @@ const fixture = {
 };
 const element = {innerHTML: "", textContent: "", className: "", classList: {add(){},remove(){}}, value:""};
 const context = vm.createContext({
-  console, Date, document: {querySelector: () => element, querySelectorAll: () => [], activeElement: null},
+  console, Date, document: {querySelector: () => element, querySelectorAll: () => [], activeElement: null, documentElement: {dataset: {}}},
   setTimeout: () => 1, clearTimeout(){}, setInterval: () => 1, clearInterval(){},
-  window: {scrollTo(){}},
+  matchMedia: () => ({matches: false, addEventListener(){}}),
+  window: {scrollTo(){}, addEventListener(){}, matchMedia: () => ({matches: false, addEventListener(){}})},
 });
 vm.runInContext(source.replace("/*__DATA__*/null", JSON.stringify(fixture)), context);
 const evaluate = s => vm.runInContext(s, context);

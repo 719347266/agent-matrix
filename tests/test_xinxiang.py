@@ -171,3 +171,35 @@ class TriageTests(unittest.TestCase):
             self.assertTrue(thread.setting(tmp, "auto_assign", False))
             thread.judge(tmp, "r49", "ai", "起草 JD，AI 能独立完成")
             self.assertEqual(thread.judgments(tmp)["r49"]["decision"], "ai")
+
+
+class NotMineTests(unittest.TestCase):
+    """Things that are not provably the owner's never land on the owner (or on the AI working for them)."""
+
+    def setUp(self):
+        from hashlib import sha256
+        from agent_matrix.meeting_review import Action, Review
+        self.transcript = "00:10 阿杰：这些我回头再优化一下。\n00:20 老周：小林你约个时间。"
+        a = dict(text="t", quote="这些我回头再优化一下", timestamp="00:10", reference=self.transcript.splitlines()[0],
+                 commitment_phrase="我回头再优化", confidence=0.95)
+        self.Action, self.a = Action, a
+        self.review = Review(meeting_id="1" * 19, transcript_sha256=sha256(self.transcript.encode()).hexdigest(),
+                             actions=[Action(title="更新FAQ", owner_name="小王", direction="mine", **a)])
+        self.meta = {"meeting_id": "1" * 19, "start_time": "2026-11-18 09:16", "owner_name": "我"}
+        self.config = Config(owner_name="我", owner_open_id="ou_me")
+
+    def test_an_owner_the_words_do_not_support_is_someone_else_and_hidden(self):
+        from agent_matrix.meeting_review import repair_review, task_fields, validate_review
+        review, notes = repair_review(self.review, self.transcript, self.meta)
+        validate_review(review, self.transcript, self.meta)
+        fields = task_fields(review.actions[0], self.config, self.meta)
+        self.assertEqual((fields["执行方"], fields.get("排除本人提醒")), (["别人"], True))
+        self.assertIn("不列给你", notes[0])
+
+    def test_unknown_owner_is_not_mine_unless_it_is_clearly_mine(self):
+        from agent_matrix.meeting_review import task_fields
+        unknown = self.Action(title="补知识库", owner_name=None, direction="unknown", **self.a)
+        self.assertEqual(task_fields(unknown, self.config, self.meta)["执行方"], ["别人"])
+        self.assertTrue(task_fields(unknown, self.config, self.meta).get("排除本人提醒"))
+        mine = self.Action(title="补知识库", owner_name=None, direction="mine", **self.a)
+        self.assertEqual(task_fields(mine, self.config, self.meta)["执行方"], ["我"])

@@ -140,8 +140,42 @@ def build_state(root):
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
+            **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,
-            "worker": worker, "inbox": box, "system": system_info(root)}
+            "worker": worker, "inbox": box, "system": {**system_info(root), "store": store_info(root)}}
+
+
+def store_info(root):
+    """Where the items live, and how far the Feishu backup is behind."""
+    from .monitor import _local_store
+    if not _local_store(root):
+        return {"local": False}
+    from . import itemstore
+    st = itemstore.status(root)
+    return {"local": True, "pending": st["pending"], "failed": st["failed"], "ok_at": str(st.get("ok_at") or "")[5:16].replace("T", " ")}
+
+
+def memory_view(root, items):
+    """记忆层 for the page: the owner's rules, what waits on a condition, recent decisions, and per item what
+    was said about its topic before."""
+    from . import memory
+    try:
+        def moment(m):
+            return {"id": m["id"], "kind": m["kind"], "label": memory.KIND_LABEL.get(m["kind"], ""), "text": m["text"],
+                    "quote": (m.get("quote") or "")[:200], "source": m.get("source_title") or "", "at": str(m["at"])[5:16],
+                    "wait_for": m.get("wait_for"), "due": (m.get("due") or "")[:10] or None, "status": m.get("status")}
+        waiting = [moment(m) for m in memory.moments(root, kind="waiting", limit=40) if m["status"] in {"open", "alerted"}]
+        recent = [moment(m) for m in memory.moments(root, limit=60) if m["kind"] in {"decision", "open_question"}][:20]
+        history = {}
+        for i in items:
+            if i["hidden"] or i["status"] in {"完成", "取消"}:
+                continue
+            lines = [moment(m) for m in memory.recall(root, f"{i['title']} {i.get('next') or ''}", limit=4)]
+            if lines:
+                history[i["n"]] = lines
+        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent}, "history": history}
+    except Exception as exc:
+        return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
 
 
 def system_info(root):
@@ -273,6 +307,18 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/commands/dismiss":
                 self.server.commands.dismiss(str(body.get("id") or ""))
                 return self._send(200, {"ok": True})
+            if path == "/api/rules":
+                from . import memory
+                if body.get("add"):
+                    memory.add_rule(root, body["add"], "本人在心响里加的", source="本人")
+                if body.get("remove"):
+                    memory.remove_rule(root, body["remove"])
+                if body.get("waiting_done"):
+                    memory.set_status(root, body["waiting_done"], "done")
+                return self._send(200, {"ok": True, "rules": memory.rules(root)})
+            if path == "/api/backup/retry":
+                from . import itemstore
+                return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
             if path == "/api/settings":
                 from . import thread
                 if body.get("engine") in {"codex", "claude"}:
@@ -332,14 +378,31 @@ def start_background(root, config):
         thread.backfill(root)
         inbox.import_history(root)
         drive.install_shim(root)  # `~/.agent-matrix/bin/xinxiang`: the command any AI calls
+        from . import memory
+        memory.backfill_meetings(root)  # earlier meetings become history (quietly, once)
     except Exception:
         pass
     try:
         server = make_server(root, config.app_port)
     except OSError:
-        return None  # port busy: another instance already serves it
+        # Busy: fine if it is another 心响; if some other program holds the port, say so loudly.
+        if not is_xinxiang(config.app_port):
+            from . import activity
+            activity.log(root, "error", f"心响打不开：端口 {config.app_port} 被别的程序占用",
+                         detail="在 config.yaml 里把 app_port 改成别的数字，再重启监听和心响.app（macapp/build.sh）。", status="failed")
+        return None
     threading.Thread(target=server.serve_forever, daemon=True, name="xinxiang").start()
     return server
+
+
+def is_xinxiang(port):
+    """Is the program answering on this port 心响 (and not some other local server)?"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as r:
+            return "<title>心响</title>" in r.read(4000).decode("utf-8", "ignore")
+    except Exception:
+        return False
 
 
 def main(argv=None):

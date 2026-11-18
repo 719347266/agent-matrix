@@ -210,6 +210,67 @@ def _prepare_triage(root, config, driver):
             "instructions": (Path(root) / "prompts/triage.md").read_text(encoding="utf-8")}
 
 
+LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
+
+
+def _prepare_learn(root, config, driver):
+    """Now and then: turn the owner's recent feedback into standing rules (偏好快照)."""
+    from . import memory, thread as conversation
+    from .worker import scratch
+    if _busy(root, "learn"):
+        return None
+    since = conversation.setting(root, "learned_at", "")
+    hist = conversation.history(root)
+    feedback = []
+    snap = {}
+    try:
+        from .monitor import _snapshot
+        snap = {r.get("record_id"): r for r in _snapshot(root).get("rows") or []}
+    except Exception:
+        pass
+    for rid, h in hist.items():
+        for m in h.get("messages", []):
+            if m["from"] == "me" and m["kind"] == "feedback" and len(m["text"]) >= 6 and m["at"] > (since[5:16].replace("T", " ") if since else ""):
+                feedback.append({"item": str((snap.get(rid) or {}).get("标题") or ""), "at": m["at"], "said": m["text"][:400]})
+    if not feedback:
+        return None
+    fresh_enough = len(feedback) >= LEARN_MIN_NEW
+    stale = not since or now() - datetime.fromisoformat(since) > timedelta(hours=LEARN_EVERY_HOURS)
+    if not (fresh_enough or stale):
+        return None
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "learn", stamp)
+    (folder / "feedback.json").write_text(json.dumps(feedback[-60:], ensure_ascii=False, indent=1), encoding="utf-8")
+    (folder / "rules.json").write_text(json.dumps(memory.rules(root), ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {len(feedback)} 条反馈里学规矩", "folder": str(folder),
+            "ref": {"count": len(feedback)}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": (Path(root) / "prompts/learn.md").read_text(encoding="utf-8")}
+
+
+def _submit_learn(root, job):
+    from . import activity, memory, thread as conversation
+    try:
+        learned = json.loads((Path(job["folder"]) / "learned.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "没有找到有效的 learned.json（格式见说明里的例子）。"}
+    added = []
+    for r in (learned.get("add") or [])[:3]:
+        rule = memory.add_rule(root, r.get("rule"), r.get("why", ""), source="AI 学的")
+        if rule:
+            added.append(rule)
+    ai_rules = {x["id"] for x in memory.rules(root) if x["source"] == "AI 学的"}
+    for rid in learned.get("retire") or []:
+        if rid in ai_rules:
+            memory.remove_rule(root, rid)
+    conversation.set_setting(root, "learned_at", now().isoformat(timespec="seconds"))
+    if added:
+        activity.log(root, "detect", "从你的反馈里学到新规矩：" + "；".join(added)[:200])
+    _close(root, job, "done")
+    return {"ok": True, "status": "done", "added": added}
+
+
 def _try_existing_review(root, source_dir, validate, publish, label):
     """Extracted earlier but the publish failed: publish without a new model run."""
     from . import activity
@@ -349,7 +410,7 @@ def _prepare_item(root, config, driver, skip=()):
 def next_job(root, config, driver, *, skip=()):
     """The next piece of work for this driver, already prepared; None when there is nothing to do."""
     root = Path(root)
-    for prepare in (_prepare_triage, _prepare_meeting, _prepare_chat):
+    for prepare in (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn):
         job = prepare(root, config, driver)
         if job:
             return _open(root, job, driver)
@@ -379,6 +440,14 @@ def _open(root, job, driver):
             job["id"] += "-" + uuid4().hex[:12]
     finally:
         db.close()
+    try:  # 记忆层: every AI reads the owner's standing rules before any work
+        from .memory import rules_text
+        head = rules_text(root)
+        job["instructions"] = head + job["instructions"]
+        if job.get("builtin_prompt"):
+            job["builtin_prompt"] = head + job["builtin_prompt"]
+    except Exception:
+        pass
     job.update(driver=driver, status="open", rounds=0, step="领到了")
     _save(root, job)
     return job
@@ -430,6 +499,22 @@ def say(root, job_id, text, driver=None):
     return {"ok": True}
 
 
+def fail(root, job, problem):
+    """A job the AI could not finish is said out loud: the panel shows it and 心响 gets a message."""
+    from . import activity, inbox
+    job = get(root, job["id"]) if isinstance(job, dict) and "id" in job else job
+    job.update(status="failed", lease_until=None)
+    _save(root, job)
+    activity.log(root, "error", f"{job.get('title') or job['kind']}：没做成", detail=str(problem)[:300], status="failed")
+    try:
+        inbox.add(root, f"job-failed:{job['id']}:{job.get('rounds', 0)}",
+                  f"⚠ {job.get('title') or 'AI 的活'}没做成\n原因：{str(problem)[:200]}\n系统会在 30 分钟后自动再试一次；"
+                  f"急的话在「系统」页点「立即检查」。", kind="system")
+    except Exception:
+        pass
+    return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
+
+
 def _close(root, job, status):
     job.update(status=status, lease_until=None)
     _save(root, job)
@@ -455,6 +540,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_item(root, config, job)
     if kind == "triage":
         return _submit_triage(root, job)
+    if kind == "learn":
+        return _submit_learn(root, job)
     from . import activity
     from .worker import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
@@ -465,18 +552,17 @@ def submit(root, config, job_id, driver=None):
         job["rounds"] += 1
         problem = str(out.get("error") or "review.json 不符合格式")[:300]
         if job["rounds"] > MAX_FIX_ROUNDS:
-            _close(root, job, "failed")
-            activity.log(root, "error", f"{job['title']}没通过校验", detail=problem, status="failed")
-            return {"ok": False, "status": "failed", "problem": problem}
+            return fail(root, job, problem)
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem + "\n只修正有依据的字段；没有承接字眼的条目直接删掉。"}
     code, out = _cli(root, *job["ref"]["publish"])
     if not out.get("ok"):
-        activity.log(root, "error", f"{job['title']}入表没成功", detail=str(out.get("error"))[:200], status="failed")
-        _close(root, job, "failed")
-        return {"ok": False, "status": "failed", "problem": str(out.get("error"))[:200]}
+        return fail(root, job, "入表没成功：" + str(out.get("error"))[:200])
     _close(root, job, "done")
-    return {"ok": True, "status": "done", "created": out.get("created") or len(out.get("task_ids") or [])}
+    if out.get("repaired"):
+        activity.log(root, "detect", f"{job['title']}：自动修正 {len(out['repaired'])} 处", detail="；".join(out["repaired"])[:300])
+    return {"ok": True, "status": "done", "created": out.get("created") or len(out.get("task_ids") or []),
+            "repaired": out.get("repaired") or []}
 
 
 def _submit_item(root, config, job):

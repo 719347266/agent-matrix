@@ -30,3 +30,6 @@ feishu_tasks_enabled: true
 slack_token: ''
 # 会议标题里太常见、不能用来关联事项的词，例如公司名
 topic_stopwords: []
+
+# 心响：事项存在本机（点了立刻生效），飞书多维表格在后台做备份。改成 feishu 则直接读写飞书表格。
+item_store: local

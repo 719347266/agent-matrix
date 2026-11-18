@@ -654,11 +654,16 @@ def main(argv=None):
     path = args.config.resolve()
     try:
         config = load(path)
-        with exclusive_lock(path.parent / "state", wait=0 if args.command != "text" else 45):
+        from contextlib import nullcontext
+        from .itemstore import enabled
+        local = args.command == "text" and enabled(config)  # local items: no Feishu round trip, no queueing
+        with nullcontext() if local else exclusive_lock(path.parent / "state", wait=0 if args.command != "text" else 45):
             state = State(path.parent / "state/state.db")
             try:
                 client = Feishu(config, path.parent)
-                client.verify_owner(client.auth()); require_owned(config, state)
+                if not local:
+                    client.verify_owner(client.auth())
+                require_owned(config, state)
                 if args.command in {"poll", "check"}:
                     result = poll(config, client, state)
                     from . import activity

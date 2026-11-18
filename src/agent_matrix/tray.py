@@ -91,9 +91,9 @@ class Tray:
 
     def center(self):
         try:
-            return json.loads((self.root / "state/app.json").read_text()).get("url") or "http://127.0.0.1:8765/"
+            return json.loads((self.root / "state/app.json").read_text()).get("url") or "http://127.0.0.1:47865/"
         except (OSError, ValueError):
-            return "http://127.0.0.1:8765/"
+            return "http://127.0.0.1:47865/"
 
     def page(self):
         out = self.root / "state/monitor.html"

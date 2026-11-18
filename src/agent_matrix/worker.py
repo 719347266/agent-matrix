@@ -821,7 +821,7 @@ def run_job(root, config, job):
             f"程序检查没通过：{result['problem']}\n改好 {'、'.join(job.get('output') or [])} 再结束。")
         result = drive.submit(root, config, job["id"])
     if result.get("status") == "fix":
-        drive._close(root, drive.get(root, job["id"]), "failed")
+        return drive.fail(root, drive.get(root, job["id"]), result.get("problem") or "改了一轮还是没通过检查")
     return result
 
 

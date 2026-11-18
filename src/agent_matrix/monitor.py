@@ -38,6 +38,14 @@ SNAPSHOT_FIELDS = ["编号", "标题", "执行方", "状态", "进度", "卡点"
 # ---- task snapshot (written by the listener every 2 minutes) --------------------
 
 def save_snapshot(root, rows):
+    path = Path(root) / "state/tasks.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"at": datetime.now(TZ).isoformat(timespec="seconds"), "rows": snapshot_rows(rows)},
+                              ensure_ascii=False, default=str))
+    tmp.replace(path)
+
+
+def snapshot_rows(rows):
     from .prework import _draft_url
     def one(v):
         if isinstance(v, list) and not v:
@@ -50,13 +58,35 @@ def save_snapshot(root, rows):
         item["record_id"] = r.get("record_id")
         item["父事项"] = [x.get("id") or x.get("record_id") for x in r.get("父事项") or [] if isinstance(x, dict)]
         out.append(item)
-    path = Path(root) / "state/tasks.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"at": datetime.now(TZ).isoformat(timespec="seconds"), "rows": out}, ensure_ascii=False, default=str))
-    tmp.replace(path)
+    return out
+
+
+_STORE = {}
+
+
+def _local_store(root):
+    """Is `item_store: local` on? (config.yaml re-read only when it changes)"""
+    path = Path(root) / "config.yaml"
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return False
+    if _STORE.get(path) is None or _STORE[path][0] != stamp:
+        try:
+            from .config import load
+            from .itemstore import enabled
+            _STORE[path] = (stamp, enabled(load(path)))
+        except Exception:
+            _STORE[path] = (stamp, False)
+    return _STORE[path][1]
 
 
 def _snapshot(root):
+    """The items as the pages show them: straight from the local store when it is on, else the last table read."""
+    if _local_store(root):
+        from . import itemstore
+        if itemstore.imported(root):
+            return {"at": datetime.now(TZ).isoformat(timespec="seconds"), "rows": snapshot_rows(itemstore.rows(root))}
     try:
         return json.loads((Path(root) / "state/tasks.json").read_text())
     except (OSError, ValueError):
@@ -309,6 +339,16 @@ def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=No
 
 # ---- summary ---------------------------------------------------------------------
 
+def _proactive(root, need):
+    try:
+        from . import proactive
+        return {"alerts": proactive.alerts(root), "recent": proactive.recent(root), "focus": proactive.focus(need),
+                "ai": proactive.ai_line(root)}
+    except Exception as exc:
+        activity.log(root, "error", "主动层出错", detail=f"{type(exc).__name__}: {exc}", status="failed")
+        return {"alerts": {"quiet": False, "items": []}, "recent": [], "focus": {"total": len(need)}}
+
+
 def _unread(root):
     try:
         from . import inbox
@@ -422,6 +462,8 @@ def build(root, now=None):
             "summary": f"正在进行 {len(moving)} 件" + (f"（{stuck} 件卡住或逾期）" if stuck else "") +
                        f" · 今天发给你 {sum(1 for e in events if e['kind'] == 'send' and e['status'] == 'ok')} 条",
             "worker": worker, "unread": _unread(root),
+            # 主动层: what to interrupt for (and whether to hold it), and the one-glance numbers for the menu
+            **_proactive(root, need),
             "need_you": need, "in_progress": moving, "backlog_count": len(backlog), "done_recent": done[:20],
             "timeline": timeline, "issues": issues,
             "snapshot_at": snap.get("at"), "board_url": board, "counts": counts,

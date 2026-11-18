@@ -199,6 +199,6 @@ class VerifiedSnapshotTests(unittest.TestCase):
                     receipt = gateway.update(original, {"状态":["完成"],"进度":"完成"}, "test", "test")
                     self.assertTrue(receipt["verified_by_readback"])
                     self.assertEqual(_snapshot(root)["rows"][0]["状态"], "完成")
-                    self.assertEqual(phases, ["正在读取最新状态","正在保存到飞书","正在核对保存结果"])
+                    self.assertEqual(phases, ["正在读取最新状态","正在保存","正在核对保存结果"])
             finally:
                 state.close()
