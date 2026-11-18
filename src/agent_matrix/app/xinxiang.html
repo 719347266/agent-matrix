@@ -515,7 +515,7 @@ function slackBlock(me){
     `<div class="group">最近 24 小时<span class="aside">看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑不写表）</span></div><div class="list">${lines||'<div class="empty">没有筛中的话</div>'}</div>`;
   const head=`<div class="head" style="margin-top:34px"><h2>接入来源</h2></div>`;
   if(me) return `${head}<div class="guide" style="margin-top:14px"><div><b>Slack</b> · 已连接 · ${esc(me.team||"")} · @${esc(me.user||"")} · 令牌 …${esc(me.tail||"")}</div>
-    <p class="hint">每分钟搜一次你能看到的新消息，和飞书聊天一样只留跟你有关的话，到整理时间一起提取。</p>
+    <p class="hint">每分钟搜一次你能看到的新消息，和飞书聊天一样只留跟你有关的话，有新的就每 5 分钟整理一次。</p>
     <div class="acts"><button class="btn pri" onclick="slackTry()">试跑最近 24 小时</button><button class="btn" onclick="slackOff()">断开</button></div></div>${result}`;
   return `${head}<div class="guide" style="margin-top:14px"><div><b>Slack</b> · 未连接</div>
     <p class="hint">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</p>

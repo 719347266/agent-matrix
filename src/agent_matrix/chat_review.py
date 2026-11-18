@@ -9,7 +9,7 @@ Same strict rules as meetings: a task needs the exact words of commitment, the o
 be the sender or be named in the line, dates only when written. No task → no message.
 """
 import argparse
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from hashlib import sha1, sha256
 import json
 from pathlib import Path
@@ -55,7 +55,11 @@ def _times(config):
 
 
 def due_slot(config, state, now):
-    """The latest review time already passed today that has no batch yet."""
+    """The latest review time already passed today that has no batch yet; or, every N minutes, "every"."""
+    every = getattr(config, "chat_review_every_minutes", 0)
+    if every:
+        last = state.get("chat-review:last")
+        return None if last and now - datetime.fromisoformat(last) < timedelta(minutes=every) else "every"
     passed = [t for t in _times(config) if now.time() >= time.fromisoformat(t)]
     if not passed:
         return None
@@ -72,7 +76,7 @@ def check(config, state, now):
     if waiting and slot:
         return {"ok": True, "run_model": True, "reason": "batch_due", "candidates": len(waiting), "slot": slot,
                 "instruction": "按 prompts/chat_extract.md 处理：先 chat_review prepare，再写 review.json，validate 后 publish。"}
-    if slot and not waiting:
+    if slot and slot != "every" and not waiting:
         state.set("chat-review:slot:" + slot, "empty")
     return {"ok": True, "run_model": False, "reason": "idle", "candidates": len(waiting)}
 
@@ -97,7 +101,9 @@ def prepare(config, state, root, now):
               "review_path": str(folder / "review.json"), "messages": len(waiting)}
     state.set("chat-review:open", result)
     slot = due_slot(config, state, now)
-    if slot:
+    if slot == "every":
+        state.set("chat-review:last", now.isoformat())
+    elif slot:
         state.set("chat-review:slot:" + slot, batch)
     return result
 

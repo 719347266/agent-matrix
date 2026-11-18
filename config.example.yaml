@@ -24,6 +24,7 @@ prework_enabled: false
 prework_lead_days: 2
 # 实时来源：聊天用你的身份读取、本地过滤；到下面这些时间点才批量交给模型提取
 chat_watch_enabled: true
+chat_review_every_minutes: 5   # 有新候选、且离上一轮满 5 分钟就整理；0 = 只在下面的固定时间整理
 chat_review_times: ['11:30', '14:30', '17:30', '20:30']
 feishu_tasks_enabled: true
 # Slack 作为第二个聊天来源：填用户 token（xoxp-），或设环境变量 SLACK_USER_TOKEN；都不填就不读 Slack

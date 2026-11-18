@@ -141,7 +141,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
         state.set("slack:search-cursor", newest_all)
     if kept:
         from .. import activity
-        activity.log(root, "detect", f"Slack 里发现 {kept} 条可能跟你有关的话，到下一个整理时间统一提取")
+        activity.log(root, "detect", f"Slack 里发现 {kept} 条可能跟你有关的话，很快统一提取")
     state.set("slack:last-poll", now.isoformat())
     return {"chats": len(convs), "messages_scanned": scanned, "candidates": kept, "via": how}
 

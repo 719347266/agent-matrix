@@ -28,6 +28,9 @@ class Config(BaseModel):
     prework_lead_days: int = Field(default=2, ge=1, le=2)
     # Real-time sources (see listen.py): chats are read as the owner and pre-filtered by code.
     chat_watch_enabled: bool = True
+    # Chat todos are extracted whenever there are new lines and this many minutes passed since the last round;
+    # 0 = only at chat_review_times.
+    chat_review_every_minutes: int = Field(default=5, ge=0, le=240)
     chat_review_times: list[str] = Field(default_factory=lambda: ["11:30", "14:30", "17:30", "20:30"])
     feishu_tasks_enabled: bool = True
     # Slack as a second chat source: a user token (xoxp-); empty = env SLACK_USER_TOKEN; neither = off.

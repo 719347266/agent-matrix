@@ -1,5 +1,5 @@
 """Real-time sources: chat pre-filter, chat extraction rules, Feishu task mapping, listener replies."""
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import tempfile
@@ -58,8 +58,28 @@ class ChatReviewTests(unittest.TestCase):
 
     def test_review_runs_only_at_set_times(self):
         state = SimpleNamespace(get=lambda key, default=None: None)
-        self.assertIsNone(due_slot(CONFIG, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ)))
-        self.assertEqual(due_slot(CONFIG, state, datetime(2026, 11, 17, 15, 0, tzinfo=TZ)), "2026-11-17T14:30")
+        fixed = CONFIG.model_copy(update={"chat_review_every_minutes": 0})
+        self.assertIsNone(due_slot(fixed, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ)))
+        self.assertEqual(due_slot(fixed, state, datetime(2026, 11, 17, 15, 0, tzinfo=TZ)), "2026-11-17T14:30")
+
+    def test_review_runs_every_five_minutes_when_lines_wait(self):
+        from agent_matrix.chat_review import check, prepare
+        from agent_matrix.sources.chats import table
+        from agent_matrix.state import State
+        state = State(self.root / "state.db")
+        table(state)
+        at = datetime(2026, 11, 17, 10, 0, tzinfo=TZ)
+        self.assertFalse(check(CONFIG, state, at)["run_model"])          # nothing waiting: keep waiting
+        state.db.execute("INSERT INTO chat_candidates VALUES ('m1','c','群','group','u','陈','2026-11-17 10:00','麻烦明天发我','[]','找你的','pending',NULL)")
+        state.db.commit()
+        self.assertTrue(check(CONFIG, state, at)["run_model"])           # due at once: no round yet
+        prepare(CONFIG, state, self.root, at)
+        state.set("chat-review:open", None)
+        state.db.execute("INSERT INTO chat_candidates VALUES ('m2','c','群','group','u','陈','2026-11-17 10:01','麻烦后天发我','[]','找你的','pending',NULL)")
+        state.db.commit()
+        self.assertFalse(check(CONFIG, state, at + timedelta(minutes=4))["run_model"])  # within 5 minutes of the last round
+        self.assertTrue(check(CONFIG, state, at + timedelta(minutes=5))["run_model"])
+        state.close()
 
 
 class FeishuTaskTests(unittest.TestCase):
