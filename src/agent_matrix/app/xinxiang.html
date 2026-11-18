@@ -658,7 +658,7 @@ function nowBox(i){
   else if(i.who==="我"){ what=`这是你的事${due(i)?"，"+due(i):""}。要 AI 帮忙，点「交给 AI」。`; buttons=[["完成","done","pri"],["交给 AI","ai",""],["改日期…","date","","例如：周五 / 11-20"],["不做","cancel",""]]; }
   else { what="别人在做，到期前会提醒你跟进。"; }
   return `<div class="now"><div class="what">${what}</div>${buttons.length?`<div class="acts">${buttons.map(b=>btn(i,b)).join("")}</div>`:""}
-  ${inlineForm(i)}<div class="say"><textarea id="saybox" data-draft="say-${i.n}" placeholder="接着和 AI 说这件事…（例：预算按 600 一天重算；加上竞品）" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))sendSay()"></textarea><button data-n="${i.n}" ${pendingFor(i.n)?"disabled":""} class="btn pri" onclick="sendSay()">发送</button></div></div>`;
+  ${inlineForm(i)}<div class="say"><textarea id="saybox" data-draft="say-${i.n}" placeholder="接着和 AI 说这件事，或直接说「完成了」「周五」「不做」…" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))sendSay()"></textarea><button data-n="${i.n}" ${pendingFor(i.n)?"disabled":""} class="btn pri" onclick="sendSay()">发送</button></div></div>`;
 }
 function sendSay(){ const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus(); apply(S.item, "add", t); }
 

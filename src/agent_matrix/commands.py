@@ -189,7 +189,7 @@ def run_action(root, payload, request_id, progress):
                         thread.add(root, row["record_id"], "me", "feedback", text)
                         state.set(key, True)
                     return {"ok": True, "reply": f"#{payload['n']} 已记进对话，事项保持关闭"}
-                text = f"{payload['n']} + {text}"
+                text = say_text(payload["n"], text)
             ops, problems = parse(text, datetime.now(TZ).date())
             applier = Applier(config, client, state, source="cindy", message_ref="app-" + request_id,
                               immediate=True, progress=progress)
@@ -204,6 +204,17 @@ def run_action(root, payload, request_id, progress):
                     "reply": "\n".join([*lines, *problems]), "deferred": applier.deferred}
         finally:
             state.close()
+
+
+def say_text(n, text):
+    """What the item box sends: a short action for this item ("完成了", "1 完成", "周五") runs as that action;
+    anything else is material for the AI ("预算按 600 一天重算")."""
+    from .reply import parse
+    short = re.sub(rf"^#?{n}\s+", "", text).rstrip("了啦吧。！!～~ ")
+    ops, problems = parse(f"{n} {short}", datetime.now(TZ).date())
+    if short and ops and not problems and all(set(op.numbers) == {n} for op in ops):
+        return f"{n} {short}"
+    return f"{n} + {text}"
 
 
 def enrich_deliverables(root, rows, request_id):

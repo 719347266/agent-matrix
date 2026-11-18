@@ -25,6 +25,15 @@ def until(predicate, timeout=3):
     raise AssertionError("command did not settle")
 
 
+class ItemBoxTests(unittest.TestCase):
+    def test_short_actions_run_and_the_rest_is_material(self):
+        from agent_matrix.commands import say_text
+        self.assertEqual(say_text(1, "完成了"), "1 完成")
+        self.assertEqual(say_text(1, "1 完成"), "1 完成")
+        self.assertEqual(say_text(1, "预算按 600 一天重算"), "1 + 预算按 600 一天重算")
+        self.assertEqual(say_text(1, "2 完成"), "1 + 2 完成")  # another item's number is not this item's action
+
+
 class CommandQueueTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
