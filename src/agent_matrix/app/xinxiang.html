@@ -126,8 +126,8 @@ let D = /*__DATA__*/null;            /* the prototype embeds data here; the app 
 const TOKEN = /*__TOKEN__*/"";
 const LIVE = !D;
 let TODAY = (D && D.today) || new Date().toISOString().slice(0,10);
-async function api(path, body){
-  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),12000);
+async function api(path, body, ms=12000){
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),ms);
   try {
     const r=await fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Xinxiang-Token":TOKEN},
       ...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
@@ -371,17 +371,55 @@ function inboxPage(){
 }
 function readMsg(id){ const m=D.inbox.find(x=>x.id===id); m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); if(m.n&&byN(m.n)) openItem(m.n,"inbox"); else render(); }
 function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); render(); }
+const SLACK_SCOPES="channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
+function slackBlock(me){
+  const t=S.slackTry, lines=t&&t.lines?t.lines.map(m=>`<div class="row" style="cursor:default"><div class="main"><div class="title">${esc(m.text)}</div><div class="meta">${esc(m.kind)} · ${esc(m.chat_name)} · ${esc(m.sent_at)} · ${esc(m.sender_name)} · <a href="${esc(m.message_id)}" target="_blank" rel="noopener">原消息</a></div></div></div>`).join(""):"";
+  const result=!t?"":t.busy?`<div class="list"><div class="empty">正在读 Slack…最多要一分钟</div></div>`:t.error?`<div class="list"><div class="empty">${esc(t.error)}</div></div>`:
+    `<div class="group">最近 24 小时：看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑不写表）</div><div class="list">${lines||'<div class="empty">没有筛中的话</div>'}</div>`;
+  if(me) return `<h2 style="margin-top:26px">接入来源</h2><div class="list" style="padding:14px 16px"><div class="kv">
+    <div>Slack</div><div>已连接 · ${esc(me.team||"")} · @${esc(me.user||"")} · 令牌 …${esc(me.tail||"")}</div></div>
+    <p class="hint">每 10 分钟读一次你最近活跃的 25 个会话，和飞书聊天一样只留跟你有关的话，到整理时间一起提取。</p>
+    <div class="acts" style="margin-top:10px"><button class="btn pri" onclick="slackTry()">试跑最近 24 小时</button><button class="btn" onclick="slackOff()">断开</button></div></div>${result}`;
+  return `<h2 style="margin-top:26px">接入来源</h2><div class="list" style="padding:14px 16px">
+    <div><b>Slack</b> · 未连接</div>
+    <p class="hint">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 新建 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</p>
+    <div class="inline" style="padding:8px 0 0"><input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button></div></div>`;
+}
+async function slackOn(){
+  const box=$("#slacktok"), tok=box&&box.value.trim(); if(!tok) return box&&box.focus();
+  if(!LIVE) return toast("原型里不能连接");
+  try{ const r=await api("/api/slack/connect",{token:tok},30000); box.value=""; drafts.delete("slack-token"); toast(`已连接 ${r.team||""}`); load(); }
+  catch(e){ toast(e.name==="AbortError"?"连 Slack 超时了，再试一次":e.message); }
+}
+async function slackOff(){
+  if(!confirm("断开 Slack？已经收进来的事项不受影响。")) return;
+  try{ await api("/api/slack/disconnect",{}); S.slackTry=null; toast("已断开"); load(); }catch(e){ toast(e.message); }
+}
+async function slackTry(){
+  S.slackTry={busy:true}; render();
+  try{ S.slackTry=await api("/api/slack/try",{hours:24},90000); }
+  catch(e){ S.slackTry={error:e.name==="AbortError"?"读 Slack 超时了，稍后再试":e.message}; }
+  render();
+}
+function engineChoice(cur, found){
+  const opts=[["codex","GPT","codex 命令行"],["claude","Claude","claude 命令行"]];
+  return `<div class="group">本机 AI 用哪个</div><div class="chips" style="margin-top:6px">${opts.map(([k,l,cmd])=>
+    `<button class="chip ${cur===k?"on":""}" onclick="setSetting('engine','${k}')">${l}${found[k]===false?" · 没找到 "+cmd:""}</button>`).join("")}</div>
+  <p class="hint" style="margin-top:6px">切换后，下一件活开始用新的 AI。做到一半的事会带着之前的对话交给它，接着往下做。两个都不加载你自己的插件和配置，只能写自己的工作文件夹，可以联网。</p>`;
+}
 function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
   const builtin=st.builtin_driver!==false;
   const seen=(w.drivers||[]).map(d=>`<div class="row" style="cursor:default"><div class="main"><div class="title">${esc(d.driver)}</div><div class="meta">最近 ${esc(d.last)} · 做完 ${d.done||0} 件${d.open?` · 正在做 ${d.open} 件`:""}</div></div></div>`).join("");
   const doing=(w.doing||[]).map(d=>`<div class="row" style="cursor:default"><div class="main"><div class="title">${esc(d.driver)} · ${esc(d.title)}</div><div class="meta">${esc(d.step||"")} · 已 ${d.minutes} 分钟</div></div></div>`).join("");
   return `<h2>谁来驱动</h2><p class="hint">任何 AI 都能接入：本机 GPT、Claude、Cindy、Cursor……能运行命令的都行。每件事的对话存在心响里，换谁来做都接得上。</p>
-  <div class="switch ${builtin?"on":""}" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 GPT 也来干活</b><br><span>${builtin?"开着：有活就自动做（一次一件）。":"关着：只等外部 AI 来领活。"}</span></div></div>
+  <div class="switch ${builtin?"on":""}" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 AI 也来干活</b><br><span>${builtin?"开着：有活就自动做。":"关着：只等外部 AI 来领活。"}</span></div></div>
+  ${engineChoice(st.engine||"codex", s.engines||{})}
   ${doing?`<div class="group">正在做</div><div class="list">${doing}</div>`:""}
   <div class="group">最近接入过的 AI</div><div class="list">${seen||'<div class="empty">还没有记录</div>'}</div>
   <div class="group">让任何 AI 接入（把下面这段发给它）</div>
   <div class="list" style="padding:12px 14px"><pre id="guide" style="white-space:pre-wrap;margin:0;font-size:12px;line-height:1.6">${esc(D.guide||"")}</pre>
   <div class="acts" style="margin-top:10px"><button class="btn pri" onclick="copyGuide()">复制接入说明</button></div></div>
+  ${slackBlock(s.slack)}
   <h2 style="margin-top:26px">系统</h2><div class="list" style="padding:14px 16px"><div class="kv">
   <div>本机常驻程序</div><div>${esc(s.listener||"运行中")}</div>
   <div>飞书推送</div><div>${esc(s.subs||"")}</div><div>飞书消息</div><div>只发 08:30 早报、21:00 晚报</div><div>数据在哪</div><div>事项：飞书多维表格；对话、交付版本、时间线：本机</div></div></div>`; }

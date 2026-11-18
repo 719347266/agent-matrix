@@ -159,6 +159,7 @@ class RunnerCancellationTests(unittest.TestCase):
                  patch("agent_matrix.drive.get", return_value={"status": "open"}), \
                  patch("agent_matrix.worker.CodexRun") as runner, \
                  patch("agent_matrix.prework.add_note"):
+                runner.THREAD_FILE, runner.NAME = ".thread", "本机 GPT"
                 runner.return_value.run.side_effect = [first, second]
                 out = worker.run_item_job(root, Config(), {"id": "j", "instructions": "开始", "builtin_prompt": "续接"})
                 self.assertTrue(callable(runner.return_value.run.call_args_list[1].kwargs.get("should_stop")))

@@ -147,7 +147,8 @@ def task_fields(config, a, m):
     fields = {"标题": a.title, "类型": ["临时"], "状态": [status], "执行方": [executor],
               "进度": {"未开始": "0/1 等对方" if executor == "别人" else "0/1 未开始", "待确认": "0/1 待确认"}[status],
               "下一步动作": a.title, "来源": ["聊天"],
-              "来源链接": f"https://applink.feishu.cn/client/chat/open?openChatId={m['chat_id']}",
+              "来源链接": m["message_id"] if m["message_id"].startswith("https://")  # Slack permalink
+                          else f"https://applink.feishu.cn/client/chat/open?openChatId={m['chat_id']}",
               "原话引用": f"[{m['chat_name']} {m.get('sent_at') or ''} {m['sender_name']}] {m['text'][:300]}"}
     if executor == "别人" and m["kind"] != "找你的":
         fields["排除本人提醒"] = True

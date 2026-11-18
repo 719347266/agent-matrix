@@ -135,7 +135,8 @@ def build_state(root):
            for m in inbox.messages(root, 150)]
     judged = {n_of[rid]: j for rid, j in thread.judgments(root).items() if n_of.get(rid)}
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
-                "builtin_driver": bool(thread.setting(root, "builtin_driver", True))}
+                "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
+                "engine": thread.setting(root, "engine", "codex")}
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
@@ -151,15 +152,23 @@ def system_info(root):
         db = sqlite3.connect(f"file:{Path(root) / 'state/state.db'}?mode=ro", uri=True, timeout=5)
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
+        slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat = {}, None
+        status, beat, slack = {}, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
     except (TypeError, ValueError):
         pass
-    return {"listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    from .config import load
+    from .worker import claude_binary, codex_binary
+    try:
+        config = load(Path(root) / "config.yaml")
+        found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
+    except Exception:
+        found = {}
+    return {"engines": found, "slack": slack, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -266,6 +275,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if path == "/api/settings":
                 from . import thread
+                if body.get("engine") in {"codex", "claude"}:
+                    thread.set_setting(root, "engine", body["engine"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if "auto_assign" in body:
@@ -275,6 +286,23 @@ class Handler(BaseHTTPRequestHandler):
                         from .worker import kick
                         kick(root, load(root / "config.yaml"), force=True)
                 return self._send(200, {"ok": True})
+            if path.startswith("/api/slack/"):
+                from .config import load
+                from .models import MatrixError
+                from .sources import slack
+                try:
+                    if path == "/api/slack/connect":
+                        return self._send(200, {"ok": True, **slack.connect(root, body.get("token"))})
+                    if path == "/api/slack/disconnect":
+                        slack.disconnect(root)
+                        return self._send(200, {"ok": True})
+                    if path == "/api/slack/try":
+                        hours = min(max(float(body.get("hours") or 24), 1), 168)
+                        return self._send(200, {"ok": True, **slack.dry_run(load(root / "config.yaml"), hours=hours)})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except OSError:
+                    return self._send(400, {"ok": False, "reply": "连不上 Slack，检查网络后再试。"})
             if path == "/api/read":
                 from . import inbox
                 inbox.mark_read(root, None if body.get("all") else [int(x) for x in body.get("ids") or []])

@@ -26,5 +26,7 @@ prework_lead_days: 2
 chat_watch_enabled: true
 chat_review_times: ['11:30', '14:30', '17:30', '20:30']
 feishu_tasks_enabled: true
+# Slack 作为第二个聊天来源：填用户 token（xoxp-），或设环境变量 SLACK_USER_TOKEN；都不填就不读 Slack
+slack_token: ''
 # 会议标题里太常见、不能用来关联事项的词，例如公司名
 topic_stopwords: []

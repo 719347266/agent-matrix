@@ -278,6 +278,11 @@ class Listener:
                     return "off"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
+        if self.every("slack", 600):
+            def slack_poll(config, client, state):
+                from .sources import slack
+                return slack.poll(config, self.root, state, datetime.now(TZ)) if config.chat_watch_enabled else "off"
+            jobs.append(("slack", slack_poll))
         if self.every("tasks", 900):
             def tasks(config, client, state):
                 from .sources import feishu_tasks

@@ -180,6 +180,51 @@ class ConversationTests(unittest.TestCase):
             self.assertEqual((work / "seen_prompt.txt").read_text(), "本人补充：加上竞品")
 
 
+    def test_claude_runner_keeps_its_own_session_and_last_reply(self):
+        """A stand-in for `claude -p`: the event shapes are copied from a real stream-json run."""
+        from agent_matrix.worker import ClaudeRun, engine
+        from agent_matrix import thread as conversation
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "fake_claude.py"
+            fake.write_text(textwrap.dedent("""\
+                #!/usr/bin/env python3
+                import json, sys, pathlib
+                prompt = sys.stdin.read()
+                args = sys.argv[1:]
+                sid = args[args.index("--resume") + 1] if "--resume" in args else "sess-1"
+                print(json.dumps({"type": "system", "subtype": "init", "session_id": sid}), flush=True)
+                print(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}), flush=True)
+                pathlib.Path("seen_prompt.txt").write_text(prompt)
+                pathlib.Path("seen_args.txt").write_text(json.dumps(args))
+                print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "好了"}]}}), flush=True)
+                print(json.dumps({"type": "result", "subtype": "success", "result": "交付写好了", "session_id": sid,
+                                  "usage": {"input_tokens": 6, "output_tokens": 188}}), flush=True)
+                """))
+            fake.chmod(0o755)
+            work = Path(tmp) / "work"; work.mkdir()
+            (work / ".thread").write_text("gpt-thread")          # GPT's conversation is left alone
+            config = Config(worker_claude=str(fake), worker_claude_model="sonnet")
+            from unittest.mock import patch
+            original_argv = ClaudeRun.argv
+            with patch.object(ClaudeRun, "argv", lambda run: [sys.executable, str(fake), *original_argv(run)[1:]]):
+                run = ClaudeRun(config, work).run("开始")
+                self.assertEqual((run.thread, run.commands, run.messages), ("sess-1", 1, 1))
+                self.assertEqual((work / ".claude-session").read_text(), "sess-1")
+                self.assertEqual((work / ".thread").read_text(), "gpt-thread")
+                self.assertEqual((work / ".last.txt").read_text(), "交付写好了")
+                self.assertEqual(run.usage["output_tokens"], 188)
+                args = json.loads((work / "seen_args.txt").read_text())
+                for flag in ("--safe-mode", "--permission-mode", "dontAsk", "--model", "sonnet", "--effort", "high"):
+                    self.assertIn(flag, args)
+                ClaudeRun(config, work, thread="sess-1").run("本人补充：加上竞品")
+                self.assertEqual((work / "seen_prompt.txt").read_text(), "本人补充：加上竞品")
+                self.assertIn("--resume", json.loads((work / "seen_args.txt").read_text()))
+            root = Path(tmp) / "root"
+            self.assertEqual(engine(root).NAME, "本机 GPT")           # default stays GPT
+            conversation.set_setting(root, "engine", "claude")
+            self.assertIs(engine(root), ClaudeRun)
+
+
 class CardTests(unittest.TestCase):
     def test_tapped_button_becomes_a_result_line(self):
         from agent_matrix.brief_v1 import _block, _row_item, card

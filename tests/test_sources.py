@@ -192,3 +192,51 @@ class SameThingTests(unittest.TestCase):
         out = [line for op in parse("31 不重复", date(2026, 11, 17))[0] for line in a.apply(op)]
         self.assertIn("不是重复", out[0])
         self.assertIn("3-31", store["merge:distinct"])
+
+
+class SlackSourceTests(unittest.TestCase):
+    def test_slack_lines_land_in_chat_candidates_with_permalink(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.sources.chats import pending
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        state = State(root / "state.db")
+        replies = {
+            "auth.test": {"user_id": "UME", "url": "https://acme.slack.com/"},
+            "users.conversations": {"channels": [{"id": "C1", "name": "ops", "updated": 2},
+                                                 {"id": "D1", "is_im": True, "user": "UCHEN", "updated": 1}]},
+            "users.info": {"user": {"profile": {"display_name": "陈一凡"}}},
+        }
+        history = {"C1": [{"ts": "1795400000.000100", "user": "UCHEN", "text": "<@UME> 周五前帮忙把投放预算定一下"},
+                          {"ts": "1795400001.000100", "user": "UCHEN", "text": "周五前帮忙把投放预算定一下"},  # not addressed
+                          {"ts": "1795400002.000100", "bot_id": "B1", "text": "<@UME> 明天记得发周报"}],
+                   "D1": [{"ts": "1795400003.000200", "user": "UCHEN", "text": "能不能明天把数据发我"}]}
+        api = lambda tok, method, **p: {"messages": history[p["channel"]]} if method == "conversations.history" else replies[method]
+        config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
+        out = slack.poll(config, root, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api)
+        self.assertEqual(out["candidates"], 2)
+        rows = {r["chat_name"]: r for r in pending(state)}
+        self.assertEqual(rows["Slack · ops"]["message_id"], "https://acme.slack.com/archives/C1/p1795400000000100")
+        self.assertIn("@王小明", rows["Slack · ops"]["text"])
+        self.assertEqual(rows["Slack · 陈一凡"]["chat_mode"], "p2p")
+        self.assertEqual(state.get("slack:cursor:C1"), "1795400002.000100")
+        self.assertEqual(slack.poll(CONFIG, root, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api), "no_token")
+        a = ChatAction(message_id=rows["Slack · ops"]["message_id"], title="定投放预算", quote="周五前帮忙把投放预算定一下",
+                       commitment_phrase="帮忙把投放预算定一下", owner_name="王小明", executor="我", confidence=0.9)
+        self.assertEqual(chat_fields(CONFIG, a, rows["Slack · ops"])["来源链接"], rows["Slack · ops"]["message_id"])
+
+    def test_connect_saves_token_and_shows_identity_without_the_token(self):
+        from agent_matrix import app
+        from agent_matrix.config import load
+        from agent_matrix.sources import slack
+        root = Path(tempfile.mkdtemp())
+        api = lambda tok, method, **p: {"user_id": "UME", "user": "wang", "team": "Acme", "url": "https://acme.slack.com/"}
+        with self.assertRaises(MatrixError):
+            slack.connect(root, "xoxb-bot-token", api=api)            # bot tokens can't read as the owner
+        who = slack.connect(root, " xoxp-1234-abcd ", api=api)
+        self.assertEqual(load(root / "config.yaml").slack_token, "xoxp-1234-abcd")
+        shown = app.system_info(root)["slack"]
+        self.assertEqual((shown["team"], shown["tail"]), ("Acme", "abcd"))
+        self.assertNotIn("xoxp", json.dumps(shown) + json.dumps(who))
+        slack.disconnect(root)
+        self.assertEqual((load(root / "config.yaml").slack_token, app.system_info(root)["slack"]), ("", None))

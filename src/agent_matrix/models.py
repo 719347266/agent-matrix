@@ -30,6 +30,8 @@ class Config(BaseModel):
     chat_watch_enabled: bool = True
     chat_review_times: list[str] = Field(default_factory=lambda: ["11:30", "14:30", "17:30", "20:30"])
     feishu_tasks_enabled: bool = True
+    # Slack as a second chat source: a user token (xoxp-); empty = env SLACK_USER_TOKEN; neither = off.
+    slack_token: str = ""
     # Words too common in meeting titles to link items by topic, e.g. the company name.
     topic_stopwords: list[str] = Field(default_factory=list)
     # The AI employee (worker.py): up to ten concurrent jobs, one GPT conversation per item.
@@ -43,6 +45,8 @@ class Config(BaseModel):
     worker_effort: str = "high"     # doing the work
     extract_effort: str = "medium"  # picking todos out of meetings and chats
     worker_timeout_minutes: int = Field(default=30, ge=5, le=120)
+    worker_claude: str = ""          # path to the claude command; empty = find it on PATH (used when 系统 → 本机 AI is Claude)
+    worker_claude_model: str = ""    # e.g. opus / sonnet; empty = the claude account's default
     worker_concurrency: int = Field(default=10, ge=1, le=20)  # jobs the built-in GPT works on at the same time
 
 

@@ -338,13 +338,12 @@ def _prepare_item(root, config, driver, skip=()):
         extra += ["", "## 这件事之前的对话（心响保存；可能是别的 AI 做的，接着往下，不要从头来）", history]
     if changes:
         extra += ["", "## 本人新补充的要求（这一轮必须照做）", *[f"- {c}" for c in changes]]
-    thread_file = item.workdir / ".thread"
     return {"id": f"item-{item.rid}-{item.version[:8]}", "kind": "item", "title": item.title, "n": int(str(item.n)) if item.n else None,
             "folder": str(item.workdir), "ref": {"record_id": item.rid, "version": item.version},
             "output": ["交付.md", "结果.json"], "lease_until": _lease(ITEM_LEASE_MINUTES),
             "instructions": base + "\n".join(extra),
             # the built-in GPT resumes its own conversation instead of re-reading everything
-            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if thread_file.is_file() else base}
+            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
 
 
 def next_job(root, config, driver, *, skip=()):

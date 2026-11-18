@@ -81,7 +81,7 @@
 
 需要 Python 3.11+、已登录的 `lark-cli`（npm 包 `@larksuite/cli`）、已登录的 GPT 命令行 `codex`（AI 员工用它干活；找不到时在 `config.yaml` 写 `worker_codex: <路径>`），以及一个能跑定时脚本的宿主（launchd、Windows 计划任务或任何 AI 宿主都行）。
 
-AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
+AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。本机 AI 可以在心响「系统」页切换成 Claude（用本机的 `claude` 命令行，同样不加载你的插件、钩子、MCP 和 CLAUDE.md，只能写工作文件夹，可以联网）；对应可调项 `worker_claude`（命令路径，默认从 PATH 找）、`worker_claude_model`（如 opus、sonnet，默认用账号默认模型）。GPT 的可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e .
@@ -93,6 +93,8 @@ cp config.example.yaml config.yaml
 ```
 
 实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`；卡片按钮要在"事件与回调 → 回调配置"里开启 `card.action.trigger`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
+
+**Slack（可选）**：在 `config.yaml` 写 `slack_token: xoxp-...`（或设环境变量 `SLACK_USER_TOKEN`），常驻监听每 10 分钟读一次你最近活跃的 25 个 Slack 会话，按和飞书聊天一样的规则过滤，到整理时间一起提取，来源链接直接跳回那条 Slack 消息。用户 token 需要这些权限：`channels:history` `groups:history` `im:history` `mpim:history` `channels:read` `groups:read` `im:read` `mpim:read` `users:read`。
 
 宿主需要配置的定时任务：
 
