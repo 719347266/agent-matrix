@@ -1,6 +1,6 @@
 """Slack → the same candidate pile as Feishu chats. Pure code, no model.
 
-Reads the owner's DMs and channels with a Slack *user* token (xoxp-, scopes: channels:history,
+Reads the owner's DMs and channels with a Slack *user* token (xoxp-, scopes: search:read, channels:history,
 groups:history, im:history, mpim:history, channels:read, groups:read, im:read, mpim:read, users:read),
 filters with the same rules as Feishu chats, and writes into chat_candidates, so chat_review
 extracts and publishes them unchanged.
@@ -36,6 +36,49 @@ def permalink(base, channel, ts):
     return f"{base.rstrip('/')}/archives/{channel}/p{ts.replace('.', '')}"
 
 
+def _searched(api, tok, oldest, who):
+    """Every message the owner can see since `oldest`, newest pages first: one or two calls instead of one per
+    conversation. Needs the search:read scope; raises MatrixError(missing_scope) without it."""
+    from datetime import datetime, timedelta
+    day = (datetime.fromtimestamp(float(oldest)) - timedelta(days=1)).strftime("%Y-%m-%d")  # after: is a whole day
+    found, page = [], 1
+    while True:
+        res = api(tok, "search.messages", query=f"after:{day}", sort="timestamp", sort_dir="desc", count=100, page=page)
+        box = res.get("messages") or {}
+        matches = box.get("matches") or []
+        found += [m for m in matches if float(m["ts"]) > float(oldest)]
+        pages = (box.get("paging") or {}).get("pages") or 1
+        # ponytail: stop at 10 pages (1000 messages) per poll; the cursor still advances past what was seen.
+        if page >= min(pages, 10) or not matches or float(matches[-1]["ts"]) <= float(oldest):
+            break
+        page += 1
+    convs = {}
+    for m in found:
+        c = m.get("channel") or {}
+        if not c.get("id"):
+            continue
+        im = bool(c.get("is_im"))
+        name = who(c.get("user") or c.get("name")) if im else (c.get("name") or c["id"])
+        convs.setdefault(c["id"], {"id": c["id"], "is_im": im, "name": name, "messages": []})["messages"].append(m)
+    return list(convs.values())
+
+
+def _listed(api, tok, oldest, who, state):
+    """Fallback without search:read: read conversation by conversation (DMs first, then channels)."""
+    convs = api(tok, "users.conversations", types="im,mpim,public_channel,private_channel",
+                exclude_archived="true", limit=200).get("channels") or []
+    # ponytail: `updated` is when the channel's settings changed, not its last message; DMs first, then by it.
+    convs = sorted(convs, key=lambda c: (bool(c.get("is_im") or c.get("is_mpim")), c.get("updated") or 0), reverse=True)[:MAX_CHATS]
+    out = []
+    for c in convs:
+        cid = c["id"]
+        since = state.get("slack:cursor:" + cid) or oldest
+        msgs = api(tok, "conversations.history", channel=cid, oldest=since, limit=200).get("messages") or []
+        out.append({"id": cid, "is_im": bool(c.get("is_im")), "name": who(c["user"]) if c.get("is_im") else c.get("name") or cid,
+                    "messages": msgs, "cursor": True})
+    return out
+
+
 def poll(config, root, state, now, *, api=call, since_hours=2):
     tok = token(config)
     if not tok:
@@ -53,24 +96,29 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
             people[uid] = (u.get("profile") or {}).get("display_name") or u.get("real_name") or u.get("name") or uid
         return people[uid]
 
-    # ponytail: newest-updated MAX_CHATS conversations only; paginate if the owner lives in more.
-    convs = api(tok, "users.conversations", types="im,mpim,public_channel,private_channel",
-                exclude_archived="true", limit=200).get("channels") or []
-    convs = sorted(convs, key=lambda c: c.get("updated") or 0, reverse=True)[:MAX_CHATS]
+    oldest = state.get("slack:search-cursor") or str((now - timedelta(hours=since_hours)).timestamp())
+    try:
+        convs, how = _searched(api, tok, oldest, who), "search"
+    except MatrixError as exc:
+        if "missing_scope" not in str(exc):
+            raise
+        convs, how = _listed(api, tok, oldest, who, state), "list"
     exclude = set(state.get("slack:exclude", []))
     kept = scanned = 0
+    newest_all = oldest
     for c in convs:
         cid = c["id"]
-        mode = "p2p" if c.get("is_im") else "group"
-        cname = "Slack · " + (who(c["user"]) if c.get("is_im") else c.get("name") or cid)
+        mode = "p2p" if c["is_im"] else "group"
+        cname = "Slack · " + c["name"]
+        msgs = sorted(c["messages"], key=lambda m: float(m["ts"]))
+        newest = max([oldest, *[m["ts"] for m in msgs]], key=float)
+        newest_all = max(newest_all, newest, key=float)
+        if c.get("cursor"):
+            state.set("slack:cursor:" + cid, newest)
         if cid in exclude or SKIP_CHAT.search(cname):
             continue
-        cursor_key = "slack:cursor:" + cid
-        oldest = state.get(cursor_key) or str((now - timedelta(hours=since_hours)).timestamp())
-        msgs = api(tok, "conversations.history", channel=cid, oldest=oldest, limit=200).get("messages") or []
-        history, newest = [], oldest
-        for m in sorted(msgs, key=lambda m: float(m["ts"])):  # API returns newest first
-            newest = max(newest, m["ts"], key=float)
+        history = []
+        for m in msgs:
             if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text"):
                 continue
             from_owner = m["user"] == my_id
@@ -89,13 +137,13 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
                 kept += 1
             history.append(f"{sender}：{text[:120]}")
         state.db.commit()
-        state.set(cursor_key, newest)
+    if how == "search":
+        state.set("slack:search-cursor", newest_all)
     if kept:
         from .. import activity
         activity.log(root, "detect", f"Slack 里发现 {kept} 条可能跟你有关的话，到下一个整理时间统一提取")
     state.set("slack:last-poll", now.isoformat())
-    return {"chats": len(convs), "messages_scanned": scanned, "candidates": kept}
-
+    return {"chats": len(convs), "messages_scanned": scanned, "candidates": kept, "via": how}
 
 
 def dry_run(config, *, hours=24, api=call):

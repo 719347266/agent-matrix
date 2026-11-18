@@ -508,7 +508,7 @@ async function notionOn(){
   try{ await api("/api/notion/connect",{token:tok.value.trim(),page:page.value.trim()},60000); tok.value=""; S.pickNotion=false; toast("已连接 Notion，事项开始同步"); load(); }
   catch(e){ toast(e.name==="AbortError"?"连 Notion 超时了，再试一次":e.message); }
 }
-const SLACK_SCOPES="channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
+const SLACK_SCOPES="search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
 function slackBlock(me){
   const t=S.slackTry, lines=t&&t.lines?t.lines.map(m=>`<div class="row flat"><div class="main"><div class="title">${esc(m.text)}</div><div class="meta"><span>${esc(m.kind)}</span><span>${esc(m.chat_name)}</span><span>${esc(m.sent_at)}</span><span>${esc(m.sender_name)}</span><a href="${esc(m.message_id)}" target="_blank" rel="noopener">原消息</a></div></div></div>`).join(""):"";
   const result=!t?"":t.busy?`<div class="list"><div class="empty">正在读 Slack…最多要一分钟</div></div>`:t.error?`<div class="list"><div class="empty">${esc(t.error)}</div></div>`:

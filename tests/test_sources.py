@@ -211,10 +211,13 @@ class SlackSourceTests(unittest.TestCase):
                           {"ts": "1795400001.000100", "user": "UCHEN", "text": "周五前帮忙把投放预算定一下"},  # not addressed
                           {"ts": "1795400002.000100", "bot_id": "B1", "text": "<@UME> 明天记得发周报"}],
                    "D1": [{"ts": "1795400003.000200", "user": "UCHEN", "text": "能不能明天把数据发我"}]}
-        api = lambda tok, method, **p: {"messages": history[p["channel"]]} if method == "conversations.history" else replies[method]
+        def api(tok, method, **p):
+            if method == "search.messages":
+                raise MatrixError("Slack search.messages 失败：missing_scope")  # token without search:read
+            return {"messages": history[p["channel"]]} if method == "conversations.history" else replies[method]
         config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
         out = slack.poll(config, root, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api)
-        self.assertEqual(out["candidates"], 2)
+        self.assertEqual((out["candidates"], out["via"]), (2, "list"))
         rows = {r["chat_name"]: r for r in pending(state)}
         self.assertEqual(rows["Slack · ops"]["message_id"], "https://acme.slack.com/archives/C1/p1795400000000100")
         self.assertIn("@王小明", rows["Slack · ops"]["text"])
@@ -224,6 +227,38 @@ class SlackSourceTests(unittest.TestCase):
         a = ChatAction(message_id=rows["Slack · ops"]["message_id"], title="定投放预算", quote="周五前帮忙把投放预算定一下",
                        commitment_phrase="帮忙把投放预算定一下", owner_name="王小明", executor="我", confidence=0.9)
         self.assertEqual(chat_fields(CONFIG, a, rows["Slack · ops"])["来源链接"], rows["Slack · ops"]["message_id"])
+
+    def test_search_finds_new_lines_in_any_conversation_and_moves_one_cursor(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.sources.chats import pending
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        state = State(root / "state.db")
+        now = datetime(2026, 11, 17, 10, 0, tzinfo=TZ)
+        t = now.timestamp()
+        found = [  # newest first, as search returns them
+            {"ts": f"{t - 60:.6f}", "user": "UME", "text": "我明天下午3点前把报价单整理好发给 Tom",
+             "channel": {"id": "DSELF", "is_im": True, "name": "UME"}},
+            {"ts": f"{t - 120:.6f}", "user": "UCHEN", "text": "<@UME> 麻烦周五前确认一下合同", "channel": {"id": "C9", "name": "sales"}},
+            {"ts": f"{t - 180:.6f}", "user": "UCHEN", "text": "周五前确认一下合同", "channel": {"id": "C9", "name": "sales"}},
+            {"ts": f"{t - 3 * 3600:.6f}", "user": "UCHEN", "text": "<@UME> 老消息，明天记得", "channel": {"id": "C9", "name": "sales"}},
+        ]
+        calls = []
+        def api(tok, method, **p):
+            calls.append(method)
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"real_name": {"UME": "王小明", "UCHEN": "陈一凡"}[p["user"]]}}
+            return {"messages": {"matches": found, "paging": {"pages": 1}}}
+        config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
+        out = slack.poll(config, root, state, now, api=api)
+        self.assertEqual((out["candidates"], out["via"]), (2, "search"))
+        self.assertNotIn("conversations.history", calls)
+        kinds = {r["chat_name"]: r["kind"] for r in pending(state)}
+        self.assertEqual(kinds, {"Slack · 王小明": "我的承诺", "Slack · sales": "找你的"})
+        self.assertEqual(state.get("slack:search-cursor"), found[0]["ts"])
+        self.assertEqual(slack.poll(config, root, state, now, api=api)["candidates"], 0)  # nothing new since the cursor
 
     def test_connect_saves_token_and_shows_identity_without_the_token(self):
         from agent_matrix import app
