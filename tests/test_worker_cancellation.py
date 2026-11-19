@@ -70,7 +70,7 @@ class CancellationTests(unittest.TestCase):
         def checked(*args):
             drive.stop_record(self.root, "rec44")
             return {"outcome": "blocked", "question": "q", "tried": "t"}, None
-        with patch("agent_matrix.drive._item") as item, patch("agent_matrix.worker.check_result", checked):
+        with patch("agent_matrix.drive._item") as item, patch("agent_matrix.itemwork.check_result", checked):
             item.return_value.workdir = self.root
             result = drive.submit(self.root, self.config, j["id"])
             self.assertEqual(result["status"], "cancelled")
@@ -132,7 +132,7 @@ class CancellationTests(unittest.TestCase):
              patch("agent_matrix.drive._prepare_meeting", return_value=None), \
              patch("agent_matrix.drive._prepare_chat", return_value=None), \
              patch("agent_matrix.drive._prepare_item", return_value=job), \
-             patch("agent_matrix.worker.project", local_project), \
+             patch("agent_matrix.workenv.project", local_project), \
              patch("agent_matrix.prework.current", side_effect=MatrixError("事项已取消")), \
              patch("agent_matrix.drive._open") as opened:
             with self.assertRaises(MatrixError):
@@ -143,7 +143,7 @@ class CancellationTests(unittest.TestCase):
 
 class RunnerCancellationTests(unittest.TestCase):
     def test_already_stopped_job_never_launches_a_process(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("agent_matrix.worker.subprocess.Popen") as popen:
+        with tempfile.TemporaryDirectory() as tmp, patch("agent_matrix.workenv.subprocess.Popen") as popen:
             run = worker.CodexRun(Config(), tmp).run("开始", should_stop=lambda: True)
         self.assertTrue(run.stopped)
         popen.assert_not_called()
@@ -157,7 +157,8 @@ class RunnerCancellationTests(unittest.TestCase):
             second = SimpleNamespace(stopped=True, thread=None, messages=0, timed_out=False, returncode=1)
             with patch("agent_matrix.drive._item", return_value=item), \
                  patch("agent_matrix.drive.get", return_value={"status": "open"}), \
-                 patch("agent_matrix.worker.CodexRun") as runner, \
+                 patch("agent_matrix.jobstore.get", return_value={"status": "open"}), \
+                 patch("agent_matrix.engines.CodexRun") as runner, \
                  patch("agent_matrix.prework.add_note"):
                 runner.THREAD_FILE, runner.NAME = ".thread", "本机 GPT"
                 runner.return_value.run.side_effect = [first, second]

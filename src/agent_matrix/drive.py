@@ -27,6 +27,7 @@ import subprocess
 import sys
 from uuid import uuid4
 
+from .workenv import shim_path  # noqa: F401
 from .jobstore import now, _db, _save, get, open_jobs, drivers, stop_record  # noqa: F401
 from . import db as database
 from .models import MatrixBusy, MatrixError
@@ -74,9 +75,6 @@ def _lease(minutes):
 
 # ---- how an outside AI calls back --------------------------------------------------------------------
 
-def shim_path():
-    base = Path.home() / ".agent-matrix" / "bin"
-    return base / ("xinxiang.cmd" if os.name == "nt" else "xinxiang")
 
 
 def install_shim(root):
@@ -118,7 +116,8 @@ def protocol_tail(job):
 
 def _prepare_triage(root, config, driver):
     from . import thread as conversation
-    from .worker import _pending_new, project, scratch
+    from .itemwork import _pending_new
+    from .workenv import project, scratch
     if not conversation.setting(root, "auto_assign", False) or _busy(root, "triage"):
         return None
     from .workflow import Gateway
@@ -147,7 +146,7 @@ LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
 def _prepare_learn(root, config, driver):
     """Now and then: turn the owner's recent feedback into standing rules (偏好快照)."""
     from . import memory, thread as conversation
-    from .worker import scratch
+    from .workenv import scratch
     if _busy(root, "learn"):
         return None
     since = conversation.setting(root, "learned_at", "")
@@ -205,7 +204,7 @@ def _submit_learn(root, job):
 def _try_existing_review(root, source_dir, validate, publish, label):
     """Extracted earlier but the publish failed: publish without a new model run."""
     from . import activity
-    from .worker import _cli
+    from .workenv import _cli
     if not (Path(source_dir) / "review.json").is_file():
         return False
     code, out = _cli(root, *validate)
@@ -219,7 +218,7 @@ def _try_existing_review(root, source_dir, validate, publish, label):
 
 def _prepare_meeting(root, config, driver):
     from .meeting_review import Review
-    from .worker import _check, _cli, scratch
+    from .workenv import _check, _cli, scratch
     code, checked = _check(root, "agent_matrix.meeting_watch")
     taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
     for m in checked.get("ready") or []:
@@ -259,7 +258,7 @@ def _prepare_meeting(root, config, driver):
 
 def _prepare_chat(root, config, driver):
     from .chat_review import ChatReview
-    from .worker import _check, _cli, scratch
+    from .workenv import _check, _cli, scratch
     if _busy(root, "chat"):
         return None
     code, checked = _check(root, "agent_matrix.chat_review")
@@ -281,7 +280,7 @@ def _prepare_chat(root, config, driver):
     (folder / "review.json").unlink(missing_ok=True)
     try:  # what was said after each candidate, so things already settled are not turned into todos
         from .background import add_followups
-        from .worker import project
+        from .workenv import project
         path = folder / Path(prep["candidates_path"]).name
         with project(root, config) as (client, state):
             pass
@@ -308,7 +307,9 @@ def _history_text(root, record_id, limit=30):
 
 
 def _prepare_item(root, config, driver, skip=()):
-    from .worker import Item, _changes, first_prompt, pick_next, project, resume_prompt
+    from .itemwork import Item
+    from .itemwork import _changes, first_prompt, pick_next, resume_prompt
+    from .workenv import project
     pick = pick_next(root, config, skip=skip)
     if not pick:
         return None
@@ -373,7 +374,7 @@ def next_job(root, config, driver, *, skip=(), kinds=None):
         # Preparing background may take time; the owner may have cancelled meanwhile.
         # Publish the lease under the same lock used by owner commands.
         from .prework import current
-        from .worker import project
+        from .workenv import project
         with project(root, config) as (client, state):
             current(config, client, state, job["ref"]["record_id"], job["ref"]["version"])
             return _open(root, job, driver)
@@ -418,7 +419,7 @@ def cindy_header(root, job):
 
 def has_items_for(root, config):
     """Is there an item waiting that nobody is working on? Cheap enough for a schedule's pre-run check."""
-    from .worker import _check
+    from .workenv import _check
     code, checked = _check(root, "agent_matrix.prework")
     if code != 0:
         return False
@@ -452,7 +453,7 @@ def step(root, config, job_id, text, driver=None):
     if write:
         try:
             from .prework import report_progress
-            from .worker import project
+            from .workenv import project
             with project(root, config, wait=20) as (client, state):
                 if closed := _closed(get(root, job_id)):
                     return closed
@@ -495,7 +496,7 @@ def _close(root, job, status):
 
 
 def _item(root, config, job):
-    from .worker import Item
+    from .itemwork import Item
     item = Item(root, config, {"record_id": job["ref"]["record_id"], "input_version": job["ref"]["version"], "title": job.get("title")})
     item.n, item.finished, item.job_id = job.get("n"), False, job["id"]
     return item
@@ -517,7 +518,7 @@ def submit(root, config, job_id, driver=None):
     if kind == "learn":
         return _submit_learn(root, job)
     from . import activity
-    from .worker import _cli
+    from .workenv import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
     if (folder / "review.json").is_file():
         shutil.copyfile(folder / "review.json", source / "review.json")
@@ -540,7 +541,7 @@ def submit(root, config, job_id, driver=None):
 
 
 def _submit_item(root, config, job):
-    from .worker import _remember, check_result
+    from .itemwork import _remember, check_result
     item = _item(root, config, job)
     result, problem = check_result(item.workdir, None)
     if closed := _closed(get(root, job["id"])):
@@ -570,7 +571,7 @@ def _row_of(root, record_id):
 
 def _submit_triage(root, job):
     from . import activity, thread as conversation
-    from .worker import TRIAGE_LABEL
+    from .itemwork import TRIAGE_LABEL
     try:
         verdicts = json.loads((Path(job["folder"]) / "triage.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):

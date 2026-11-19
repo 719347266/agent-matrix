@@ -219,7 +219,7 @@ def run_action(root, payload, request_id, progress):
             for line in lines:
                 activity.log(root, "reply", f"你回复「{text[:20]}」→ {line[:60]}", status="ok" if "✓" in line else "info")
             if any(op.verb in WAKE_WORKER for op in ops) and any("✓" in line for line in lines):
-                from .worker import kick
+                from .workenv import kick
                 kick(root, config, force=True)
             return {"ok": bool(lines) and all("✓" in line for line in lines) and not problems,
                     "reply": "\n".join([*lines, *problems]), "deferred": applier.deferred}

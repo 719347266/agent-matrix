@@ -29,7 +29,7 @@ class ButtonHandoff(unittest.TestCase):
         self.start = dict(protocol=pickup.PROTOCOL,type='start',context=dict(targetSessionId='buddy-session',scheduleId='button-only'))
 
     def click(self):
-        with patch.object(ls,'CINDY_APP',self.root), patch('agent_matrix.worker.workdir_for',return_value=self.work), \
+        with patch.object(ls,'CINDY_APP',self.root), patch('agent_matrix.itemwork.workdir_for',return_value=self.work), \
              patch.object(ls,'_gpt_said',return_value=['已有第一版']), patch.object(ls.subprocess,'run') as opened:
             result=ls.start_in_cindy(self.root,None,self.item,history='主人：保留第一版')
             self.assertEqual(opened.call_args.args[0][-1],'cindy://session/buddy-session')

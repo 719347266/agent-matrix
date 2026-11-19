@@ -162,7 +162,7 @@ class ServerTests(unittest.TestCase):
             conn.request("POST", "/api/settings", json.dumps(body), {"Host": f"127.0.0.1:{self.port}", "X-Xinxiang-Token": token,
                                                                      "Content-Type": "application/json"})
             return conn.getresponse().status
-        with patch("agent_matrix.worker.kick") as kick:
+        with patch("agent_matrix.workenv.kick") as kick:
             self.assertEqual(post({"prework_enabled": True}), 200)
         self.assertTrue(load(self.root / "config.yaml").prework_enabled)
         self.assertTrue(json.loads(self.get("/api/state", {"X-Xinxiang-Token": token})[1])["settings"]["prework_enabled"])

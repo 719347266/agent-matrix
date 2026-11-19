@@ -62,7 +62,7 @@ class DriveTests(unittest.TestCase):
         job, folder = self.open_job("meeting", ref={"meeting_id": "m1", "source": str(source), "validate": ["v"], "publish": ["p"]})
         (folder / "review.json").write_text("{}")
         answers = iter([(1, {"ok": False, "error": "缺少承接字眼"}), (0, {"ok": True}), (0, {"ok": True, "task_ids": ["r1"]})])
-        with patch("agent_matrix.worker._cli", lambda root, *a: next(answers)):
+        with patch("agent_matrix.workenv._cli", lambda root, *a: next(answers)):
             first = drive.submit(self.root, self.config, job["id"])
             self.assertEqual(first["status"], "fix")
             self.assertIn("缺少承接字眼", first["problem"])

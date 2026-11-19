@@ -67,7 +67,7 @@ class LocalSessions(unittest.TestCase):
         with patch.object(ls,"discover",return_value={}), patch.object(ls.subprocess,"run") as native:
             self.assertEqual(ls.view(self.home,hist,[],known),[])
             self.assertEqual(hist["r6"][0]["status"],"recorded")
-            self.assertEqual(sessions.open_session(self.home,None,hist["r6"][0]["job"]),{"opened":"cindy"})
+            self.assertEqual(ls.open_session(self.home,None,hist["r6"][0]["job"]),{"opened":"cindy"})
             self.assertEqual(native.call_args.args[0], ["open","cindy://session/exact-id"])
 
     def test_latest_request_skips_tool_results_and_system_notes(self):
@@ -112,7 +112,7 @@ class LocalSessions(unittest.TestCase):
         work = self.home / "work"
         work.mkdir()
         item = {"record_id": "r62", "n": 62, "title": "补齐角色流程图", "status": "完成", "who": "我", "next": "发流程图"}
-        with patch("agent_matrix.worker.workdir_for", return_value=work), patch.object(ls.subprocess, "run") as run:
+        with patch("agent_matrix.itemwork.workdir_for", return_value=work), patch.object(ls.subprocess, "run") as run:
             ls.start_for_item(root, None, item, history="你：先画一级页面")
         url = run.call_args.args[0][1]
         self.assertTrue(url.startswith("claude://code/new?"))
@@ -127,7 +127,7 @@ class PickUpInCindy(unittest.TestCase):
             (root / "state").mkdir(parents=True); work.mkdir(); app.mkdir()
             (work / "交付.md").write_text("v1", encoding="utf-8")
             item = {"record_id": "r61", "n": 61, "title": "更新考核方案", "status": "完成", "who": "AI", "next": "交方案"}
-            with patch("agent_matrix.worker.workdir_for", return_value=work), patch.object(ls, "CINDY_APP", app), \
+            with patch("agent_matrix.itemwork.workdir_for", return_value=work), patch.object(ls, "CINDY_APP", app), \
                  patch.object(ls, "_gpt_said", return_value=["[11-18 11:44] 已完成材料，方案见 交付.md"]), \
                  patch.object(ls.subprocess, "run") as run:
                 out = ls.start_in_cindy(root, None, item, history="你：注册权重再高一点")

@@ -24,7 +24,7 @@ SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{3,120}")
 
 
 def _jobs(root, where="1=1", args=()):
-    from .drive import _db
+    from .jobstore import _db
     db = _db(root)
     try:
         cols = [c[1] for c in db.execute("PRAGMA table_info(jobs)")]
@@ -70,7 +70,7 @@ def _public(job):
 
 def running(root):
     """Sessions working right now: one per open job (lease still valid), newest first."""
-    from .drive import now
+    from .jobstore import now
     return [_public(j) for j in _jobs(root, "status='open' AND lease_until>?", (now().isoformat(timespec="seconds"),))]
 
 
@@ -94,7 +94,7 @@ def by_item(root):
 
 def bind(root, job_id, session=None, link=None):
     """An outside AI tells which conversation it is working in (an id, or a link that opens it)."""
-    from .drive import _db
+    from .jobstore import _db
     value = str(session or "").strip()
     if value.startswith(("http://", "https://")) and not link:
         value, link = "", value
@@ -122,7 +122,7 @@ def command(root, config, job_id):
         raise MatrixError("这段会话没有记下对话编号，打不开。")
     folder = shlex.quote(str(job.get("folder") or Path.home()))
     if engine == "gpt":
-        from .worker import _env, codex_binary, provider_overrides
+        from .workenv import _env, codex_binary, provider_overrides
         binary = codex_binary(config)
         if not binary:
             raise MatrixError("找不到 codex 命令。")
@@ -133,7 +133,7 @@ def command(root, config, job_id):
         # GPT's tools break on non-ASCII PATH entries, so it gets a plain PATH (same as the worker)
         return f"cd {folder} && PATH={shlex.quote(process_env['PATH'])} {env}{shlex.quote(binary)} resume {flags} {shlex.quote(session)}"
     if engine == "claude":
-        from .worker import claude_binary
+        from .workenv import claude_binary
         binary = claude_binary(config)
         if not binary:
             raise MatrixError("找不到 claude 命令。")
@@ -141,28 +141,6 @@ def command(root, config, job_id):
     raise MatrixError("这段会话不是本机的 GPT 或 Claude，用它自己的链接打开。")
 
 
-def open_session(root, config, job_id):
-    """Open one conversation so the owner can keep talking to it: a link → returned for the browser;
-    a local GPT / Claude conversation → a Terminal window that resumes it."""
-    if job_id.startswith("local:"):
-        from .local_sessions import open_local
-        return open_local(root, config, job_id[6:])
-    job = _job(root, job_id)
-    engine, session, link = _session_of(job)
-    if link:
-        return {"link": link}
-    if engine == "claude" and session:
-        from .local_sessions import open_claude
-        return {**open_claude(session), "engine": engine}
-    # the built-in GPT runs `codex exec`: read here (default), in the ChatGPT app, or resumed in Terminal (设置 → AI 对话)
-    from .local_sessions import gpt_open_choice, open_gpt_in_chatgpt
-    where = gpt_open_choice(root)
-    if where == "chatgpt" and session:
-        return {**open_gpt_in_chatgpt(session), "engine": engine}
-    if where == "terminal" and session:
-        open_terminal(command(root, config, job_id))
-        return {"opened": "terminal", "engine": engine}
-    return {"transcript": True, "engine": engine}
 
 
 def open_terminal(line):
@@ -232,7 +210,7 @@ def transcript(root, config, job_id):
     engine, session, _ = _session_of(job)
     if engine != "gpt" or not session or not SAFE_ID.fullmatch(session):
         raise MatrixError("这段对话不是本机 GPT 的，点「打开对话」去它自己的软件里看。")
-    from .worker import worker_codex_home
+    from .workenv import worker_codex_home
     home = worker_codex_home() or Path.home() / ".codex"
     files = sorted(home.glob(f"sessions/*/*/*/rollout-*{session}.jsonl"))
     if not files:

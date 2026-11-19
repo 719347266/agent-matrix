@@ -11,13 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import archmap  # noqa: E402
 
 # Imports that still reach into a higher layer: (from, to).
-KNOWN_UPWARD = {
-    ("reply", "worker"),
-}
+KNOWN_UPWARD = set()
 # Modules still inside an import cycle.
-KNOWN_CYCLIC = {
-    "drive", "local_sessions", "sessions", "worker",
-}
+KNOWN_CYCLIC = set()
 # Modules that still open SQLite themselves instead of going through db.py.
 KNOWN_CONNECTS = set()
 

@@ -85,7 +85,7 @@ def _num(value):
 def build_state(root):
     from . import inbox, thread
     from .snapshot import _snapshot
-    from .worker import is_running, read_status
+    from .workenv import is_running, read_status
     root = Path(root)
     snap = _snapshot(root)
     rows = snap.get("rows") or []
@@ -241,7 +241,7 @@ def system_info(root):
     except (TypeError, ValueError):
         pass
     from .config import load
-    from .worker import claude_binary, codex_binary
+    from .workenv import claude_binary, codex_binary
     try:
         config = load(Path(root) / "config.yaml")
         found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
@@ -426,13 +426,13 @@ class Handler(BaseHTTPRequestHandler):
                             setattr(config, key, list(dict.fromkeys(str(w).strip()[:40] for w in body[key] if str(w).strip()))[:100])
                     save(root / "config.yaml", config)
                     if config.prework_enabled and body.get("prework_enabled"):
-                        from .worker import kick  # start on the waiting AI items now, not at the next 2-minute tick
+                        from .workenv import kick  # start on the waiting AI items now, not at the next 2-minute tick
                         threading.Thread(target=kick, args=(root, config), kwargs={"force": True}, daemon=True).start()
                 if "auto_assign" in body:
                     thread.set_setting(root, "auto_assign", bool(body["auto_assign"]))
                     if body["auto_assign"]:  # judge the waiting items right away
                         from .config import load
-                        from .worker import kick
+                        from .workenv import kick
                         kick(root, load(root / "config.yaml"), force=True)
                 return self._send(200, {"ok": True})
             if path in ("/api/store", "/api/notion/connect"):
@@ -484,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "text": local_sessions.cindy_setup_text(root)})
             if path == "/api/engine/test":
                 from .config import load
-                from .worker import test_engine
+                from .engines import test_engine
                 name = body.get("engine")
                 if name not in {"codex", "claude"}:
                     return self._send(400, {"ok": False, "reply": "不认识这个 AI。"})
@@ -516,9 +516,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/session/open":
                 from .config import load
                 from .models import MatrixError
-                from . import sessions as ai_sessions
+                from . import local_sessions
                 try:
-                    return self._send(200, {"ok": True, **ai_sessions.open_session(root, load(root / "config.yaml"), str(body.get("job") or ""))})
+                    return self._send(200, {"ok": True, **local_sessions.open_session(root, load(root / "config.yaml"), str(body.get("job") or ""))})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/read":

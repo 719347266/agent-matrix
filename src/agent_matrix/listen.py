@@ -253,7 +253,7 @@ class Listener:
     def wake_worker(self, config, force=False):
         """The AI employee runs in its own process; this only starts it when it is idle."""
         try:
-            from .worker import kick
+            from .workenv import kick
             if kick(self.root, config, force=force) == "started":
                 log("worker", "started")
         except Exception as exc:

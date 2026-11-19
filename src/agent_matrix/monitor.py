@@ -314,7 +314,7 @@ def worker_view(root, rows, moving, now):
 
     Returns the AI employee's state for its own panel section:
     {"state": working|extracting|checking|idle, "line", "n", "title", "step", "minutes", "queue", "last"}."""
-    from .worker import is_running, read_status
+    from .workenv import is_running, read_status
     ws = read_status(root)
     running = is_running(root)
     n_of, title_of = {}, {}

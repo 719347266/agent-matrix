@@ -534,7 +534,7 @@ def handle(config, client, state, text, *, source, message_ref):
         activity.log(client.root, "reply", f"你回复「{text.strip()[:20]}」→ {line[:60]}", status="ok" if "✓" in line else "info")
     if any(op.verb in WAKE_WORKER for op in ops) and any("✓" in x for x in lines):
         try:  # new material, a rejection or "先做": the AI employee starts now, not on the next tick
-            from .worker import kick
+            from .workenv import kick
             kick(client.root, config, force=True)
         except Exception:
             pass

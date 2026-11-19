@@ -222,7 +222,7 @@ def _public(rec, present):
 def _bind_of(root, rec, items):
     """The item a conversation is clearly about, or None: it runs in the item's own folder (opened from 心响),
     or it names one item ("#62", or the item's full title)."""
-    from .worker import work_base
+    from .workenv import work_base
     cwd = str(rec.get("cwd") or "")
     if cwd:
         base = str(work_base(root))
@@ -309,7 +309,7 @@ def open_claude(sid, host=None):
 
 
 def open_local(root,config,key):
-    from . import sessions, worker
+    from . import sessions, workenv
     import shlex
     rec=discover().get(key)
     if not rec:
@@ -338,10 +338,10 @@ GPT_OPEN = ("here", "chatgpt", "terminal")                         # where a bui
 
 def apps(config=None):
     """What this computer can use: the apps that are installed and the command-line tools on PATH."""
-    from . import worker
+    from . import workenv
     return {"cindy": CINDY_APP.is_dir(), "claude": CLAUDE_APP.is_dir(), "chatgpt": CHATGPT_APP.is_dir(),
-            "terminal-claude": bool(worker.claude_binary(config)) if config else bool(__import__("shutil").which("claude")),
-            "terminal-codex": bool(worker.codex_binary(config)) if config else bool(__import__("shutil").which("codex"))}
+            "terminal-claude": bool(workenv.claude_binary(config)) if config else bool(__import__("shutil").which("claude")),
+            "terminal-codex": bool(workenv.codex_binary(config)) if config else bool(__import__("shutil").which("codex"))}
 
 
 def pickup_choice(root, found=None):
@@ -366,7 +366,7 @@ def gpt_open_choice(root, found=None):
 def _gpt_said(root, record_id, limit=12):
     """What the built-in GPT said and handed in on this item (its own conversation files), newest last."""
     from . import sessions
-    from .worker import worker_codex_home
+    from .workenv import worker_codex_home
     home = worker_codex_home() or Path.home() / ".codex"
     said = []
     for s in reversed(sessions.by_item(root).get(record_id, [])):
@@ -380,8 +380,8 @@ def _gpt_said(root, record_id, limit=12):
 def write_context(root, item, history="", *, buddy=False):
     """The item's folder becomes the place to pick it up: 心响事项.md with the facts, the conversation so far and what
     the built-in GPT already did, plus AGENTS.md / CLAUDE.md so whichever AI opens the folder reads it first."""
-    from . import worker
-    folder = worker.workdir_for(root, item["record_id"])
+    from . import itemwork
+    folder = itemwork.workdir_for(root, item["record_id"])
     lines = [f"# 心响事项 #{item['n']}：{item.get('title') or ''}", "",
              f"- 状态：{item.get('status') or ''}；谁来做：{item.get('who') or ''}；截止：{item.get('due') or '无'}",
              f"- 来源：{item.get('source') or '手动'} {item.get('source_url') or ''}".rstrip(),
@@ -451,10 +451,10 @@ def pick_up(root, config, item, history=""):
 
 def start_in_terminal(root, config, item, history="", cli="claude"):
     """For people without a desktop app: the command-line AI in Terminal, in the item's folder."""
-    from . import sessions, worker
+    from . import sessions, workenv
     import shlex
     folder = write_context(root, item, history)
-    binary = (worker.claude_binary if cli == "claude" else worker.codex_binary)(config)
+    binary = (workenv.claude_binary if cli == "claude" else workenv.codex_binary)(config)
     if not binary:
         raise MatrixError(f"没有找到 {cli} 命令行。")
     prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
@@ -465,7 +465,7 @@ def start_in_terminal(root, config, item, history="", cli="claude"):
 def open_gpt_in_chatgpt(thread_id):
     """A built-in GPT conversation in the ChatGPT app: only this one is linked into the owner's Codex folder
     (a hard link, so both sides share one file and the AI's next round sees what the owner said there)."""
-    from .worker import owner_codex_home, worker_codex_home
+    from .workenv import owner_codex_home, worker_codex_home
     home = worker_codex_home()
     if not home or not ID.fullmatch(thread_id):
         raise MatrixError("这段对话打不开。")
@@ -592,7 +592,7 @@ def cindy_status(root):
 
 def cindy_setup_text(root):
     """The one message the owner sends to Cindy: its own AI creates (or updates) the pickup schedule."""
-    from .drive import shim_path
+    from .workenv import shim_path
     status = cindy_status(root)
     project = status.get("project") or "（你的项目文件夹）"
     cmd = str(shim_path())
@@ -613,3 +613,25 @@ def cindy_setup_text(root):
 4. 按 instructions 做，交付文件写到 folder 里；按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
 
 建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查都对就行。"""
+
+
+def open_session(root, config, job_id):
+    """Open one conversation so the owner can keep talking to it: a link → returned for the browser;
+    a local GPT / Claude conversation → a Terminal window that resumes it."""
+    if job_id.startswith("local:"):
+        return open_local(root, config, job_id[6:])
+    from . import sessions
+    job = sessions._job(root, job_id)
+    engine, session, link = sessions._session_of(job)
+    if link:
+        return {"link": link}
+    if engine == "claude" and session:
+        return {**open_claude(session), "engine": engine}
+    # the built-in GPT runs `codex exec`: read here (default), in the ChatGPT app, or resumed in Terminal (设置 → AI 对话)
+    where = gpt_open_choice(root)
+    if where == "chatgpt" and session:
+        return {**open_gpt_in_chatgpt(session), "engine": engine}
+    if where == "terminal" and session:
+        sessions.open_terminal(sessions.command(root, config, job_id))
+        return {"opened": "terminal", "engine": engine}
+    return {"transcript": True, "engine": engine}

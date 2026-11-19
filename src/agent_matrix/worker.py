@@ -30,823 +30,106 @@ import threading
 import time
 
 from .models import MatrixBusy, MatrixError
+from .workenv import (now, status_path, read_status, _STATUS_LOCK, write_status, _alive, is_running, _version_key, codex_binary, owner_codex_home, worker_codex_home, _env, work_base, scratch, provider_overrides, project, _cli, _check, claude_binary, kick)  # noqa: F401
+from .engines import (CodexRun, MCP_CACHE_SECONDS, MCP_DENY, mcp_servers, ClaudeRun, ENGINES, engine, test_engine)  # noqa: F401
+from .itemwork import (SECTIONS_ALWAYS, TEMPLATE_HINT, _plain, _section_names, check_result, workdir_for, record_copy, _changes, _remember, first_prompt, resume_prompt, TRIAGE_LABEL, _pending_new, pick_next, Item)  # noqa: F401
 from .state import State, exclusive_lock
 from .timeutil import TZ
 
-SECTIONS_ALWAYS = ["用到的资料", "我做的假设"]
-TEMPLATE_HINT = {"周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
-                 "方案": "推荐 / 选项对比 / 需要你拍板", "会议材料": "议程 / 需要决策 / 背景数据",
-                 "回复草稿": "草稿 / 需要你确认", "其他": "按完成标准逐条覆盖"}
 MAX_FIX_ROUNDS = 2
 IDLE_POLL_SECONDS = 15  # a free lane looks for new work this often while other lanes are busy
 
 
 # ---- small helpers ------------------------------------------------------------------------------------
 
-def now():
-    return datetime.now(TZ)
 
 
-def status_path(root):
-    return Path(root) / "state/worker.json"
 
 
-def read_status(root):
-    try:
-        return json.loads(status_path(root).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
 
 
-_STATUS_LOCK = threading.Lock()
 
 
-def write_status(root, **fields):
-    """The panel reads this file; written atomically, never under the project lock (lanes share it)."""
-    with _STATUS_LOCK:
-        data = {**read_status(root), **fields, "updated_at": now().isoformat(timespec="seconds")}
-        path = status_path(root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, path)
-        return data
 
 
-def _alive(pid):
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError, TypeError):
-        return False
 
 
-def is_running(root):
-    s = read_status(root)
-    return bool(s.get("running") and _alive(s.get("pid")))
 
 
-def _version_key(path):
-    m = re.search(r"/(\d+(?:\.\d+)*)/", path)
-    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
 
 
-def codex_binary(config):
-    if getattr(config, "worker_codex", ""):
-        return config.worker_codex
-    found = shutil.which("codex")
-    if found:
-        return found
-    bundled = glob(os.path.expanduser("~/Library/Application Support/Cindy/codex-package/*/bin/codex"))
-    return max(bundled, key=_version_key) if bundled else None
 
 
-def owner_codex_home():
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 
 
-def worker_codex_home():
-    """The AI employee's own GPT folder: its conversations stay out of the owner's GPT app, and the
-    owner's global instructions and skills are not loaded. Sign-in is shared through a link to the
-    owner's auth.json (never copied). None when that is not possible; then the owner's folder is used."""
-    home = Path.home() / ".agent-matrix" / "codex-home"
-    if not str(home).isascii():
-        return None
-    auth = owner_codex_home() / "auth.json"
-    if not auth.is_file():
-        return None
-    try:
-        home.mkdir(parents=True, exist_ok=True)
-        link = home / "auth.json"
-        if not link.is_symlink() or os.readlink(link) != str(auth):
-            link.unlink(missing_ok=True)
-            link.symlink_to(auth)
-        return home
-    except OSError:
-        return None
 
 
-def _env(config):
-    """GPT's command tool crashes on non-ASCII paths (codex 0.167), so its environment keeps none:
-    PATH entries and variables with non-ASCII values (PWD, VIRTUAL_ENV, ...) are left out."""
-    env = {k: v for k, v in os.environ.items() if str(v).isascii()}
-    env.pop("CODEX_HOME", None)  # a host app (e.g. Cindy) may point this at its own GPT setup
-    own = worker_codex_home()
-    if own is not None:
-        env["CODEX_HOME"] = str(own)
-    env.pop("VIRTUAL_ENV", None)
-    extra = []
-    lark = shutil.which(config.lark_binary) or (config.lark_binary if os.path.isabs(config.lark_binary) else None)
-    if lark:
-        extra.append(os.path.dirname(lark))
-    for d in ("/opt/homebrew/bin", "/usr/local/bin", os.path.expanduser("~/.npm-global/bin")):
-        if os.path.isdir(d):
-            extra.append(d)
-    paths = [*extra, *os.environ.get("PATH", "").split(os.pathsep)]
-    env["PATH"] = os.pathsep.join(dict.fromkeys(x for x in paths if x and x.isascii()))
-    return env
 
 
-def work_base(root):
-    """Where GPT works. Inside the project when its path is plain ASCII; otherwise a mirror under
-    ~/.agent-matrix (the command tool cannot run in a folder like 「01 项目」)."""
-    root = Path(root).resolve()
-    if str(root).isascii():
-        return root / "state/work"
-    home = Path.home()
-    if not str(home).isascii():
-        return root / "state/work"
-    return home / ".agent-matrix" / ("w" + sha256(str(root).encode()).hexdigest()[:8])
 
 
-def scratch(root, *parts):
-    path = work_base(root).joinpath(*parts)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
-def provider_overrides():
-    """Run GPT without the owner's plugins, MCP servers and hooks (they distract the model and cost
-    tokens), but with the same model provider: copy only `model_provider` and its
-    `[model_providers.<name>]` table from the owner's codex config into -c flags."""
-    import tomllib
-    try:
-        data = tomllib.loads((owner_codex_home() / "config.toml").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    name = data.get("model_provider")
-    table = (data.get("model_providers") or {}).get(name) if name else None
-    if not name or not isinstance(table, dict):
-        return []
-    flags = ["-c", f"model_provider={json.dumps(name)}"]
-    for key, value in table.items():
-        if isinstance(value, (str, bool, int, float)):
-            flags += ["-c", f"model_providers.{name}.{key}={json.dumps(value)}"]
-    return flags
 
 
-@contextmanager
-def project(root, config, *, wait=120, client=True):
-    """Short locked section: state (and a verified Feishu client) for a few reads/writes."""
-    from .feishu import Feishu
-    with exclusive_lock(Path(root) / "state", wait=wait):
-        state = State(Path(root) / "state/state.db")
-        try:
-            feishu = None
-            if client:
-                feishu = Feishu(config, Path(root))
-                feishu.verify_owner(feishu.auth())
-            yield feishu, state
-        finally:
-            state.close()
 
 
-def _cli(root, module, *args, timeout=300):
-    """Run one of our own commands (they take the project lock themselves) and parse its JSON line."""
-    run = subprocess.run([sys.executable, "-m", module, *args], cwd=root, capture_output=True, text=True,
-                         encoding="utf-8", timeout=timeout)
-    lines = [x for x in (run.stdout or "").strip().splitlines() + (run.stderr or "").strip().splitlines() if x.startswith("{")]
-    try:
-        return run.returncode, json.loads(lines[-1]) if lines else {}
-    except ValueError:
-        return run.returncode, {}
 
 
-def _check(root, module, tries=6):
-    """`check` commands skip when the project is busy; wait a little instead of concluding "nothing to do"."""
-    for _ in range(tries):
-        code, out = _cli(root, module, "check")
-        if out.get("reason") != "busy":
-            return code, out
-        time.sleep(5)
-    return code, out
 
 
 # ---- running the model ----------------------------------------------------------------------------------
 
-class CodexRun:
-    """One `codex exec` turn in a folder, streamed so the panel can follow it."""
-    THREAD_FILE = ".thread"
-    NAME = "本机 GPT"
-
-    def __init__(self, config, workdir, *, thread=None, effort=None, timeout_minutes=None, ephemeral=False):
-        self.config, self.workdir, self.thread = config, Path(workdir), thread
-        self.effort = effort or config.worker_effort
-        self.timeout = 60 * (timeout_minutes or config.worker_timeout_minutes)
-        self.ephemeral = ephemeral
-        self.usage, self.commands, self.timed_out, self.returncode = {}, 0, False, None
-        self.stopped = False
-        self.messages = 0
-
-    def argv(self):
-        binary = codex_binary(self.config)
-        if not binary:
-            raise MatrixError("找不到 GPT 命令行（codex）。在 config.yaml 的 worker_codex 写上它的路径。")
-        argv = [binary, "exec"]
-        if self.thread:
-            argv += ["resume", self.thread]
-        argv += ["--json", "--skip-git-repo-check", "--ignore-user-config", *provider_overrides(), "-m", self.config.worker_model,
-                 "-c", f"model_reasoning_effort={self.effort}", "-c", 'sandbox_mode="workspace-write"',
-                 "-c", "sandbox_workspace_write.network_access=true", "-o", str(self.workdir / ".last.txt")]
-        if not self.thread:
-            argv += ["-C", str(self.workdir)]
-        if self.ephemeral:
-            argv.append("--ephemeral")
-        return [*argv, "-"]
-
-    def _kill_tree(self, proc):
-        """Stop commands already started by this driver as well as the driver itself."""
-        if os.name == "nt":
-            if proc.poll() is None:
-                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
-                               timeout=10, creationflags=0x08000000)
-        else:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            except PermissionError:
-                # Some process hosts disallow group signals even for our own child. Only
-                # target descendants of this exact process; never signal unrelated jobs.
-                if proc.poll() is None:
-                    result = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, check=True)
-                    children = {}
-                    for line in result.stdout.splitlines():
-                        pid, parent = map(int, line.split())
-                        children.setdefault(parent, []).append(pid)
-                    descendants = []
-                    pending = [proc.pid]
-                    while pending:
-                        parent = pending.pop()
-                        found = children.get(parent, [])
-                        descendants.extend(found)
-                        pending.extend(found)
-                    for pid in reversed(descendants):
-                        try:
-                            os.kill(pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-        if proc.poll() is None:
-            proc.kill()
-
-    def env(self):
-        return _env(self.config)
-
-    def run(self, prompt, on_event=None, on_tick=None, should_stop=None):
-        if should_stop and should_stop():
-            self.stopped = True
-            return self
-        flags = 0x08000000 if os.name == "nt" else 0  # no console window on Windows
-        proc = subprocess.Popen(self.argv(), cwd=self.workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                env=self.env(), creationflags=flags, start_new_session=os.name != "nt")
-        lines = queue_mod.Queue()
-        done = threading.Event()
-
-        def read_lines():
-            try:
-                for line in proc.stdout:
-                    lines.put(line)
-            finally:
-                lines.put(None)
-
-        def watch_stop():
-            # A progress callback can be waiting on Feishu; cancellation must still stop the process.
-            while not done.wait(0.5):
-                if should_stop():
-                    self.stopped = True
-                    self._kill_tree(proc)
-                    return
-
-        reader = threading.Thread(target=read_lines, daemon=True)
-        watcher = threading.Thread(target=watch_stop, daemon=True) if should_stop else None
-        reader.start()
-        if watcher:
-            watcher.start()
-        try:
-            try:
-                proc.stdin.write(prompt)
-                proc.stdin.close()
-            except BrokenPipeError:
-                pass
-            self._loop(proc, lines, time.monotonic() + self.timeout, on_event, on_tick, should_stop)
-        finally:
-            done.set()
-            if watcher:
-                watcher.join(timeout=2)
-            if self.stopped or proc.poll() is None:
-                self._kill_tree(proc)
-            try:
-                self.returncode = proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                pass
-            reader.join(timeout=2)
-            proc.stdout.close()
-        return self
-
-    def _loop(self, proc, lines, deadline, on_event, on_tick, should_stop=None):
-        finished = False
-        while not finished:
-            try:
-                line = lines.get(timeout=0.5)
-            except queue_mod.Empty:
-                line = ""
-            if self.stopped or (should_stop and should_stop()):
-                self.stopped = True
-                self._kill_tree(proc)
-                return
-            if line is None:
-                finished = True
-            elif line:
-                self._event(line, on_event)
-            if on_tick:
-                on_tick()
-            if time.monotonic() > deadline:
-                self.timed_out = True
-                self._kill_tree(proc)
-                finished = True
-
-    def _event(self, line, on_event):
-        try:
-            event = json.loads(line)
-        except ValueError:
-            return
-        kind = event.get("type")
-        if kind == "thread.started" and event.get("thread_id"):
-            self.thread = event["thread_id"]
-            if not self.ephemeral:
-                (self.workdir / self.THREAD_FILE).write_text(self.thread)
-        elif kind == "turn.completed":
-            for k, v in (event.get("usage") or {}).items():
-                self.usage[k] = self.usage.get(k, 0) + (v or 0)
-        item = event.get("item") or {}
-        if item.get("type") == "command_execution" and kind == "item.started":
-            self.commands += 1
-        if item.get("type") == "agent_message" and kind == "item.completed":
-            self.messages += 1
-        if on_event:
-            on_event(event)
 
 
-def claude_binary(config):
-    return getattr(config, "worker_claude", "") or shutil.which("claude")
 
 
-MCP_CACHE_SECONDS = 6 * 3600
 # Whatever MCP is loaded, the AI only reads: it never sends, publishes, merges, deletes or edits shared workspaces
 # (Notion pages, comments, calendars…) on its own. Deliverables go in its own folder, as before.
-MCP_DENY = " ".join(f"mcp__*{w}*" for w in ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply",
-                                              "create", "update", "move", "restore", "resolve", "comment", "duplicate",
-                                              "spawn", "cancel", "upload"))
 
 
-def mcp_servers(binary, *, run=subprocess.run, cache=None):
-    """Tool-name prefixes of the MCP servers the owner's Claude has connected ("claude.ai Notion" → claude_ai_Notion).
-    `claude mcp list` health-checks every server (~10 s), so the answer is cached for a few hours."""
-    cache = Path(cache or Path.home() / ".cache/agent-matrix-mcp.json")
-    try:
-        saved = json.loads(cache.read_text())
-        if time.time() - saved["at"] < MCP_CACHE_SECONDS:
-            return saved["servers"]
-    except (OSError, ValueError, KeyError):
-        pass
-    try:
-        out = run([binary, "mcp", "list"], capture_output=True, text=True, timeout=120).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    servers = sorted({re.sub(r"[^A-Za-z0-9_-]", "_", line.split(": ", 1)[0].replace("claude.ai ", "claude_ai_"))
-                      for line in out.splitlines() if ": " in line and "✔" in line})
-    try:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"at": time.time(), "servers": servers}))
-    except OSError:
-        pass
-    return servers
 
 
-class ClaudeRun(CodexRun):
-    """One `claude -p` turn, same contract as CodexRun. Like GPT: without the owner's CLAUDE.md, plugins,
-    hooks and MCP (--safe-mode), except the MCP tools listed in worker_mcp_tools; writes only inside the folder,
-    network allowed (OS sandbox)."""
-    THREAD_FILE = ".claude-session"
-    NAME = "本机 Claude"
-    SANDBOX = json.dumps({"sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False,
-                                      "network": {"allowedDomains": ["*"]}}})
-
-    def argv(self):
-        binary = claude_binary(self.config)
-        if not binary:
-            raise MatrixError("找不到 Claude 命令行（claude）。在 config.yaml 的 worker_claude 写上它的路径。")
-        wanted = self.config.worker_mcp_tools
-        mcp = ([f"mcp__{p}__*" for p in mcp_servers(binary) if self.config.worker_claudeai_mcp or not p.startswith("claude_ai_")]
-               if "*" in wanted else [t for t in wanted if t.startswith("mcp__")])
-        # --safe-mode turns every MCP server off. With MCP wanted: load the owner's user settings (that is where the
-        # MCP servers live) but switch all hooks off, and allow only MCP tools (dontAsk denies everything unlisted).
-        settings = json.dumps({**json.loads(self.SANDBOX), "disableAllHooks": True}) if mcp else self.SANDBOX
-        argv = [binary, "-p", *(["--setting-sources", "user,project"] if mcp else ["--safe-mode"]),
-                "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "dontAsk", "--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch", *mcp]),
-                "--settings", settings,
-                *(["--disallowedTools", MCP_DENY] if mcp else [])]
-        if self.config.worker_claude_model:
-            argv += ["--model", self.config.worker_claude_model]
-        if self.effort in {"low", "medium", "high", "xhigh", "max"}:
-            argv += ["--effort", self.effort]
-        if self.thread:
-            argv += ["--resume", self.thread]
-        if self.ephemeral:
-            argv.append("--no-session-persistence")
-        return argv
-
-    def env(self):
-        env = _env(self.config)
-        if self.config.worker_mcp_tools and not self.config.worker_claudeai_mcp:
-            # A claude.ai connector and a plugin pointing at the same server (Notion, Atlassian…) collapse into one,
-            # and the claude.ai one wins even when only the plugin is signed in: leave the claude.ai ones out.
-            env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
-        return env
-
-    def _event(self, line, on_event):
-        try:
-            event = json.loads(line)
-        except ValueError:
-            return
-        kind = event.get("type")
-        if kind == "system" and event.get("subtype") == "init" and event.get("session_id"):
-            self.thread = event["session_id"]
-            if not self.ephemeral:
-                (self.workdir / self.THREAD_FILE).write_text(self.thread)
-        elif kind == "assistant":
-            for part in (event.get("message") or {}).get("content") or []:
-                if part.get("type") == "tool_use" and part.get("name") == "Bash":
-                    self.commands += 1
-                elif part.get("type") == "text":
-                    self.messages += 1
-        elif kind == "result":
-            for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
-                self.usage[k] = self.usage.get(k, 0) + ((event.get("usage") or {}).get(k) or 0)
-            if event.get("result"):  # codex writes its last message with -o; claude reports it here
-                (self.workdir / ".last.txt").write_text(event["result"], encoding="utf-8")
-        if on_event:
-            on_event(event)
 
 
-ENGINES = {"codex": "CodexRun", "claude": "ClaudeRun"}
 
 
-def engine(root, purpose="work"):
-    """Which local AI the built-in driver uses (设置 → AI 执行): one for doing items ("work"), one for sorting
-    meetings and chats, judging new items and learning rules ("sort"; same as "work" unless chosen)."""
-    from . import thread as conversation
-    work = conversation.setting(Path(root), "engine", "codex")
-    if work not in ENGINES:   # items done by Cindy: the built-in driver still sorts, with GPT unless chosen
-        work = "codex"
-    chosen = conversation.setting(Path(root), "engine_sort", work) if purpose == "sort" else work
-    return ClaudeRun if chosen == "claude" else CodexRun
 
 
-def test_engine(root, config, name):
-    """Can this AI be reached right now? One tiny turn in a scratch folder: did it answer, how long, which model.
-    The result is kept for the settings page."""
-    from . import thread as conversation
-    base = ClaudeRun if name == "claude" else CodexRun
-
-    class Probe(base):
-        raw = ()
-
-        def _event(self, line, on_event):
-            self.raw = (*self.raw, line)[-30:]
-            super()._event(line, on_event)
-
-    folder = scratch(root, "engine-test", name)
-    (folder / ".last.txt").unlink(missing_ok=True)
-    started = time.monotonic()
-    model = (config.worker_claude_model or "Claude 账号默认") if name == "claude" else config.worker_model
-    try:
-        run = Probe(config, folder, effort="low", timeout_minutes=2, ephemeral=True).run("只回复两个字：连通。不要运行任何命令。")
-        reply = (folder / ".last.txt").read_text(encoding="utf-8").strip() if (folder / ".last.txt").is_file() else ""
-        problem = ""
-        if not reply:
-            said = [l for l in run.raw if l.strip()]
-            errors = [l for l in said if any(w in l.lower() for w in ("error", "failed", "unauthorized", "401", "403", "not found", "invalid"))]
-            problem = "超时了（2 分钟没回）" if run.timed_out else (errors or said or ["没有回复"])[-1][:300]
-        ok = "连通" in reply
-        if reply and not ok:  # it answered, but not the AI: e.g. "Not logged in · Please run /login"
-            problem = reply[:300]
-        if "login" in problem.lower() or "logged in" in problem.lower() or "unauthorized" in problem.lower() or "401" in problem:
-            problem += "（没登录：在终端运行一次这个命令行并登录）"
-        result = {"ok": ok, "reply": reply[:60], "error": problem, "seconds": round(time.monotonic() - started, 1)}
-    except MatrixError as exc:
-        result = {"ok": False, "reply": "", "error": str(exc), "seconds": round(time.monotonic() - started, 1)}
-    result.update(model=model, at=now().strftime("%m-%d %H:%M"), name=base.NAME)
-    conversation.set_setting(Path(root), f"engine_test:{name}", result)
-    return result
 
 
 # ---- checking what came back ----------------------------------------------------------------------------
 
-def _plain(markdown):
-    return "".join(re.sub(r"[#*`>|_\-\[\]()!~]", "", markdown).split())
 
 
-def _section_names(markdown):
-    return [re.sub(r"\s+", "", m.group(1)) for m in re.finditer(r"^#{1,6}\s*(.+?)\s*$", markdown, re.M)]
 
 
-def check_result(workdir, row):
-    """(result, problem). problem is a short sentence the model can act on, or None when it passes."""
-    from .prework import PLACEHOLDERS, TEMPLATES
-    try:
-        result = json.loads((Path(workdir) / "结果.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None, "没有找到有效的 结果.json。按说明写好再结束。"
-    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked"}:
-        return result, "结果.json 的 outcome 只能是 done 或 blocked。"
-    if result["outcome"] == "blocked":
-        if not str(result.get("question") or "").strip() or not str(result.get("tried") or "").strip():
-            return result, "卡住时必须写 question（问本人的一个具体问题）和 tried（已经试过哪些办法）。"
-        return result, None
-    template = result.get("template")
-    if template not in TEMPLATES:
-        return result, "template 只能是：" + "、".join(TEMPLATES) + "。"
-    summary = str(result.get("summary") or "").strip()
-    if not summary or len(summary) > 40:
-        return result, "summary 要有，且不超过 40 字。"
-    if len(str(result.get("confirmation") or "")) > 30:
-        return result, "confirmation 不超过 30 字。"
-    if not result.get("sources"):
-        return result, "sources 要列出实际用到的资料。"
-    try:
-        doc = (Path(workdir) / "交付.md").read_text(encoding="utf-8")
-    except OSError:
-        return result, "没有找到 交付.md。"
-    names = _section_names(doc)
-    missing = [s for s in SECTIONS_ALWAYS if not any(s in n for n in names)]
-    if missing:
-        return result, "交付.md 最后要有这两节小标题：" + "、".join(f"## {s}" for s in missing) + "。"
-    sections, cap = TEMPLATES[template]
-    missing = [s for s in sections if not any(s in n for n in names)]
-    if missing:
-        return result, f"按「{template}」模板，交付.md 缺少这些小标题：" + "、".join(missing) + "。"
-    found = [w for w in PLACEHOLDERS if w in doc]
-    if found:
-        return result, "交付.md 里还有占位文字：" + "、".join(found) + "。换成真实内容。"
-    body = re.split(r"^#{1,6}\s*用到的资料", doc, flags=re.M)[0]
-    length = len(_plain(body))
-    if length > cap:
-        return result, f"正文 {length} 字，「{template}」上限 {cap} 字。先给结论，删掉铺垫和重复。"
-    if length < 80:
-        return result, "交付.md 正文太短，像没做完。"
-    return result, None
 
 
 # ---- one AI item ---------------------------------------------------------------------------------------
 
-def workdir_for(root, record_id):
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", record_id or ""):
-        raise MatrixError("事项 ID 无效。")
-    return scratch(root, record_id)
 
 
-def record_copy(root, record_id):
-    """The project keeps its own copy of each item's folder (deliverable, result, notes for review)."""
-    path = Path(root) / "state/work" / record_id
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
-def _changes(workdir, row):
-    """What the owner added since the last round: new 补充材料 / 退回意见 lines."""
-    from .background import _one
-    try:
-        seen = json.loads((workdir / ".seen.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        seen = {}
-    out = []
-    for key in ("补充材料", "退回意见", "完成标准"):
-        new = [x for x in _one(row.get(key)).splitlines() if x.strip()]
-        old = set(x for x in str(seen.get(key) or "").splitlines() if x.strip())
-        out += [f"{key}：{x}" for x in new if x not in old]
-    return out
 
 
-def _remember(workdir, row):
-    from .background import _one
-    (workdir / ".seen.json").write_text(json.dumps({k: _one(row.get(k)) for k in ("补充材料", "退回意见", "完成标准")},
-                                                   ensure_ascii=False), encoding="utf-8")
 
 
-def first_prompt(root, row):
-    from .background import _one
-    template = (Path(root) / "prompts/worker.md").read_text(encoding="utf-8")
-    hints = "；".join(f"{k}：{v}" for k, v in TEMPLATE_HINT.items())
-    return template.format(item=f"#{row.get('编号')} {_one(row.get('标题'))}", templates=hints)
 
 
-def resume_prompt(changes, timed_out):
-    if changes:
-        lines = "\n".join("- " + c for c in changes)
-        return ("本人有新的要求，任务单.md 已更新：\n" + lines +
-                "\n\n在上一版（上一版.md）基础上改，逐条改到。规则不变：先补背景，写 step.txt，"
-                "最后重写 交付.md 和 结果.json 再结束。")
-    if timed_out:
-        return "上一轮时间到了，没做完。接着做，不要从头来；最后写好 交付.md 和 结果.json 再结束。"
-    return "接着上次往下做，最后写好 交付.md 和 结果.json 再结束。"
 
 
-class Item:
-    """Runs one claimed item from background to card."""
-
-    def __init__(self, root, config, pick):
-        self.root, self.config = Path(root), config
-        self.rid, self.version = pick["record_id"], pick["input_version"]
-        self.title, self.n = pick.get("title") or "", None
-        self.workdir = workdir_for(root, self.rid)
-        self.last_step, self.last_step_write = None, 0.0
-
-    # status shown on the panel
-    def show(self, stage, step=None):
-        write_status(self.root, kind="item", record_id=self.rid, n=self.n, title=self.title[:26], stage=stage,
-                     step=step if step is not None else read_status(self.root).get("step", ""),
-                     stage_at=now().isoformat(timespec="seconds"))
-
-    def claim(self, lease_minutes=None):
-        from .prework import current, read_notes
-        from .prework_store import WorkQueue
-        from .workflow import Gateway
-        with project(self.root, self.config) as (client, state):
-            current(self.config, client, state, self.rid, self.version)
-            claimed = WorkQueue(state).claim(self.rid, self.version, now(),
-                                             lease_minutes=lease_minutes or self.config.worker_timeout_minutes * (MAX_FIX_ROUNDS + 1) + 30)
-            if not claimed:
-                return None
-            rows = Gateway(client, state).rows()
-            row = next((r for r in rows if r["record_id"] == self.rid), None)
-            notes = read_notes(self.root, self.rid)
-        if row is None:
-            return None
-        from .background import _one
-        self.n, self.title = row.get("编号"), _one(row.get("标题")) or self.title
-        return client, rows, row, notes
-
-    def prepare_folder(self, client, rows, row, notes):
-        from . import background
-        keep = record_copy(self.root, self.rid)
-        for name in (".thread", ".claude-session", "交付.md", ".seen.json"):  # carry the conversation over if the folder moved
-            if (keep / name).is_file() and not (self.workdir / name).is_file():
-                shutil.copyfile(keep / name, self.workdir / name)
-        previous = None
-        if (self.workdir / "交付.md").is_file():
-            shutil.copyfile(self.workdir / "交付.md", self.workdir / "上一版.md")
-            previous = "上一版.md"
-        for name in ("结果.json", "step.txt", ".last.txt"):
-            (self.workdir / name).unlink(missing_ok=True)
-        (self.workdir / "任务单.md").write_text(background.task_sheet(row, rows), encoding="utf-8")
-        self.show("找背景", "程序在拉背景")
-        own_base = "/base/" + self.config.base_token if self.config.base_token else ""
-        (self.workdir / "背景.md").write_text(background.build(self.root, client, rows, row, now(), notes=notes, previous=previous,
-                                                             skip_urls=[own_base], copy_to=self.workdir), encoding="utf-8")
-
-    def on_tick(self):
-        """Mirror step.txt to the panel right away and to the table's 进度 at most once a minute."""
-        try:
-            step = (self.workdir / "step.txt").read_text(encoding="utf-8").strip().splitlines()[0][:15]
-        except (OSError, IndexError):
-            return
-        if step == self.last_step:
-            return
-        self.last_step = step
-        self.show("在做", step)
-        if time.monotonic() - self.last_step_write >= 60:
-            self.last_step_write = time.monotonic()
-            try:
-                from .prework import report_progress
-                with project(self.root, self.config, wait=20) as (client, state):
-                    report_progress(self.config, client, state, self.rid, step)
-            except (MatrixError, MatrixBusy, OSError):
-                pass
-
-    def require_active(self):
-        job_id = getattr(self, "job_id", None)
-        if job_id:
-            from . import drive
-            if drive.get(self.root, job_id)["status"] != "open":
-                raise MatrixError("这件活已经结束，旧运行不能再写入。")
-
-    def release(self):
-        """Give the item back to the queue at once (interrupted, or the driver let it go)."""
-        from .prework_store import WorkQueue
-        try:
-            with project(self.root, self.config, client=False, wait=30) as (_, state):
-                from . import drive
-                if any(j["kind"] == "item" and j["id"] != getattr(self, "job_id", None)
-                       and j["ref"].get("record_id") == self.rid and j["ref"].get("version") == self.version
-                       for j in drive.open_jobs(self.root)):
-                    return  # a restored run already owns this lease
-                WorkQueue(state).release(self.rid, self.version)
-        except Exception:
-            pass
-
-    def mirror_reply(self):
-        """What the AI said at the end of its turn goes into the item's conversation in 心响."""
-        try:
-            text = (self.workdir / ".last.txt").read_text(encoding="utf-8").strip()
-        except OSError:
-            return
-        if text:
-            from . import thread as conversation
-            conversation.add(self.root, self.rid, "ai", "say", text[:3000], driver=engine(self.root).NAME)
-        (self.workdir / ".last.txt").unlink(missing_ok=True)
-
-    def defer(self, reason, tokens):
-        from .prework import add_note
-        from .prework_store import WorkQueue
-        add_note(self.root, self.rid, reason)
-        with project(self.root, self.config, client=False) as (_, state):
-            WorkQueue(state).defer(self.rid, self.version, now(), reason)
-        self.done_status("推迟", reason, tokens)
-        return {"record_id": self.rid, "result": "deferred", "reason": reason}
-
-    def block(self, question, result, tokens):
-        from .prework import _v1, add_note, current, mark_blocked, notify
-        from .prework_store import WorkQueue
-        with project(self.root, self.config) as (client, state):
-            self.require_active()
-            current(self.config, client, state, self.rid, self.version)
-            add_note(self.root, self.rid, f"卡住：{question}；试过：{result.get('tried', '')}；{result.get('note', '')}")
-            WorkQueue(state).block(self.rid, self.version, question)
-            if _v1(state):
-                mark_blocked(self.config, client, state, self.rid, question)
-            notify(self.config, client, state)
-        self.done_status("卡住", question[:28], tokens)
-        return {"record_id": self.rid, "result": "blocked", "question": question}
-
-    def publish(self, result, tokens):
-        from .prework import add_note, notify, publish_markdown
-        self.show("交付中", "建飞书文档")
-        keep = record_copy(self.root, self.rid)
-        for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".claude-session", ".seen.json"):
-            if (self.workdir / name).is_file():
-                shutil.copyfile(self.workdir / name, keep / name)
-        with project(self.root, self.config) as (client, state):
-            self.require_active()
-            published = publish_markdown(self.config, client, state, self.rid, self.version,
-                                         keep / "交付.md", result, title=self.title)
-            notify(self.config, client, state)
-        from . import thread as conversation
-        doc = (keep / "交付.md").read_text(encoding="utf-8")
-        version = conversation.add_deliverable(
-            self.root, self.rid, summary=result.get("summary", ""), url=published["url"], confirm=result.get("confirmation", ""),
-            assumptions=conversation.assumptions_of(doc), sources=[x for x in result.get("sources", []) if str(x).startswith("http")])
-        add_note(self.root, self.rid, f"已交付 v{version}：{published['url']}；{result.get('note', '')}")
-        self.done_status("已交付", result["summary"], tokens, url=published["url"])
-        return {"record_id": self.rid, "result": "published", "url": published["url"]}
-
-    def done_status(self, outcome, text, tokens, url=None):
-        from . import activity
-        self.finished = True
-        activity.log(self.root, "prework", f"#{self.n} {self.title[:20]} · {outcome}", detail=text, ref=url or "")
-        write_status(self.root, last={"n": self.n, "title": self.title[:26], "outcome": outcome, "text": text[:40],
-                                      "tokens": tokens, "at": now().isoformat(timespec="seconds")},
-                     stage="空闲", step="", record_id=None, n=None, title="")
 
 
 # ---- new items: the AI decides whether it can do them (owner's switch in 心响) -----------------------------
 
-TRIAGE_LABEL = {"ai": "AI 能独立做，已接手", "prep": "需要你来做，AI 先备材料", "me": "需要你自己来",
-                "skip": "不用做，已放下", "done": "你已经办完了，已关掉"}
 
 
-def _pending_new(rows, judged):
-    out = []
-    for r in rows:
-        status = (r.get("状态") or [None])[0] if isinstance(r.get("状态"), list) else r.get("状态")
-        who = (r.get("执行方") or [None])[0] if isinstance(r.get("执行方"), list) else r.get("执行方")
-        if status != "待确认" or who == "别人" or r.get("排除本人提醒") or r.get("record_id") in judged:
-            continue
-        try:
-            n = int(str(r.get("编号")).strip())
-        except (TypeError, ValueError):
-            continue
-        from .background import _one
-        out.append({"n": n, "record_id": r["record_id"], "who": who or "", "title": _one(r.get("标题")),
-                    "what": _one(r.get("下一步动作"))[:300], "quote": _one(r.get("原话引用"))[:300], "source": _one(r.get("来源")),
-                    "since": _one(r.get("创建时间"))[:16]})
-    return out
 
 
 # ---- the queue ------------------------------------------------------------------------------------------
 
-def pick_next(root, config, skip=()):
-    """Next AI item: the owner's "先做" first, then by due date (prework.check already orders by due date)."""
-    code, checked = _check(root, "agent_matrix.prework")
-    ready = [r for r in checked.get("ready") or [] if r.get("status") in {"queued", "running", "prepared"}
-             and r["record_id"] not in skip]
-    with project(root, config, client=False, wait=60) as (_, state):
-        first = state.get("work:first", [])
-    ready.sort(key=lambda r: (r["record_id"] not in first, first.index(r["record_id"]) if r["record_id"] in first else 0))
-    write_status(root, queue=[{"record_id": r["record_id"], "title": str(r.get("title") or "")[:26]} for r in ready[1:]])
-    return ready[0] if ready else None
 
 
 def _tick(root, config, job, item, seen):
@@ -1001,36 +284,6 @@ def run_loop(root, config, *, max_jobs=200):
     return {"ok": True, "jobs": counter["n"]}
 
 
-def kick(root, config=None, force=False):
-    """Start `run` in the background unless it is already running. Cheap; safe to call every minute.
-
-    Timers call it plainly (a run that just finished is not repeated within 90 s); events that bring
-    new work (a reply, a meeting that ended) pass force=True and start it at once."""
-    root = Path(root)
-    if config is not None and not getattr(config, "worker_enabled", True):
-        return "off"
-    from . import thread as conversation
-    if not conversation.setting(root, "builtin_driver", True):
-        return "off"  # the owner lets other AIs drive; they call `xinxiang next` themselves
-    if is_running(root):
-        return "running"
-    if not force:
-        try:
-            last = datetime.fromisoformat(read_status(root).get("updated_at", ""))
-            if now() - last < timedelta(seconds=90):
-                return "recent"
-        except ValueError:
-            pass
-    kwargs = {"cwd": root, "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-    if os.name == "nt":
-        kwargs["creationflags"] = 0x00000008 | 0x08000000  # DETACHED_PROCESS | CREATE_NO_WINDOW
-    else:
-        kwargs["start_new_session"] = True
-    log = root / "logs/worker.log"
-    log.parent.mkdir(exist_ok=True)
-    kwargs["stdout"] = kwargs["stderr"] = log.open("a", encoding="utf-8")
-    subprocess.Popen([sys.executable, "-m", "agent_matrix.worker", "run"], **kwargs)
-    return "started"
 
 
 def main(argv=None):

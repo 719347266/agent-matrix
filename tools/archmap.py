@@ -15,12 +15,12 @@ LAYERS = [
     ("基础", ["models", "config", "timeutil", "schema", "alerts", "cards", "digest", "reply_timing", "llm",
               "precheck", "db", "lifecycle", "values", "textmatch", "delivery"]),
     ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory", "jobstore", "snapshot"]),
-    ("外部连接", ["feishu", "bitable", "records", "notion", "storemode", "sources.chats", "sources.slack", "sources"]),
+    ("外部连接", ["feishu", "bitable", "records", "notion", "storemode", "workenv", "sources.chats", "sources.slack", "sources"]),
     ("业务规则", ["workflow", "merge", "automation", "linked_sync", "sources.feishu_tasks", "automation_demo", "brief_migration", "brief_v1", "prework",
                   "reply", "meeting_watch", "meeting_review", "chat_review", "background", "proactive",
                   "agents", "agents.daily_brief", "agents.meeting_followup", "agents.meeting_prep",
                   "agents.pre_worker", "agents.recurring", "agents.weekly_review"]),
-    ("AI执行", ["drive", "worker", "sessions", "local_sessions", "cindy_pickup"]),
+    ("AI执行", ["engines", "itemwork", "drive", "worker", "sessions", "local_sessions", "cindy_pickup"]),
     ("入口", ["listen", "app", "cli", "scheduled", "monitor", "tray", "commands", "__main__", "__init__"]),
 ]
 LEVEL = {m: i for i, (_, mods) in enumerate(LAYERS) for m in mods}

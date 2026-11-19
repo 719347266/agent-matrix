@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from agent_matrix import app, drive, sessions, thread
+from agent_matrix import app, drive, local_sessions, sessions, thread
 from agent_matrix.models import Config, MatrixError
 
 
@@ -27,7 +27,7 @@ class SessionTests(unittest.TestCase):
         state = app.build_state(self.root)
         self.assertEqual([(s["n"], s["link"], s["can_open"]) for s in state["running"]], [(12, url, True)])
         self.assertEqual(sessions.by_item(self.root)["rec12"][0]["link"], url)
-        self.assertEqual(sessions.open_session(self.root, self.config, job["id"]), {"link": url})
+        self.assertEqual(local_sessions.open_session(self.root, self.config, job["id"]), {"link": url})
 
     def test_expired_lease_disappears_but_keeps_its_original_link(self):
         job = self.job("expired", lease=-3)
@@ -40,10 +40,10 @@ class SessionTests(unittest.TestCase):
     def test_local_resume_reports_launch_failure(self):
         job = self.job("claude-job", "本机 Claude")
         sessions.bind(self.root, job["id"], "demo-123")
-        with patch("agent_matrix.worker.claude_binary", return_value="/usr/bin/claude"), patch(
+        with patch("agent_matrix.workenv.claude_binary", return_value="/usr/bin/claude"), patch(
             "agent_matrix.sessions.subprocess.run", side_effect=OSError("Terminal unavailable")):
             with self.assertRaises(MatrixError):
-                sessions.open_session(self.root, self.config, job["id"])
+                local_sessions.open_session(self.root, self.config, job["id"])
 
     def test_private_notes_visible_in_item_but_omitted_from_ai_context(self):
         thread.add(self.root, "rec12", "me", "feedback", "这条发给 AI")

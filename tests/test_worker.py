@@ -8,6 +8,7 @@ import textwrap
 import unittest
 from zoneinfo import ZoneInfo
 
+from agent_matrix import engines
 from agent_matrix.models import Config
 
 TZ = ZoneInfo("Asia/Shanghai")
@@ -234,7 +235,7 @@ class ConversationTests(unittest.TestCase):
             fake_run = lambda *a, **k: type("R", (), {"stdout": listed})()
             servers = worker.mcp_servers("claude", run=fake_run, cache=Path(tmp) / "mcp.json")
             self.assertEqual(servers, ["claude_ai_Notion", "pencil", "plugin_chrome-devtools-mcp_chrome-devtools"])  # connected only
-            with patch.object(worker, "mcp_servers", lambda binary: servers):
+            with patch.object(engines, "mcp_servers", lambda binary: servers):
                 every = ClaudeRun(Config(worker_claude=str(fake), worker_mcp_tools=["*"]), work).argv()
             self.assertIn("mcp__pencil__* mcp__plugin_chrome-devtools-mcp_chrome-devtools__*", every[every.index("--allowedTools") + 1])
             self.assertIn("mcp__*send*", every[every.index("--disallowedTools") + 1])  # never sends on its own
