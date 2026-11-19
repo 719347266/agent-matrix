@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""A stand-in for lark-cli used only by the isolated test copy of 心响.
+
+It answers from world.json (meetings, transcripts, Feishu tasks, documents) in the current directory,
+appends every call to fake-lark-calls.jsonl, and refuses anything it does not know (exit 1) so a
+missing case shows up instead of passing silently. It never talks to the network.
+"""
+import json, os, sys, time, uuid
+from pathlib import Path
+
+args = sys.argv[1:]
+root = Path.cwd()
+world_path = root / "world.json"
+world = json.loads(world_path.read_text()) if world_path.exists() else {}
+log = root / "fake-lark-calls.jsonl"
+
+
+def opt(name, default=None):
+    return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else default
+
+
+def record(result):
+    with log.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"at": time.time(), "args": args, "result": result}, ensure_ascii=False) + "\n")
+
+
+def ok(data):
+    record("ok")
+    print(json.dumps({"ok": True, "data": data}, ensure_ascii=False))
+    sys.exit(0)
+
+
+def refuse(code):
+    record("refused:" + code)
+    print(json.dumps({"ok": False, "error": {"code": code, "type": "fake"}}, ensure_ascii=False), file=sys.stderr)
+    sys.exit(1)
+
+
+def save():
+    world_path.write_text(json.dumps(world, ensure_ascii=False, indent=1))
+
+
+head = args[:2]
+dry = "--dry-run" in args
+
+if args[:2] == ["auth", "status"]:
+    cfg = world["identity"]
+    me = {"status": "ready", "available": True, "verified": True, "openId": cfg["owner_open_id"], "userName": cfg["owner_name"], "tokenStatus": "valid"}
+    bot = {"status": "ready", "available": True, "verified": True}
+    record("ok")
+    print(json.dumps({"ok": True, "appId": cfg["app_id"], "identities": {"user": me, "bot": bot}}, ensure_ascii=False))
+    sys.exit(0)
+
+if head == ["vc", "+detail"]:
+    mid = opt("--meeting-ids")
+    m = world.get("meetings", {}).get(mid)
+    ok({"meetings": [m] if m else [{"meeting_id": mid, "error": "not_found"}]})
+if head == ["vc", "+search"]:
+    ok({"items": [], "has_more": False})
+if head == ["calendar", "+agenda"]:
+    ok([])
+if head == ["calendar", "+get"]:
+    ok({"event": {}})
+if head == ["note", "+detail"]:
+    ok({"note": {"note_display_type": "unified"}})
+if head == ["note", "+transcript"]:
+    note = opt("--note-id")
+    text = world.get("transcripts", {}).get(note)
+    if text is None:
+        refuse("no_transcript")
+    out = root / opt("--output")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("x", encoding="utf-8") as f:
+        f.write(text)
+    ok({"path": str(out)})
+
+if head == ["task", "+get-my-tasks"]:
+    done = opt("--complete") if opt("--complete") else next((a.split("=", 1)[1] for a in args if a.startswith("--complete=")), "false")
+    tasks = [t for t in world.get("tasks", []) if bool(t.get("completed_at")) == (done == "true")]
+    ok({"items": tasks})
+
+if args[:1] == ["base"]:
+    cmd = args[1]
+    if cmd == "+field-list":
+        select = lambda name, opts: {"field_name": name, "name": name, "type": "select", "id": "fld_" + name,
+                                     "options": [{"name": o} for o in opts]}
+        names = world.get("field_names", [])
+        fields = [{"field_name": n, "name": n, "type": "text", "id": "fld_" + n} for n in names]
+        fields += [select("状态", ["待确认", "未开始", "进行中", "卡住", "待验收", "完成", "取消"]),
+                   select("来源", ["会议", "聊天", "飞书任务", "手写"])]
+        ok({"items": fields})
+    if cmd in {"+record-batch-create", "+record-batch-update", "+field-update"}:
+        if dry:
+            ok({"dry_run": True})
+        body = json.loads(opt("--json") or "{}")
+        world.setdefault("base_writes", []).append({"cmd": cmd, "table": opt("--table-id"), "body": body})
+        save()
+        if cmd == "+record-batch-create":
+            ok({"record_id_list": ["recFAKE" + uuid.uuid4().hex[:8] for _ in body.get("create_records", [])]})
+        ok({"updated": True})
+    if cmd == "+record-list":
+        ok({"items": [], "has_more": False})
+
+if head == ["docs", "+create"]:
+    if dry:
+        ok({"dry_run": True})
+    token = "doxFAKE" + uuid.uuid4().hex[:10]
+    content_ref = opt("--content")
+    text = (root / content_ref[3:]).read_text(encoding="utf-8") if content_ref.startswith("@./") else content_ref
+    world.setdefault("docs", {})[token] = text
+    save()
+    ok({"document": {"document_id": token, "url": f"https://{world['identity']['base_host']}/docx/{token}"}})
+if head == ["docs", "+fetch"]:
+    token = opt("--doc")
+    if token not in world.get("docs", {}):
+        refuse("no_doc")
+    ok({"document": {"content": world["docs"][token]}})
+if head == ["docs", "+script"]:
+    ok({"assessment": {"status": "passed"}})
+
+if head == ["api", "POST"]:
+    ok({})
+
+if head == ["im", "+messages-send"]:
+    if dry:
+        ok({"dry_run": True})
+    ok({"message_id": "omFAKE" + uuid.uuid4().hex[:10]})
+if head in (["im", "+chat-list"],):
+    ok({"items": world.get("chats", []), "has_more": False})
+if head in (["im", "+chat-messages-list"], ["im", "+messages-search"]):
+    ok({"items": [], "has_more": False})
+
+refuse("fake_unsupported")

@@ -121,6 +121,7 @@ cp config.example.yaml config.yaml
 .venv/bin/python -m agent_matrix.worker status                  # AI 员工正在做哪件、做到哪、排队顺序
 .venv/bin/python -m agent_matrix health                         # 授权与表格自检
 .venv/bin/python -m unittest discover -s tests                  # 测试
+tools/e2e/run.sh                                                # 端到端演练：复制线上数据到临时目录，模拟推送跑全部链路，不碰线上
 node tests/test_client.cjs && node tests/test_client_live.cjs    # 页面交互与断线重试
 ```
 
