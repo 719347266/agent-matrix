@@ -44,6 +44,45 @@ final class ClientLinks: NSObject, WKUIDelegate {
         return nil
     }
 
+    // The page's alert() / confirm() / prompt(): without these WKWebView answers "cancel" silently,
+    // so a button that asks first (断开 Slack, 只存本机 …) looks like it does nothing.
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.addButton(withTitle: "好")
+        present(alert, in: webView) { _ in completionHandler() }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        present(alert, in: webView) { completionHandler($0 == .alertFirstButtonReturn) }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = prompt
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.stringValue = defaultText ?? ""
+        alert.accessoryView = field
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        present(alert, in: webView) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+    }
+
+    private func present(_ alert: NSAlert, in webView: WKWebView, done: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = webView.window {
+            alert.beginSheetModal(for: window, completionHandler: done)
+        } else {
+            done(alert.runModal())
+        }
+    }
+
     private func open(_ url: URL, in webView: WKWebView) {
         guard ["http", "https", "mailto", "feishu", "lark"].contains(url.scheme?.lowercased() ?? "") else {
             show("暂不支持这类链接，可右键复制链接。", in: webView)
@@ -55,7 +94,7 @@ final class ClientLinks: NSObject, WKUIDelegate {
     }
 
     private func show(_ message: String, in webView: WKWebView) {
-        // Use the existing page toast; WKWebView's JavaScript alert/confirm is not configured.
+        // Use the existing page toast for link problems.
         guard let data = try? JSONSerialization.data(withJSONObject: [message]),
               let argument = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("if (typeof window.toast === 'function') window.toast(\(argument)[0]);", completionHandler: nil)

@@ -155,6 +155,26 @@ def build_state(root):
                 "engine": thread.setting(root, "engine", "codex"),
                 "prework_enabled": _config_flag(root, "prework_enabled"),
                 "worker_mcp": _config_flag(root, "worker_mcp_tools")}
+    settings["engine_sort"] = thread.setting(root, "engine_sort", settings["engine"] if settings["engine"] != "cindy" else "codex")
+    settings["cindy_project"] = thread.setting(root, "cindy_project", "")
+    try:
+        from . import local_sessions
+        settings["cindy"] = local_sessions.cindy_status(root)
+        if settings["cindy"].get("installed"):
+            settings["cindy"]["setup_text"] = local_sessions.cindy_setup_text(root)
+    except Exception:
+        settings["cindy"] = {}
+    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude")}
+    try:  # where conversations open and items are picked up (设置 → AI 对话)
+        from . import local_sessions
+        from .config import load as load_config
+        found = local_sessions.apps(load_config(root / "config.yaml"))
+        cfg = load_config(root / "config.yaml")
+        settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model}
+        settings.update(apps=found, pickup_app=local_sessions.pickup_choice(root, found),
+                        gpt_open=local_sessions.gpt_open_choice(root, found))
+    except Exception:
+        pass
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
@@ -362,8 +382,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
             if path == "/api/settings":
                 from . import thread
-                if body.get("engine") in {"codex", "claude"}:
+                if body.get("engine") in {"codex", "claude", "cindy"}:
                     thread.set_setting(root, "engine", body["engine"])
+                if "cindy_project" in body:
+                    thread.set_setting(root, "cindy_project", str(body["cindy_project"] or "")[:500])
+                if body.get("engine_sort") in {"codex", "claude"}:
+                    thread.set_setting(root, "engine_sort", body["engine_sort"])
+                if any(k in body for k in ("worker_model", "worker_claude_model")):  # model names live in config.yaml
+                    from .config import load as load_config, save as save_config
+                    config = load_config(root / "config.yaml")
+                    for key in ("worker_model", "worker_claude_model"):
+                        if key in body:
+                            value = " ".join(str(body[key] or "").split())[:80]
+                            if key == "worker_model" and not value:
+                                continue  # GPT needs a model name; Claude may use the account default
+                            setattr(config, key, value)
+                    save_config(root / "config.yaml", config)
+                from .local_sessions import GPT_OPEN, PICKUP
+                if body.get("pickup_app") in PICKUP:
+                    thread.set_setting(root, "pickup_app", body["pickup_app"])
+                if body.get("gpt_open") in GPT_OPEN:
+                    thread.set_setting(root, "gpt_open", body["gpt_open"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if (body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body or "worker_mcp" in body
@@ -426,10 +465,28 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, **result})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/session/transcript":
+                from .config import load
+                from .models import MatrixError
+                from . import sessions as ai_sessions
+                try:
+                    return self._send(200, {"ok": True, **ai_sessions.transcript(root, load(root / "config.yaml"), str(body.get("job") or ""))})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/cindy/setup":
+                from . import local_sessions
+                return self._send(200, {"ok": True, "text": local_sessions.cindy_setup_text(root)})
+            if path == "/api/engine/test":
+                from .config import load
+                from .worker import test_engine
+                name = body.get("engine")
+                if name not in {"codex", "claude"}:
+                    return self._send(400, {"ok": False, "reply": "不认识这个 AI。"})
+                return self._send(200, {"ok": True, **test_engine(root, load(root / "config.yaml"), name)})
             if path == "/api/session/unbind":
                 from . import local_sessions
                 return self._send(200, local_sessions.unbind(root, str(body.get("key") or "")))
-            if path == "/api/session/start":
+            if path in ("/api/session/start", "/api/session/cindy", "/api/session/pickup"):
                 from .config import load
                 from .models import MatrixError
                 from .monitor import _snapshot
@@ -444,8 +501,9 @@ class Handler(BaseHTTPRequestHandler):
                         "next": row.get("下一步动作"), "criterion": row.get("完成标准"), "quote": _clean(row.get("原话引用")),
                         "url": _url(row.get("交付物链接"))}
                 try:
-                    return self._send(200, {"ok": True, **local_sessions.start_for_item(root, load(root / "config.yaml"), item,
-                                                                                      history=_history_text(root, row["record_id"], 40))})
+                    start = {"/api/session/cindy": local_sessions.start_in_cindy, "/api/session/start": local_sessions.start_for_item}.get(path, local_sessions.pick_up)
+                    return self._send(200, {"ok": True, **start(root, load(root / "config.yaml"), item,
+                                                               history=_history_text(root, row["record_id"], 40))})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/session/open":

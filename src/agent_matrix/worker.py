@@ -491,10 +491,56 @@ class ClaudeRun(CodexRun):
             on_event(event)
 
 
-def engine(root):
-    """Which local AI the built-in driver uses, chosen on the 系统 page."""
+ENGINES = {"codex": "CodexRun", "claude": "ClaudeRun"}
+
+
+def engine(root, purpose="work"):
+    """Which local AI the built-in driver uses (设置 → AI 执行): one for doing items ("work"), one for sorting
+    meetings and chats, judging new items and learning rules ("sort"; same as "work" unless chosen)."""
     from . import thread as conversation
-    return ClaudeRun if conversation.setting(Path(root), "engine", "codex") == "claude" else CodexRun
+    work = conversation.setting(Path(root), "engine", "codex")
+    if work not in ENGINES:   # items done by Cindy: the built-in driver still sorts, with GPT unless chosen
+        work = "codex"
+    chosen = conversation.setting(Path(root), "engine_sort", work) if purpose == "sort" else work
+    return ClaudeRun if chosen == "claude" else CodexRun
+
+
+def test_engine(root, config, name):
+    """Can this AI be reached right now? One tiny turn in a scratch folder: did it answer, how long, which model.
+    The result is kept for the settings page."""
+    from . import thread as conversation
+    base = ClaudeRun if name == "claude" else CodexRun
+
+    class Probe(base):
+        raw = ()
+
+        def _event(self, line, on_event):
+            self.raw = (*self.raw, line)[-30:]
+            super()._event(line, on_event)
+
+    folder = scratch(root, "engine-test", name)
+    (folder / ".last.txt").unlink(missing_ok=True)
+    started = time.monotonic()
+    model = (config.worker_claude_model or "Claude 账号默认") if name == "claude" else config.worker_model
+    try:
+        run = Probe(config, folder, effort="low", timeout_minutes=2, ephemeral=True).run("只回复两个字：连通。不要运行任何命令。")
+        reply = (folder / ".last.txt").read_text(encoding="utf-8").strip() if (folder / ".last.txt").is_file() else ""
+        problem = ""
+        if not reply:
+            said = [l for l in run.raw if l.strip()]
+            errors = [l for l in said if any(w in l.lower() for w in ("error", "failed", "unauthorized", "401", "403", "not found", "invalid"))]
+            problem = "超时了（2 分钟没回）" if run.timed_out else (errors or said or ["没有回复"])[-1][:300]
+        ok = "连通" in reply
+        if reply and not ok:  # it answered, but not the AI: e.g. "Not logged in · Please run /login"
+            problem = reply[:300]
+        if "login" in problem.lower() or "logged in" in problem.lower() or "unauthorized" in problem.lower() or "401" in problem:
+            problem += "（没登录：在终端运行一次这个命令行并登录）"
+        result = {"ok": ok, "reply": reply[:60], "error": problem, "seconds": round(time.monotonic() - started, 1)}
+    except MatrixError as exc:
+        result = {"ok": False, "reply": "", "error": str(exc), "seconds": round(time.monotonic() - started, 1)}
+    result.update(model=model, at=now().strftime("%m-%d %H:%M"), name=base.NAME)
+    conversation.set_setting(Path(root), f"engine_test:{name}", result)
+    return result
 
 
 # ---- checking what came back ----------------------------------------------------------------------------
@@ -868,7 +914,7 @@ def run_job(root, config, job):
     write_status(root, kind=job["kind"], stage=job.get("title") or job["kind"], step="", n=None, title=(job.get("title") or "")[:26],
                  stage_at=now().isoformat(timespec="seconds"))
     folder = Path(job["folder"])
-    Run = engine(root)
+    Run = engine(root, "sort")
     run = Run(config, folder, effort=config.extract_effort, timeout_minutes=15).run(job["instructions"])
     if run.thread:
         from .sessions import bind
@@ -905,7 +951,9 @@ def run_loop(root, config, *, max_jobs=200):
                 if counter["n"] >= max_jobs:
                     return
                 try:
-                    job = drive.next_job(root, config, name, skip=set(failed))
+                    # items go to Cindy when the owner chose it (设置 → AI 执行); this driver then only sorts
+                    kinds = drive.SORTING if drive.item_runner(root) == "cindy" else None
+                    job = drive.next_job(root, config, name, skip=set(failed), kinds=kinds)
                 except (MatrixError, MatrixBusy, OSError) as exc:
                     activity.log(root, "error", f"{name}领活出错", detail=str(exc)[:300], status="failed")
                     job = None

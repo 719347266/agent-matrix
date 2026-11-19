@@ -154,9 +154,15 @@ def open_session(root, config, job_id):
     if engine == "claude" and session:
         from .local_sessions import open_claude
         return {**open_claude(session), "engine": engine}
-    line = command(root, config, job_id)
-    open_terminal(line)
-    return {"opened": "terminal", "engine": engine}
+    # the built-in GPT runs `codex exec`: read here (default), in the ChatGPT app, or resumed in Terminal (设置 → AI 对话)
+    from .local_sessions import gpt_open_choice, open_gpt_in_chatgpt
+    where = gpt_open_choice(root)
+    if where == "chatgpt" and session:
+        return {**open_gpt_in_chatgpt(session), "engine": engine}
+    if where == "terminal" and session:
+        open_terminal(command(root, config, job_id))
+        return {"opened": "terminal", "engine": engine}
+    return {"transcript": True, "engine": engine}
 
 
 def open_terminal(line):
@@ -165,3 +171,73 @@ def open_terminal(line):
         subprocess.run(["osascript", "-e", script, line], check=True, capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
         raise MatrixError("未能在终端中打开原对话，请检查终端是否可用以及系统的自动化权限。") from exc
+
+
+# ---- reading a built-in GPT conversation inside 心响 --------------------------------------------------------
+
+CMD = re.compile(r'cmd:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _when(stamp):
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).astimezone(TZ).strftime("%m-%d %H:%M")
+    except ValueError:
+        return ""
+
+
+def _command_of(payload):
+    raw = payload.get("input") or payload.get("arguments") or ""
+    found = CMD.search(raw)
+    if found:
+        try:
+            return json.loads('"' + found.group(1) + '"')
+        except ValueError:
+            return found.group(1)
+    try:
+        args = json.loads(raw)
+        cmd = args.get("cmd") or args.get("command")
+        return " ".join(cmd) if isinstance(cmd, list) else str(cmd or "")
+    except (ValueError, AttributeError):
+        return ""
+
+
+def read_rollout(path, limit=150):
+    """One codex conversation as plain lines: the task it was given, what it said, what it ran, when a round ended."""
+    entries = []
+    with Path(path).open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            kind, p, at = o.get("type"), o.get("payload") or {}, _when(o.get("timestamp"))
+            if kind == "response_item" and p.get("type") == "message":
+                text = "\n".join(c.get("text", "") for c in p.get("content") or [] if isinstance(c, dict)).strip()
+                if p.get("role") == "assistant" and text:
+                    entries.append({"who": "ai", "text": text[:4000], "at": at})
+                elif p.get("role") == "user" and text and not text.startswith("<"):
+                    entries.append({"who": "task", "text": text[:6000], "at": at})
+            elif kind == "response_item" and p.get("type") in ("custom_tool_call", "function_call"):
+                cmd = _command_of(p)
+                if cmd:
+                    entries.append({"who": "run", "text": cmd[:400], "at": at})
+            elif kind == "event_msg" and p.get("type") in ("task_complete", "turn_aborted"):
+                entries.append({"who": "sys", "text": "这一轮做完了" if p["type"] == "task_complete" else "这一轮被停下了", "at": at})
+    return entries[-limit:]
+
+
+def transcript(root, config, job_id):
+    """What the built-in GPT did in one conversation, for reading in 心响 (also while it is still working)."""
+    job = _job(root, job_id)
+    engine, session, _ = _session_of(job)
+    if engine != "gpt" or not session or not SAFE_ID.fullmatch(session):
+        raise MatrixError("这段对话不是本机 GPT 的，点「打开对话」去它自己的软件里看。")
+    from .worker import worker_codex_home
+    home = worker_codex_home() or Path.home() / ".codex"
+    files = sorted(home.glob(f"sessions/*/*/*/rollout-*{session}.jsonl"))
+    if not files:
+        raise MatrixError("找不到这段对话的记录。")
+    entries = [e for f in files for e in read_rollout(f)]
+    running = job["status"] == "open"
+    return {"entries": entries[-150:], "running": running, "title": job.get("title") or "", "n": job.get("n"),
+            "driver": job.get("driver") or "本机 GPT"}
