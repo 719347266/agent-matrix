@@ -30,6 +30,7 @@ class ChatFilterTests(unittest.TestCase):
         self.assertEqual(keep("哥们，你们超管后台借我登一下", chat_mode="p2p"), "找你的")  # casual private asks
         self.assertEqual(keep("兄弟，加好了和我说一下", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("你的头像哈哈哈哈哈哈", chat_mode="p2p"))
+        self.assertEqual(keep("<http://dreame-netherlands.myshopify.com|dreame-netherlands.myshopify.com>", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("嗯嗯"))
 
 
