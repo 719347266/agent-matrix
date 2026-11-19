@@ -147,7 +147,7 @@ def build_state(root):
                        "time": str(last.get("at", ""))[11:16]} if last else None}
     box = [{"id": m["id"], "time": m["time"] if m["day"] == datetime.now(TZ).date().isoformat() else m["day"][5:] + " " + m["time"],
             "title": m["title"], "text": m["summary"], "kind": m["kind"], "n": (m["refs"] or [None])[0], "refs": m["refs"] or [],
-            "at": str(m.get("at") or "")[:19], "read": m["read"]}
+            "blocks": m["blocks"], "at": str(m.get("at") or "")[:19], "read": m["read"]}  # blocks: the whole message, opened in place
            for m in inbox.messages(root, 150)]
     judged = {n_of[rid]: j for rid, j in thread.judgments(root).items() if n_of.get(rid)}
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
@@ -391,6 +391,28 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     result = local_sessions.associate(root, str(body.get("key") or ""), int(body.get("n") or 0))
                     return self._send(200, {"ok": True, **result})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/session/unbind":
+                from . import local_sessions
+                return self._send(200, local_sessions.unbind(root, str(body.get("key") or "")))
+            if path == "/api/session/start":
+                from .config import load
+                from .models import MatrixError
+                from .monitor import _snapshot
+                from .drive import _history_text
+                from . import local_sessions
+                n = int(body.get("n") or 0)
+                row = next((r for r in _snapshot(root).get("rows", []) if str(r.get("编号")) == str(n)), None)
+                if not row:
+                    return self._send(400, {"ok": False, "reply": "找不到这件事。"})
+                item = {"record_id": row["record_id"], "n": n, "title": row.get("标题"), "status": row.get("状态"), "who": row.get("执行方"),
+                        "due": str(row.get("截止日") or "")[:10], "source": row.get("来源"), "source_url": _url(row.get("来源链接")),
+                        "next": row.get("下一步动作"), "criterion": row.get("完成标准"), "quote": _clean(row.get("原话引用")),
+                        "url": _url(row.get("交付物链接"))}
+                try:
+                    return self._send(200, {"ok": True, **local_sessions.start_for_item(root, load(root / "config.yaml"), item,
+                                                                                      history=_history_text(root, row["record_id"], 40))})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/session/open":

@@ -36,6 +36,9 @@ def _plain(text):
     return re.sub(r"\*\*(.*?)\*\*", r"\1", text).strip()
 
 
+LINK = re.compile(r"\[([^\]]*)\]\((https?://[^\s)]+)\)")
+
+
 def _refs(text):
     return [int(x) for x in dict.fromkeys(re.findall(r"#(\d{1,5})", text or ""))]
 
@@ -49,12 +52,17 @@ def from_text(text):
 
 
 def _row(column_set):
-    """One card row: bold head, grey hint, then「打开」links and callback buttons."""
+    """One card row: bold head, grey hint, then「打开」links (a button or a plain link) and callback buttons."""
     head, hint, url, actions = "", "", None, []
     for col in column_set.get("columns") or []:
         for el in col.get("elements") or []:
             if el.get("tag") == "markdown":
-                text = _plain(el.get("content"))
+                content = str(el.get("content") or "")
+                link = LINK.search(content)  # read-only cards carry the document as a plain link
+                url = url or (link.group(2) if link else None)
+                text = _plain(LINK.sub("", content)).strip(" ·")
+                if not text:
+                    continue
                 if not head:
                     head = text
                 else:
@@ -76,6 +84,8 @@ def from_card(card):
     blocks = [{"type": "text", "text": subtitle}] if subtitle else []
     refs = []
     for el in ((card.get("body") or {}).get("elements") or card.get("elements") or []):
+        if el.get("element_id") == "footer":  # a note for the Feishu reader only (see brief_v1.card)
+            continue
         tag = el.get("tag")
         if tag == "interactive_container":
             section = {"type": "section", "title": "", "rows": [], "more": ""}
@@ -84,8 +94,8 @@ def from_card(card):
                     text = _plain(inner.get("content"))
                     if not section["title"] and not section["rows"]:
                         section["title"] = text
-                    else:
-                        section["more"] = text
+                    elif text:  # notes under the rows (meetings, what was decided, "还有 N 件"): keep every line
+                        section["more"] = (section["more"] + "\n" if section["more"] else "") + text
                 elif inner.get("tag") == "column_set":
                     row = _row(inner)
                     section["rows"].append(row)

@@ -103,6 +103,16 @@ button:disabled{opacity:.5;cursor:wait}
 .row .acts{display:flex;gap:6px;align-items:center}
 .row q{display:block;font-size:12px;color:var(--ink3);margin-top:3px;quotes:"「" "」";white-space:normal}
 .empty{padding:28px 16px;text-align:center;color:var(--ink3)}
+/* a brief opened in the inbox: its groups and lines, each item with its status and buttons */
+.msg-open{padding:2px 14px 14px 18px;background:var(--hover);border-top:1px solid var(--line2);cursor:default}
+.msg-open .list{margin-top:6px}
+.b-h{margin:14px 2px 0;font-size:12.5px;font-weight:600;color:var(--ink2)}
+.b-p{margin:12px 2px 0;color:var(--ink2);white-space:pre-wrap;word-break:break-word}
+.b-p.quiet{font-size:12px;color:var(--ink3)}
+.b-note{padding:8px 12px;font-size:12.5px;line-height:1.7;color:var(--ink2);border-top:1px solid var(--line2);word-break:break-word}
+.b-note:first-child{border-top:0}
+.row.shut .t{color:var(--ink3)}
+.fold{font-size:12px;color:var(--ink3)}
 .bar{height:3px;border-radius:2px;background:var(--blue-soft);margin-top:6px;overflow:hidden;max-width:220px}.bar i{display:block;height:100%;background:var(--blue)}
 @container (max-width:760px){.row .meta .opt{display:none}}
 @container (max-width:560px){.row{grid-template-columns:8px 36px minmax(0,1fr) auto}.row.ev{grid-template-columns:8px 68px minmax(0,1fr) auto}.row .meta{display:none}}
@@ -214,6 +224,20 @@ button:disabled{opacity:.5;cursor:wait}
 .sess button.t{border:0;background:none;padding:0;text-align:left;cursor:pointer}
 .sess .go{border:0;background:none;color:var(--brand);font-size:12px;padding:0 2px}
 .sess:hover .t{color:var(--brand)}
+.scard{padding:8px 0;border-top:1px solid var(--line2);font-size:12px}
+.scard:first-of-type{border-top:0}
+.scard .top{display:flex;align-items:center;gap:6px}
+.scard .state{font-size:11px;color:var(--ink3);display:inline-flex;align-items:center;gap:4px}
+.scard .state.on{color:var(--blue)}.scard .state.on:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.4s infinite}
+.scard .open{margin-left:auto;border:0;background:none;color:var(--brand);font-size:12px;padding:0}
+.scard .name{margin-top:4px;color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scard .doing{margin-top:1px;color:var(--ink3);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.5}
+.scard .task{margin-top:5px;display:flex;align-items:center;gap:6px;min-width:0}
+.scard .task button{border:0;background:none;padding:0;font-size:12px;color:var(--brand);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:left}
+.scard .task .k{color:var(--ink3);flex:none}
+.scard .task .ok{flex:none;border:1px solid var(--line);border-radius:5px;padding:0 6px;color:var(--ink)}
+.scard select{min-width:0;flex:1;font-size:12px;padding:2px 4px;border-radius:6px}
+.aicard{max-height:60vh;overflow:auto}
 @container (max-width:520px){.props{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .solo{background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column}
 .solo .d-head{position:static;border-radius:12px 12px 0 0}
@@ -376,9 +400,9 @@ function putHTML(selector,html){
   if(htmlCache.get(selector)===html)return false;
   $(selector).innerHTML=html; htmlCache.set(selector,html); return true;
 }
-function inlineForm(i){
+function inlineForm(i,at=null){  // at: the inbox message (brief) the button was clicked in, so the box opens right there
   const f=S.inline;
-  if(!f||f.n!==i.n)return "";
+  if(!f||f.n!==i.n||(f.at??null)!==(at==null?null:String(at)))return "";
   return `<div class="inline" onclick="event.stopPropagation()"><input id="inline-${i.n}" data-draft="inline-${i.n}-${f.k}" placeholder="${esc(f.ph)}" onkeydown="if(event.key==='Enter')submitInline();if(event.key==='Escape'){S.inline=null;render()}"><button class="btn pri" data-n="${i.n}" onclick="submitInline()">确定</button><button class="btn ghost" onclick="S.inline=null;render()">取消</button></div>`;
 }
 function submitInline(){
@@ -468,7 +492,7 @@ function btn(i,[label,k,cls,ph]){ return `<button data-n="${i.n}" ${pendingFor(i
 function act(n,k,ph,el){
   if(k==="focus"){ S.mode="ai"; if(S.item!==n) openItem(n); else render(); setTimeout(()=>$("#saybox")?.focus(),30); return; }
   if(pendingFor(n))return;
-  if(ph){ S.inline={n,k,ph};render();$("#inline-"+n)?.focus();return; }
+  if(ph){ S.inline={n,k,ph,at:el?.closest?.("[data-msg]")?.dataset?.msg??null};render();$("#inline-"+n)?.focus();return; }
   apply(n,k,null);
 }
 function say(n, from, kind, text){ (D.threads[n] ||= []).push({at:TODAY.slice(5)+" "+clock(), from, kind, text, driver: from==="ai"?"本机 GPT":""}); }
@@ -515,28 +539,96 @@ const section=(title,items,extra="")=>items.length?`<div class="sec-h">${title}<
 const byDue=(a,b)=>(a.due||"9")>(b.due||"9")?1:(a.due||"9")<(b.due||"9")?-1:a.n-b.n;
 
 /* ---------- pages ---------- */
+const REPORTS=new Set(["brief","prep","weekly"]);   // read as a whole message, even when only one item is in it
+const itemOf = m => !REPORTS.has(m.kind)&&(m.refs||[]).length===1&&byN(m.refs[0]);
 function inboxPage(){
   const tab=S.inboxTab||(unreadCount()?"未读":"全部");
-  const list=D.inbox.filter(m=>tab==="未读"?!m.read:true);
+  const list=D.inbox.filter(m=>tab==="未读"?!m.read||m.id===S.openMsg:true);  // opening marks it read; it stays open
   // one row per item: its newest message, unread if any of its messages is
   const seen=new Set(), rows=[];
   for(const m of list){
-    const one=(m.refs||[]).length===1&&byN(m.refs[0]);
+    const one=itemOf(m);
     const key=one?"n"+one.n:"m"+m.id;
     if(seen.has(key)) continue; seen.add(key);
-    const unread=one?unreadOf(one.n).length>0:!m.read, more=one?list.filter(x=>(x.refs||[]).length===1&&x.refs[0]===one.n).length-1:0;
-    const [k,c]=kindOf(m);
-    const click=one?`openItem(${one.n})`:`openMsg(${m.id})`;
-    const body=S.openMsg===m.id&&m.text?`<div class="s wrap" style="margin-top:6px;color:var(--ink2)">${linkify(m.text)}</div>`:"";
-    rows.push(`<div class="row ev ${unread?"unread":""} ${one&&S.item===one.n?"sel":""}" onclick="${click}"><span class="ud"></span><span class="pill ${c}" style="justify-self:start">${k}</span>
-      <div style="min-width:0"><div class="t">${esc(one?`#${one.n} ${one.title}`:m.title)}</div><div class="s">${esc(one?m.title:(m.text||"").split("\n")[0])}${more>0?`　另有 ${more} 条`:""}</div>${body}</div>
-      <div class="meta"><span class="ago">${esc(ago(m.at))}</span></div><div class="acts">${one?rowButtons(one).map(b=>btn(one,b)).join(""):""}</div></div>${one?inlineForm(one):""}`);
+    const unread=one?unreadOf(one.n).length>0:!m.read, more=one?list.filter(x=>itemOf(x)===one).length-1:0;
+    const [k,c]=kindOf(m), opens=!one&&hasBody(m), open=opens&&S.openMsg===m.id;
+    const click=one?`openItem(${one.n})`:opens?`openMsg(${m.id})`:"";
+    const lead=one?m.title:leadOf(m).replace(MD_LINKS,"$1");
+    rows.push(`<div class="row ev ${unread?"unread":""} ${one&&S.item===one.n||open?"sel":""} ${click?"":"flat"}" ${click?`onclick="${click}"`:""} ${opens?`aria-expanded="${open}"`:""}><span class="ud"></span><span class="pill ${c}" style="justify-self:start">${k}</span>
+      <div style="min-width:0"><div class="t">${esc(one?`#${one.n} ${one.title}`:m.title)}</div><div class="s">${esc(lead)}${more>0?`　另有 ${more} 条`:""}</div></div>
+      <div class="meta"><span class="ago">${esc(ago(m.at))}</span></div><div class="acts">${one?rowButtons(one).map(b=>btn(one,b)).join(""):opens?`<span class="fold">${open?"收起":"展开"}</span>`:""}</div></div>${one?inlineForm(one):open?msgBody(m):""}`);
   }
   const tabs=["未读","全部"].map(k=>`<button class="chip ${k===tab?"on":""}" onclick="S.inboxTab='${k}';render()">${k}${k==="未读"&&unreadCount()?` ${unreadCount()}`:""}</button>`).join("");
   return `<div class="chips" style="align-items:center">${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
     <div class="list">${rows.join("")||`<div class="empty">${tab==="未读"?"没有新动态。新进来的事、AI 交付和提问都会出现在这里。":"还没有消息"}</div>`}</div>`;
 }
 function openMsg(id){ const m=D.inbox.find(x=>x.id===id); if(!m) return; if(!m.read){ m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); announce(); } S.openMsg=S.openMsg===id?null:id; render(); }
+
+/* ---------- a message opened in place: briefs and meeting prep read as the whole report ----------
+   Groups and lines as they were sent; a line about an item shows its number, title and status NOW,
+   with the same buttons as a list row. Clicking the line opens the item. */
+const firstText = m => (m.blocks||[]).find(b=>b.type==="text");
+const leadOf = m => String(firstText(m)?.text??m.text??"").split("\n")[0];   // the line the inbox row shows
+const shown = (m,b) => b.type==="section" || (b.type==="hint" ? !!cleanHint(b.text)
+  : !!String(b.text||"").trim() && !(b===firstText(m)&&!String(b.text).includes("\n")));  // the row already shows it
+const hasBody = m => (m.blocks||[]).some(b=>shown(m,b)) || (!(m.blocks||[]).length&&String(m.text||"").includes("\n"));
+// Older cards told you what to reply in Feishu; those words are dropped here, where every line has its buttons.
+const cleanHint = t => /^\s*回复/.test(t||"") ? "" : String(t||"").split(" · ").filter(p=>!/^回复/.test(p.trim()))
+  .map(p=>p.replace(/[，,]?\s*(?:没问题|补材料|不做)?回「.*$/,"").trim()).filter(Boolean).join(" · ");
+const MD_LINK=/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/, MD_LINKS=new RegExp(MD_LINK.source,"g");
+function richText(t){  // **bold**, [label](url), bare links, and #12 that opens item 12
+  return esc(String(t||"").replace(/\*\*(.*?)\*\*/g,"$1")).replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"'）)\]】」，。]+)|#(\d{1,5})/g,(all,label,url,bare,n)=>{
+    if(url) return `<a href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${label||esc(linkLabel(url.replace(/&amp;/g,"&")))} ↗</a>`;
+    if(bare) return `<a href="${bare}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(linkLabel(bare.replace(/&amp;/g,"&")))} ↗</a>`;
+    return byN(+n)?`<a href="#" onclick="event.stopPropagation();openItem(${+n});return false">#${n}</a>`:all;
+  });
+}
+// your own open item also gets「完成」, as the old card had; everything else is exactly a list row's buttons
+function briefButtons(i){
+  const b=rowButtons(i);
+  if(b.length||i.who!=="我"||isWorking(i)||["完成","取消","待确认","待验收","卡住"].includes(i.status)) return b;
+  return [["完成","done",""]];
+}
+function briefLine(head,hint,url,mid){
+  const n=+((String(head).match(/^#(\d{1,5})\b/)||[])[1]), i=n&&byN(n);
+  hint=cleanHint(hint);
+  const doc=i&&["待验收","完成"].includes(i.status)&&i.url&&!isWorking(i)?i.url:url;
+  const open=doc?`<a class="btn link" href="${esc(doc)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">打开文档</a>`:"";
+  if(!i) return `<div class="row flat"><span class="ud"></span><span class="no"></span><div style="min-width:0"><div class="t wrap">${richText(head)}</div>${hint?`<div class="s wrap">${richText(hint)}</div>`:""}</div><div></div><div class="acts">${open}</div></div>`;
+  return `<div class="row ${S.item===i.n?"sel":""} ${["完成","取消"].includes(i.status)?"shut":""}" onclick="openItem(${i.n})"><span class="ud"></span><span class="no">#${i.n}</span>
+    <div style="min-width:0"><div class="t">${esc(i.title)}</div>${hint?`<div class="s wrap">${richText(hint)}</div>`:""}</div>
+    <div class="meta">${pill(i)}</div><div class="acts">${open}${briefButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i,mid)}`;
+}
+function textLines(text,mid){  // a text message (older briefs were text): "#12 …" lines become item lines
+  const lines=String(text||"").split("\n").map(x=>x.trim()).filter(Boolean), out=[];
+  let rows=[];
+  const flush=()=>{ if(rows.length) out.push(`<div class="list">${rows.join("")}</div>`); rows=[]; };
+  lines.forEach((line,k)=>{
+    const m=line.match(/^#(\d{1,5})\s/);
+    if(m&&byN(+m[1])){ const link=line.match(MD_LINK), rest=line.replace(MD_LINK,"").split(" · ").slice(1).join(" · ");
+      rows.push(briefLine(line,rest,link&&link[2],mid)); return; }
+    flush();
+    const heading=line.length<=10&&!/[·，。：]/.test(line)&&/^#\d/.test(lines[k+1]||"");
+    const said=cleanHint(line);
+    if(said) out.push(heading?`<div class="b-h">${esc(said)}</div>`:`<p class="b-p">${richText(said)}</p>`);
+  });
+  flush();
+  return out.join("");
+}
+function msgBody(m){
+  const parts=[];
+  (m.blocks||[]).forEach(b=>{
+    if(!shown(m,b)) return;
+    if(b.type==="section"){
+      const rows=(b.rows||[]).map(r=>briefLine(r.head,r.hint,r.url,m.id)).join("");
+      const more=b.more?`<div class="b-note">${String(b.more).split("\n").map(richText).join("<br>")}</div>`:"";
+      parts.push(`${b.title?`<div class="b-h">${richText(b.title)}</div>`:""}${rows||more?`<div class="list">${rows}${more}</div>`:""}`);
+    } else if(b.type==="hint") parts.push(`<p class="b-p quiet">${richText(cleanHint(b.text))}</p>`);
+    else parts.push(textLines(b.text,m.id));
+  });
+  if(!(m.blocks||[]).length&&m.text) parts.push(textLines(m.text,m.id));  // prototype data without blocks
+  return `<div class="msg-open" data-msg="${m.id}">${parts.join("")||`<p class="b-p quiet">没有更多内容</p>`}</div>`;
+}
 function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); announce(); render(); }
 function todoPage(){
   const v=D.items.filter(live);
@@ -802,10 +894,12 @@ function sessionControl(s, css, label){
 }
 function sessionsTab(i){
   const list=i.sessions||[];
-  if(!list.length) return `<div class="hint" style="margin:0">这件事还没有绑定 AI 会话。</div>`;
-  return `<p class="hint" style="margin:0 0 10px">本机 GPT / Claude 的对话会在终端里打开，接着原来的上下文和它说；外部 AI 报了链接的，直接打开链接。</p><div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
-    <div style="min-width:0"><div class="t">${esc(s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>正在做</span>':""}</div><div class="s">第一次 ${esc(s.first)}，最近 ${esc(s.started)}，共 ${s.rounds||1} 轮${s.session?`　编号 ${esc(String(s.session).slice(0,13))}…`:""}</div></div>
-    <div></div><div class="acts">${s.can_open?sessionControl(s,"btn","打开对话"):'<span class="hint" style="margin:0">没有记下对话编号</span>'}</div></div>`).join("")}</div>`;
+  const start=`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 聊这件事？在 Claude 里新开一段对话，自动带上这件事的来龙去脉和之前的对话，并绑定在这里。</div><div class="acts"><button class="btn pri" onclick="startClaude(${i.n})">用 Claude 接着做这件事</button></div></div>`;
+  if(!list.length) return start+`<div class="hint" style="margin:0">还没有 AI 会话绑定这件事。左侧「AI 会话」里正在进行的对话，也可以点「关联到事项…」绑过来。</div>`;
+  return start+`<div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
+    <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':""}</div>
+      <div class="s">${s.doing?esc(s.doing)+"　":""}${s.first&&s.first!==s.started?`第一次 ${esc(s.first)}，`:""}最近 ${esc(s.started||"")}${s.rounds>1?`，共 ${s.rounds} 轮`:""}</div></div>
+    <div></div><div class="acts">${s.can_open?sessionControl(s,"btn","打开对话"):'<span class="hint" style="margin:0">没有记下对话编号</span>'}${s.local&&s.key?`<button class="btn ghost" data-key="${esc(s.key)}" onclick="unbind(this.dataset.key)">不是这件事</button>`:""}</div></div>`).join("")}</div>`;
 }
 function sourceTab(i){
   const parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
@@ -870,33 +964,59 @@ const ICON={
   all:'<path d="M5.5 4.5h8M5.5 8h8M5.5 11.5h8"/><circle cx="2.8" cy="4.5" r=".6"/><circle cx="2.8" cy="8" r=".6"/><circle cx="2.8" cy="11.5" r=".6"/>',
   mem:'<path d="M8 3.2c-2.6 0-4.5 1.8-4.5 4.1 0 1.4.7 2.6 1.9 3.3V13h5.2v-2.4c1.2-.7 1.9-1.9 1.9-3.3 0-2.3-1.9-4.1-4.5-4.1z"/><path d="M6.4 13h3.2"/>',
   sys:'<circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/>'};
-function engineTag(s){ const e=s.engine; return `<span class="eng ${e}">${e==="gpt"?"GPT":e==="claude"?"Claude":esc(String(s.driver||"AI").slice(0,6))}</span>`; }
+function engineTag(s){ const e=s.engine||""; return `<span class="eng ${e}">${esc(s.local?(s.driver||"AI"):e==="gpt"?"本机 GPT":e==="claude"?"本机 Claude":String(s.driver||"AI").slice(0,8))}</span>`; }
+/* every AI conversation replying right now: which app, what it is about, which item it is for */
+const replyingNow = s => s.local?(s.working??s.status==="open"):s.status==="open";
+function sessCard(s){
+  const it=s.n&&byN(s.n), working=replyingNow(s);
+  const about=s.local?(s.doing||""):String(s.step||"").replace(/^\d\/4\s*/,"")+(s.minutes!=null?`，已 ${s.minutes} 分钟`:"");
+  const name=s.local?s.title:(it?it.title:s.title);
+  const task=it?`<div class="task"><span class="k">事项</span><button onclick="openItem(${it.n})" title="打开这件事">#${it.n} ${esc(it.title)}</button></div>`
+    :s.local?`<div class="task">${localBindControl(s)}</div>`:"";
+  return `<div class="scard">
+    <div class="top">${engineTag(s)}<span class="state ${working?"on":""}">${working?"回复中":""}</span>${sessionControl(s,"open","打开")}</div>
+    <div class="name" title="${esc(name)}">${esc(name)}</div>${about?`<div class="doing" title="${esc(about)}">${esc(about)}</div>`:""}${task}</div>`;
+}
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
   const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",0,""],["sys","设置",0,""]];
-  const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false})), busy=run.length>0;
-  const rows=run.map(s=>{ const it=s.n&&byN(s.n);
-    return `<div class="sess">${engineTag(s)}${it?`<button class="t" onclick="openItem(${it.n})">#${it.n} ${esc(it.title)}</button>`:`<span class="t">${esc(s.title)}</span>`}${sessionControl(s,"go","打开")}<span class="s">${esc(String(s.step||(s.local?(it?"已关联事项":"未关联事项"):"")).replace(/^\d\/4\s*/,""))}${s.minutes!=null?`，${s.minutes} 分钟`:""}</span>${s.local&&!it?localBindControl(s):""}</div>`; }).join("");
+  const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
+  const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
   return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${S.view===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
-    `<div class="aicard ${busy?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${busy?`AI 会话进行中 ${run.length}`:"AI 空闲"}</div>${busy?rows:idle}</div>`;
+    `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${replying?`AI 正在回复 ${replying}`:"AI 空闲"}</div>${replying?now.map(sessCard).join(""):idle}</div>`;
 }
 function localBindControl(s){
-  if(S.bindKey!==s.key) return `<button class="go" data-key="${esc(s.key)}" onclick="S.bindKey=this.dataset.key;render()">关联事项</button>`;
-  const options=D.items.filter(i=>!i.hidden).map(i=>`<option value="${i.n}">#${i.n} ${esc(i.title)}</option>`).join("");
-  return `<div style="grid-column:1/-1;display:flex;gap:4px"><select id="bind-item" aria-label="选择事项" style="min-width:0;flex:1"><option value="">选择事项</option>${options}</select><button class="go" onclick="bindLocal()">确定</button><button class="go" onclick="S.bindKey=null;render()">取消</button></div>`;
+  if(S.bindKey!==s.key) return `<button data-key="${esc(s.key)}" onclick="S.bindKey=this.dataset.key;render()">关联到事项…</button>`;
+  const options=D.items.filter(i=>!i.hidden&&!["完成","取消"].includes(i.status)).map(i=>`<option value="${i.n}">#${i.n} ${esc(i.title)}</option>`).join("");
+  return `<select id="bind-item" aria-label="选择事项"><option value="">选择事项</option>${options}</select><button class="ok" onclick="bindLocal()">确定</button><button class="ok" onclick="S.bindKey=null;render()">取消</button>`;
 }
 async function bindLocal(){
   const n=Number($("#bind-item")?.value);
   if(!n) return toast("先选一个事项");
-  try{ await api("/api/session/associate",{key:S.bindKey,n}); S.bindKey=null; await load(); toast("已关联 #"+n); }
+  return bindTo(S.bindKey,n);
+}
+async function bindTo(key,n){
+  if(!LIVE) return toast("原型里不能关联");
+  try{ await api("/api/session/associate",{key,n}); S.bindKey=null; await load(); toast(`已关联到 #${n}，在这件事的「AI 会话」里能打开它`); }
   catch(e){ toast(e.message||"没有关联成功"); }
+}
+async function unbind(key){
+  if(!LIVE) return toast("原型里不能改");
+  try{ await api("/api/session/unbind",{key}); await load(); toast("已解除，这段对话不会再自动绑到这件事"); }
+  catch(e){ toast(e.message||"没有解除成功"); }
+}
+async function startClaude(n){
+  if(!LIVE) return toast("原型里不能打开");
+  try{ await api("/api/session/start",{n},30000); toast("已在 Claude 里新开对话，带上了这件事的来龙去脉，会自动绑定到这件事"); setTimeout(load,4000); }
+  catch(e){ toast(e.message||"没能打开 Claude"); }
 }
 async function openSession(job, running){
   if(!LIVE) return toast("原型里不能打开");
-  if(running&&!confirm("这段对话 AI 正在用。现在打开接着聊，可能打断它这一轮。仍要打开吗？")) return;
+  if(running&&!String(job).startsWith("local:")&&!confirm("这段对话 AI 正在用。现在打开接着聊，可能打断它这一轮。仍要打开吗？")) return;
   try{ const r=await api("/api/session/open",{job},20000);
-    if(r.link) window.open(r.link,"_blank","noopener"); else toast(r.opened==="cindy"?"已打开 Cindy 原对话":"已在终端里打开原对话");
+    if(r.link) window.open(r.link,"_blank","noopener");
+    else toast(r.opened==="claude"?"已在 Claude 里打开这段对话":r.opened==="cindy"?"已在 Cindy 里打开这段对话":"已在终端里打开这段对话，接着原来的上下文说");
   }catch(e){ toast(e.message||"打不开这段对话"); }
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }

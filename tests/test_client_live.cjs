@@ -100,15 +100,19 @@ const response=data=>({ok:true,status:200,json:async()=>clone(data)});
   assert.match(live.run('replyState(byN(1))'), /Claude 已接手：阅读资料/);
   live.run('D.threads[1].push({from:"ai",kind:"say",text:"做好了"})');
   assert.equal(live.run('replyState(byN(1))'),"");
-  live.run('D.running=[{job:"one",n:1,engine:"other",driver:"Cindy",can_open:true,step:"阅读"}]');
+  live.run('D.running=[{job:"one",n:1,engine:"other",driver:"Cindy",can_open:true,step:"阅读",status:"open"}]');
   assert.match(live.run('sideHTML()'),/Cindy/);
   assert.match(live.run('sideHTML()'),/打开/);
   live.run('D.running=[]; D.local_sessions=[{key:"cindy:one",job:"local:cindy:one",driver:"Cindy",local:true,title:"本机会话",can_open:true,status:"open"}]');
-  assert.match(live.run('sideHTML()'),/未关联事项/);
+  assert.match(live.run('sideHTML()'),/关联到事项…/);
+  assert.match(live.run('sideHTML()'),/回复中/);                       // status open = replying right now
+  live.run('D.local_sessions[0].working=false');                     // finished: leaves the list
+  assert.doesNotMatch(live.run('sideHTML()'),/本机会话/);
+  live.run('D.local_sessions[0].working=true');
   live.run('S.bindKey="cindy:one"');
   assert.match(live.run('sideHTML()'),/选择事项/);
   live.run('D.local_sessions[0].n=1');
-  assert.match(live.run('sideHTML()'),/已关联事项/);
+  assert.match(live.run('sideHTML()'),/<span class="k">事项<\/span><button onclick="openItem\(1\)"/);
   live.run('byN(1).reply_timing={sent_at:"2026-11-17T17:37:00+08:00",pickup_at:"2026-11-17T17:46:00+08:00",reply_at:"2026-11-17T17:47:00+08:00"}; D.reply_timing_summary={days:30,replies:1,pickups:1,median_reply_seconds:600,median_pickup_seconds:540}');
   assert.match(live.run('replyState(byN(1))'),/从留言到首次回复或交付：10 分钟/);
   assert.match(live.run('replyState(byN(1))'),/首次处理记录距留言 9 分钟/);
@@ -116,5 +120,15 @@ const response=data=>({ok:true,status:200,json:async()=>clone(data)});
   assert.match(live.run('replyState(byN(1))'),/留言已等/);
   live.run('byN(1).who="我"');
   assert.doesNotMatch(live.run('replyState(byN(1))'),/留言已等/);
+  // Opening a brief marks it read on the server; its buttons send the same command as the list.
+  const sent=[], box=[{id:3,kind:"brief",title:"早报",text:"",refs:[1],read:false,blocks:[{type:"section",title:"今天你要做 · 1 件",rows:[{head:"#1 测试",hint:"今天到期",url:null,actions:[],refs:[1]}],more:""}]}];
+  const brief=harness(async(url,opts)=>{ if(url==="/api/state")return response({...clone(base),inbox:box}); sent.push([url,JSON.parse(opts.body)]); return response({command:{id:"c1",numbers:[1],status:"running",message:"正在处理",created:Date.now()/1000}}); });
+  brief.run(`D.inbox=${JSON.stringify(box)}; S.view="inbox"`);
+  brief.run("openMsg(3)");
+  assert.deepEqual(sent[0],["/api/read",{ids:[3]}]);
+  assert.match(brief.run("inboxPage()"),/act\(1,'done'/);
+  await brief.run('apply(1,"done",null)');
+  assert.equal(sent[1][1].text,"1 完成");
+  assert.match(brief.run("inboxPage()"),/disabled/,"the brief's button waits like the list's");
   console.log("Live client checks passed: immediate feedback, double click, verified success, lost acknowledgement, reload, safe retry, stale response.");
 })().catch(e=>{console.error(e);process.exitCode=1});
