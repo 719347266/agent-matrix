@@ -184,12 +184,21 @@ def build_state(root):
                         gpt_open=local_sessions.gpt_open_choice(root, found))
     except Exception as exc:
         activity.swallowed(root, "app.build_state", exc)
-    return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
+    return {"demo": False, "page": page_version(), "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,
             "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external, "system": {**system_info(root), "store": store_info(root)}}
+
+
+def page_version():
+    """Changes whenever the page file changes, so an open window can notice and reload itself."""
+    from hashlib import sha256
+    try:
+        return sha256(PAGE.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return ""
 
 
 def store_info(root):
@@ -339,7 +348,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "forbidden"})
         path = urlparse(self.path).path
         if path in {"/", "/index.html"}:
-            page = PAGE.read_text(encoding="utf-8").replace("/*__TOKEN__*/\"\"", json.dumps(self.server.token))
+            page = PAGE.read_text(encoding="utf-8")
+            page = page.replace("/*__PAGE__*/\"\"", json.dumps(page_version())).replace("/*__TOKEN__*/\"\"", json.dumps(self.server.token))
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
         if path == "/icon.png":  # the app icon doubles as the page logo
             icon = Path(__file__).resolve().parents[2] / "macapp/AppIcon.png"

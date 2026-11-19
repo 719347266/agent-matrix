@@ -354,6 +354,7 @@ applyTheme(savedTheme());
 
 let D = /*__DATA__*/null;            /* the prototype embeds data here; the app loads it from /api/state */
 const TOKEN = /*__TOKEN__*/"";
+const PAGE = /*__PAGE__*/"";   /* which version of this page is showing; a newer one on disk reloads it */
 const LIVE = !D;
 let TODAY = (D && D.today) || new Date().toISOString().slice(0,10);
 async function api(path, body, ms=12000){
@@ -367,9 +368,13 @@ async function api(path, body, ms=12000){
   } finally { clearTimeout(timer); }
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
+/* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
+function midEdit(){ return !!S.ob||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
-  try{ const data=await api("/api/state"); if(seq!==loadSequence)return; D=data; TODAY=D.today; failing=false; syncCommands(); announce(); }
+  try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
+    if(PAGE&&data.page&&data.page!==PAGE&&!midEdit()){ location.reload(); return; }  // the page itself was updated
+    D=data; TODAY=D.today; failing=false; syncCommands(); announce(); }
   catch(e){ if(seq!==loadSequence)return; failing=true; }
   if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item or the inbox
   clearTimeout(refreshTimer);

@@ -258,3 +258,22 @@ class NotMineTests(unittest.TestCase):
         self.assertTrue(task_fields(unknown, self.config, self.meta).get("排除本人提醒"))
         mine = self.Action(title="补知识库", owner_name=None, direction="mine", **self.a)
         self.assertEqual(task_fields(mine, self.config, self.meta)["执行方"], ["我"])
+
+
+class PageVersionTests(unittest.TestCase):
+    """An open window learns that the page file changed and reloads itself (the desktop app never reloads on its own)."""
+
+    def test_state_and_page_carry_the_same_version_and_it_follows_the_file(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from agent_matrix import app
+        html = app.PAGE.read_text(encoding="utf-8")
+        self.assertIn('const PAGE = /*__PAGE__*/"";', html)
+        first = app.page_version()
+        self.assertRegex(first, r"^[0-9a-f]{12}$")
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "xinxiang.html"
+            copy.write_text(html + "<!-- changed -->", encoding="utf-8")
+            with patch.object(app, "PAGE", copy):
+                self.assertNotEqual(app.page_version(), first)
