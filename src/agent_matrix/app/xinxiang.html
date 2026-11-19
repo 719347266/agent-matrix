@@ -894,12 +894,12 @@ function sessionControl(s, css, label){
 }
 function sessionsTab(i){
   const list=i.sessions||[];
-  const start=`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 聊这件事？新开一段 Claude 对话，自动带上这件事的来龙去脉和之前的对话，并绑定在这里。</div><div class="acts"><button class="btn pri" onclick="startClaude(${i.n})">用 Claude 接着做这件事</button></div></div>`;
+  const start=`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 聊这件事？在 Claude 里新开一段对话，自动带上这件事的来龙去脉和之前的对话，并绑定在这里。</div><div class="acts"><button class="btn pri" onclick="startClaude(${i.n})">用 Claude 接着做这件事</button></div></div>`;
   if(!list.length) return start+`<div class="hint" style="margin:0">还没有 AI 会话绑定这件事。左侧「AI 会话」里正在进行的对话，也可以点「关联到事项…」绑过来。</div>`;
   return start+`<div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
-    <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':s.status==="idle"?'　<span class="pill">等你</span>':""}</div>
+    <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':""}</div>
       <div class="s">${s.doing?esc(s.doing)+"　":""}${s.first&&s.first!==s.started?`第一次 ${esc(s.first)}，`:""}最近 ${esc(s.started||"")}${s.rounds>1?`，共 ${s.rounds} 轮`:""}</div></div>
-    <div></div><div class="acts">${s.can_open?sessionControl(s,"btn","打开对话"):'<span class="hint" style="margin:0">没有记下对话编号</span>'}</div></div>`).join("")}</div>`;
+    <div></div><div class="acts">${s.can_open?sessionControl(s,"btn","打开对话"):'<span class="hint" style="margin:0">没有记下对话编号</span>'}${s.local&&s.key?`<button class="btn ghost" data-key="${esc(s.key)}" onclick="unbind(this.dataset.key)">不是这件事</button>`:""}</div></div>`).join("")}</div>`;
 }
 function sourceTab(i){
   const parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
@@ -965,26 +965,26 @@ const ICON={
   mem:'<path d="M8 3.2c-2.6 0-4.5 1.8-4.5 4.1 0 1.4.7 2.6 1.9 3.3V13h5.2v-2.4c1.2-.7 1.9-1.9 1.9-3.3 0-2.3-1.9-4.1-4.5-4.1z"/><path d="M6.4 13h3.2"/>',
   sys:'<circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/>'};
 function engineTag(s){ const e=s.engine||""; return `<span class="eng ${e}">${esc(s.local?(s.driver||"AI"):e==="gpt"?"本机 GPT":e==="claude"?"本机 Claude":String(s.driver||"AI").slice(0,8))}</span>`; }
-/* every AI conversation going on right now: which app, replying or waiting, what it is about, which item it is for */
+/* every AI conversation replying right now: which app, what it is about, which item it is for */
+const replyingNow = s => s.local?(s.working??s.status==="open"):s.status==="open";
 function sessCard(s){
-  const it=s.n&&byN(s.n), sug=!it&&s.suggest&&byN(s.suggest), working=s.local?(s.working??s.status==="open"):s.status==="open";
+  const it=s.n&&byN(s.n), working=replyingNow(s);
   const about=s.local?(s.doing||""):String(s.step||"").replace(/^\d\/4\s*/,"")+(s.minutes!=null?`，已 ${s.minutes} 分钟`:"");
   const name=s.local?s.title:(it?it.title:s.title);
   const task=it?`<div class="task"><span class="k">事项</span><button onclick="openItem(${it.n})" title="打开这件事">#${it.n} ${esc(it.title)}</button></div>`
-    :sug?`<div class="task"><span class="k">可能是</span><button onclick="openItem(${sug.n})">#${sug.n} ${esc(sug.title)}</button><button class="ok" data-key="${esc(s.key)}" onclick="bindTo(this.dataset.key,${sug.n})">是</button></div>`
     :s.local?`<div class="task">${localBindControl(s)}</div>`:"";
   return `<div class="scard">
-    <div class="top">${engineTag(s)}<span class="state ${working?"on":""}">${working?"回复中":"等你"}</span>${sessionControl(s,"open","打开")}</div>
+    <div class="top">${engineTag(s)}<span class="state ${working?"on":""}">${working?"回复中":""}</span>${sessionControl(s,"open","打开")}</div>
     <div class="name" title="${esc(name)}">${esc(name)}</div>${about?`<div class="doing" title="${esc(about)}">${esc(about)}</div>`:""}${task}</div>`;
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
   const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",0,""],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
-  const replying=run.filter(s=>s.local?(s.working??s.status==="open"):s.status==="open").length;
+  const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
   return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${S.view===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
-    `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${run.length?`AI 会话 ${run.length}${replying?`，${replying} 个在回复`:""}`:"AI 空闲"}</div>${run.length?run.map(sessCard).join(""):idle}</div>`;
+    `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${replying?`AI 正在回复 ${replying}`:"AI 空闲"}</div>${replying?now.map(sessCard).join(""):idle}</div>`;
 }
 function localBindControl(s){
   if(S.bindKey!==s.key) return `<button data-key="${esc(s.key)}" onclick="S.bindKey=this.dataset.key;render()">关联到事项…</button>`;
@@ -1001,9 +1001,14 @@ async function bindTo(key,n){
   try{ await api("/api/session/associate",{key,n}); S.bindKey=null; await load(); toast(`已关联到 #${n}，在这件事的「AI 会话」里能打开它`); }
   catch(e){ toast(e.message||"没有关联成功"); }
 }
+async function unbind(key){
+  if(!LIVE) return toast("原型里不能改");
+  try{ await api("/api/session/unbind",{key}); await load(); toast("已解除，这段对话不会再自动绑到这件事"); }
+  catch(e){ toast(e.message||"没有解除成功"); }
+}
 async function startClaude(n){
   if(!LIVE) return toast("原型里不能打开");
-  try{ await api("/api/session/start",{n},30000); toast("已在终端里开了 Claude，带上了这件事的来龙去脉，已绑定到这件事"); load(); }
+  try{ await api("/api/session/start",{n},30000); toast("已在 Claude 里新开对话，带上了这件事的来龙去脉，会自动绑定到这件事"); setTimeout(load,4000); }
   catch(e){ toast(e.message||"没能打开 Claude"); }
 }
 async function openSession(job, running){
@@ -1011,7 +1016,7 @@ async function openSession(job, running){
   if(running&&!String(job).startsWith("local:")&&!confirm("这段对话 AI 正在用。现在打开接着聊，可能打断它这一轮。仍要打开吗？")) return;
   try{ const r=await api("/api/session/open",{job},20000);
     if(r.link) window.open(r.link,"_blank","noopener");
-    else toast(r.hint?`已切到 Claude：${r.hint}`:r.opened==="cindy"?"已打开 Cindy 里的原对话":"已在终端里打开原对话，接着原来的上下文说");
+    else toast(r.opened==="claude"?"已在 Claude 里打开这段对话":r.opened==="cindy"?"已在 Cindy 里打开这段对话":"已在终端里打开这段对话，接着原来的上下文说");
   }catch(e){ toast(e.message||"打不开这段对话"); }
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }

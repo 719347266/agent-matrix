@@ -393,6 +393,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, **result})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/session/unbind":
+                from . import local_sessions
+                return self._send(200, local_sessions.unbind(root, str(body.get("key") or "")))
             if path == "/api/session/start":
                 from .config import load
                 from .models import MatrixError

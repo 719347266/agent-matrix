@@ -2,7 +2,8 @@
 
 A conversation counts as ongoing while it is open: a live Claude process, a Cindy session or a Codex thread used in
 the last few hours. Each one says which app it is in, what it is about (its title and the latest request), whether it
-is replying right now, and which 心响 item it belongs to (an exact recorded binding, or a suggestion the owner confirms)."""
+is replying right now, and which 心响 item it belongs to: a conversation clearly about one item (opened from that
+item, or naming it) binds itself; the owner binds the rest by hand, or undoes a binding on the item."""
 from contextlib import closing
 from datetime import datetime
 import json
@@ -17,6 +18,8 @@ from .models import MatrixError
 from .timeutil import TZ
 
 ID = re.compile(r"[a-zA-Z0-9_-]{1,128}\Z")
+HOST = re.compile(r"local_[A-Za-z0-9-]{1,64}")   # a Claude desktop conversation (claude://code/continue?session=…)
+UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")  # a Claude CLI conversation
 LIVE_SECONDS = 3 * 3600  # Cindy / Codex: used within this window = still an open conversation
 SHOWN = 10
 NAMES = {"cindy": "Cindy", "codex": "Codex", "claude": "Claude"}
@@ -27,12 +30,13 @@ def _ro(p):
     return sqlite3.connect(p.resolve().as_uri() + "?mode=ro", uri=True, timeout=.2)
 
 
-def _record(source, sid, title, stamp, *, sdk=None, cwd=None, working=True, doing="", app=None, live=False):
+def _record(source, sid, title, stamp, *, sdk=None, cwd=None, working=True, doing="", app=None, live=False, host=None):
     if not isinstance(sid, str) or not ID.fullmatch(sid):
         return None
     return dict(key=f"{source}:{sid}", source=source, sid=sid, title=str(title or NAMES[source])[:100],
                 stamp=float(stamp), sdk=sdk, cwd=str(cwd or ""), working=bool(working),
-                doing=_short(doing), app=app or NAMES[source], live=bool(live))
+                doing=_short(doing), app=app or NAMES[source], live=bool(live),
+                host=host if isinstance(host, str) and HOST.fullmatch(host) else None)
 
 
 def _short(text, limit=140):
@@ -130,7 +134,7 @@ def _claude(home, now):
             yield _record("claude",sid,obj.get("name"),min(stamp,now),cwd=obj.get("cwd"),
                           working=obj.get("status") in {"busy","running","working","processing"},
                           doing=_last_request(home,sid) if isinstance(sid,str) and ID.fullmatch(sid) else "",
-                          app="Claude 桌面" if desktop else "Claude 命令行",live=True)
+                          app="Claude 桌面" if desktop else "Claude 命令行",live=True,host=obj.get("hostSessionId"))
         except ISSUES:
             continue
 
@@ -204,6 +208,7 @@ def _db(root):
     db=base(root)
     db.execute("""CREATE TABLE IF NOT EXISTS local_session_items (
        key TEXT PRIMARY KEY, rid TEXT NOT NULL, data TEXT NOT NULL)""")
+    db.execute("CREATE TABLE IF NOT EXISTS local_session_skips (key TEXT PRIMARY KEY)")
     return db
 
 
@@ -218,23 +223,39 @@ def _public(rec, present):
             "started":datetime.fromtimestamp(rec["stamp"],TZ).strftime("%m-%d %H:%M")}
 
 
-def _suggest(rec, items):
-    """A likely item for an unbound conversation: "#62" in its title or latest request, or an item's full title.
-    Only a suggestion; the owner confirms it with one click."""
+def _bind_of(root, rec, items):
+    """The item a conversation is clearly about, or None: it runs in the item's own folder (opened from 心响),
+    or it names one item ("#62", or the item's full title)."""
+    from .worker import work_base
+    cwd = str(rec.get("cwd") or "")
+    if cwd:
+        base = str(work_base(root))
+        for i in items:
+            if cwd == f"{base}/{i['rid']}":
+                return i["rid"]
     text = f"{rec.get('title','')} {rec.get('doing','')}"
-    open_items = [i for i in items if not i.get("hidden") and i.get("status") not in ("完成", "取消")]
+    shown = [i for i in items if not i.get("hidden")]
     numbers = {int(x) for x in re.findall(r"#(\d{1,5})(?!\d)", text)}
-    hit = [i for i in open_items if i["n"] in numbers]
+    hit = [i for i in shown if i["n"] in numbers]
     if not hit:
-        hit = [i for i in open_items if len(i.get("title") or "") >= 6 and i["title"] in text]
-    return hit[0]["n"] if len(hit) == 1 else None
+        hit = [i for i in shown if len(i.get("title") or "") >= 6 and i["title"] in text]
+    return hit[0]["rid"] if len(hit) == 1 else None
 
 
 def view(root,by_item,running,items):
-    """Attach by exact recorded conversation ID only. Never infer an item from its title."""
+    """Ongoing conversations for the sidebar, each with its item. A conversation clearly about one item is bound to it
+    by itself (and stays bound); the owner can undo that on the item. Every bound conversation is listed on its item."""
     obs=discover()
-    with closing(_db(root)) as db:
+    with closing(_db(root)) as db, db:
         records={key:(rid,json.loads(data)) for key,rid,data in db.execute("SELECT key,rid,data FROM local_session_items")}
+        skipped={key for (key,) in db.execute("SELECT key FROM local_session_skips")}
+        for key,r in obs.items():
+            if key in records or key in skipped:
+                continue
+            rid=_bind_of(root,r,items)
+            if rid:
+                db.execute("INSERT OR REPLACE INTO local_session_items VALUES(?,?,?)",(key,rid,json.dumps(r,ensure_ascii=False)))
+                records[key]=(rid,r)
     assigned={i["rid"]:i["n"] for i in items}
     known={}
     for rid,sessions in by_item.items():
@@ -246,15 +267,23 @@ def view(root,by_item,running,items):
     for key,(rid,r) in records.items():
         if rid not in assigned: continue
         if not any(s.get("session")==r["sid"] for s in by_item.get(rid,[])):
-            extra=_public(r,key in obs)
+            now=obs.get(key)
+            extra={**_public(now or r,key in obs),"key":key}
             by_item.setdefault(rid,[]).append({**extra,"first":extra["started"],"rounds":1})
     for key,r in obs.items():
         if r["sid"] in active or (r.get("sdk") and r["sdk"] in active): continue
         candidates=known.get(r["sid"],set()) | known.get(r.get("sdk"),set())
         rid=records[key][0] if key in records else next(iter(candidates)) if len(candidates)==1 else None
-        n=assigned.get(rid)
-        result.append({**_public(r,True),"n":n,"key":key,"suggest":None if n else _suggest(r,items)})
+        result.append({**_public(r,True),"n":assigned.get(rid),"key":key})
     return result
+
+
+def unbind(root, key):
+    """The owner says a conversation is not about that item: unbind it and never bind it by itself again."""
+    with closing(_db(root)) as db, db:
+        db.execute("DELETE FROM local_session_items WHERE key=?", (key,))
+        db.execute("INSERT OR IGNORE INTO local_session_skips VALUES(?)", (key,))
+    return {"ok": True}
 
 
 def associate(root,key,n):
@@ -266,6 +295,21 @@ def associate(root,key,n):
     with closing(_db(root)) as db, db:
         db.execute("INSERT OR REPLACE INTO local_session_items VALUES(?,?,?)",(key,rid,json.dumps(rec,ensure_ascii=False)))
     return {"n":n}
+
+
+def open_claude(sid, host=None):
+    """Into the Claude app, right at that conversation: a desktop one by its id, a command-line one imported by its id."""
+    if host and HOST.fullmatch(host):
+        url = "claude://code/continue?session=" + host
+    elif sid and UUID.fullmatch(sid):
+        url = "claude://resume?session=" + sid
+    else:
+        raise MatrixError("这段 Claude 对话没有可以打开的编号。")
+    try:
+        subprocess.run(["open", url], capture_output=True, check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise MatrixError("无法打开 Claude。") from exc
+    return {"opened": "claude"}
 
 
 def open_local(root,config,key):
@@ -282,11 +326,8 @@ def open_local(root,config,key):
         try: subprocess.run(["open","cindy://session/"+sid],capture_output=True,check=True,timeout=10)
         except (OSError,subprocess.SubprocessError) as exc: raise MatrixError("无法打开本机 Cindy。") from exc
         return {"opened":"cindy"}
-    if src=="claude" and rec.get("live") and rec.get("app")=="Claude 桌面" and key in discover():
-        # still open in the Claude app: bring it to the front (a second copy in Terminal would talk over it)
-        try: subprocess.run(["open","-a","Claude"],capture_output=True,check=True,timeout=10)
-        except (OSError,subprocess.SubprocessError) as exc: raise MatrixError("无法打开 Claude。") from exc
-        return {"opened":"claude-app","hint":f"在 Claude 左侧会话列表里找「{rec.get('title') or '这段对话'}」"}
+    if src=="claude":
+        return open_claude(sid, rec.get("host"))
     binary=(worker.claude_binary if src=="claude" else worker.codex_binary)(config)
     if not binary: raise MatrixError("没有找到 "+NAMES[src]+" 命令行。")
     cwd=Path(rec.get("cwd") or Path.home())
@@ -298,14 +339,10 @@ def open_local(root,config,key):
 
 
 def start_for_item(root, config, item, history=""):
-    """Open a new Claude conversation for one item, already bound to it: the item's facts and its conversation so far
-    go into a note in the item's folder, so the owner does not paste the context again."""
-    from . import sessions, worker
-    from uuid import uuid4
-    import shlex
-    binary = worker.claude_binary(config)
-    if not binary:
-        raise MatrixError("没有找到 Claude 命令行（claude）。")
+    """Open a new conversation for one item in the Claude app, in the item's own folder: the item's facts and its
+    conversation so far are in a note there, so the owner does not paste the context again, and the folder binds
+    the new conversation to the item (see view)."""
+    from . import worker
     folder = worker.workdir_for(root, item["record_id"])
     lines = [f"# 心响事项 #{item['n']}：{item.get('title') or ''}", "",
              f"- 状态：{item.get('status') or ''}；谁来做：{item.get('who') or ''}；截止：{item.get('due') or '无'}",
@@ -320,12 +357,12 @@ def start_for_item(root, config, item, history=""):
     if history:
         lines += ["", "## 这件事之前的对话（心响记录）", history]
     (folder / "心响事项.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    sid = str(uuid4())
     prompt = ("读当前文件夹的 心响事项.md，这是本人在心响里的一件事和它之前的对话。"
               "先用两三句话说清现在到哪一步了、还差什么，然后问本人接下来要你做什么。")
-    title = f"心响 #{item['n']} {item.get('title') or ''}"[:60]
-    sessions.open_terminal(f"cd {shlex.quote(str(folder))} && " + shlex.join([binary, "--session-id", sid, "-n", title, prompt]))
-    rec = _record("claude", sid, title, time.time(), cwd=folder, working=True, doing=prompt, app="Claude 命令行", live=True)
-    with closing(_db(root)) as db, db:
-        db.execute("INSERT OR REPLACE INTO local_session_items VALUES(?,?,?)", (rec["key"], item["record_id"], json.dumps(rec, ensure_ascii=False)))
-    return {"opened": "terminal", "session": sid}
+    from urllib.parse import urlencode
+    url = "claude://code/new?" + urlencode({"folder": str(folder), "q": prompt})
+    try:
+        subprocess.run(["open", url], capture_output=True, check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise MatrixError("无法打开 Claude。") from exc
+    return {"opened": "claude", "folder": str(folder)}  # the conversation binds itself to the item by this folder

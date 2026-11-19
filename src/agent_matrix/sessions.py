@@ -151,6 +151,9 @@ def open_session(root, config, job_id):
     engine, session, link = _session_of(job)
     if link:
         return {"link": link}
+    if engine == "claude" and session:
+        from .local_sessions import open_claude
+        return {**open_claude(session), "engine": engine}
     line = command(root, config, job_id)
     open_terminal(line)
     return {"opened": "terminal", "engine": engine}

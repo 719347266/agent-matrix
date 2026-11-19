@@ -100,15 +100,15 @@ const response=data=>({ok:true,status:200,json:async()=>clone(data)});
   assert.match(live.run('replyState(byN(1))'), /Claude 已接手：阅读资料/);
   live.run('D.threads[1].push({from:"ai",kind:"say",text:"做好了"})');
   assert.equal(live.run('replyState(byN(1))'),"");
-  live.run('D.running=[{job:"one",n:1,engine:"other",driver:"Cindy",can_open:true,step:"阅读"}]');
+  live.run('D.running=[{job:"one",n:1,engine:"other",driver:"Cindy",can_open:true,step:"阅读",status:"open"}]');
   assert.match(live.run('sideHTML()'),/Cindy/);
   assert.match(live.run('sideHTML()'),/打开/);
   live.run('D.running=[]; D.local_sessions=[{key:"cindy:one",job:"local:cindy:one",driver:"Cindy",local:true,title:"本机会话",can_open:true,status:"open"}]');
   assert.match(live.run('sideHTML()'),/关联到事项…/);
   assert.match(live.run('sideHTML()'),/回复中/);                       // status open = replying right now
-  live.run('D.local_sessions[0].suggest=1');
-  assert.match(live.run('sideHTML()'),/可能是<\/span><button onclick="openItem\(1\)">#1 /);
-  live.run('D.local_sessions[0].suggest=null');
+  live.run('D.local_sessions[0].working=false');                     // finished: leaves the list
+  assert.doesNotMatch(live.run('sideHTML()'),/本机会话/);
+  live.run('D.local_sessions[0].working=true');
   live.run('S.bindKey="cindy:one"');
   assert.match(live.run('sideHTML()'),/选择事项/);
   live.run('D.local_sessions[0].n=1');

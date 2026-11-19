@@ -79,28 +79,42 @@ class LocalSessions(unittest.TestCase):
         (folder / "abcd-1234.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows))
         self.assertEqual(ls._last_request(self.home, "abcd-1234"), "把 #62 的流程图补齐")
 
-    def test_an_unbound_conversation_suggests_the_item_it_names(self):
+    def test_a_conversation_about_one_item_binds_itself_and_can_be_undone(self):
         items = [{"rid": "r6", "n": 6, "title": "整理聚光投放测试策略", "status": "进行中"},
-                 {"rid": "r9", "n": 9, "title": "已经做完的事情", "status": "完成"}]
+                 {"rid": "r9", "n": 9, "title": "已经做完的事情", "status": "完成"},
+                 {"rid": "r7", "n": 7, "title": "另一件事情要做", "status": "进行中"}]
         named = ls._record("claude", "c-1", "随便聊聊", self.now, doing="帮我看下 #6 的数据")
         titled = ls._record("claude", "c-2", "整理聚光投放测试策略", self.now)
-        closed = ls._record("claude", "c-3", "接着做 #9", self.now)
-        with patch.object(ls, "discover", return_value={r["key"]: r for r in (named, titled, closed)}):
-            out = {r["key"]: r["suggest"] for r in ls.view(self.home, {}, [], items)}
-        self.assertEqual(out, {"claude:c-1": 6, "claude:c-2": 6, "claude:c-3": None})
+        finished = ls._record("claude", "c-3", "接着改 #9", self.now)
+        two = ls._record("claude", "c-4", "比较 #6 和 #7", self.now)
+        from agent_matrix.worker import work_base
+        folder = ls._record("claude", "c-5", "新对话", self.now, cwd=f"{work_base(self.home)}/r7")
+        found = {r["key"]: r for r in (named, titled, finished, two, folder)}
+        with patch.object(ls, "discover", return_value=found):
+            out = {r["key"]: r["n"] for r in ls.view(self.home, {}, [], items)}
+        self.assertEqual(out, {"claude:c-1": 6, "claude:c-2": 6, "claude:c-3": 9, "claude:c-4": None, "claude:c-5": 7})
+        ls.unbind(self.home, "claude:c-1")
+        with patch.object(ls, "discover", return_value=found):
+            self.assertIsNone(next(r["n"] for r in ls.view(self.home, {}, [], items) if r["key"] == "claude:c-1"))
 
-    def test_a_claude_conversation_opened_from_an_item_is_bound_with_its_context(self):
+    def test_claude_conversations_open_in_the_claude_app_at_that_conversation(self):
+        with patch.object(ls.subprocess, "run") as run:
+            ls.open_claude("11111111-2222-4333-8444-555555555555", "local_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+            self.assertEqual(run.call_args.args[0], ["open", "claude://code/continue?session=local_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"])
+            ls.open_claude("11111111-2222-4333-8444-555555555555")
+            self.assertEqual(run.call_args.args[0], ["open", "claude://resume?session=11111111-2222-4333-8444-555555555555"])
+            with self.assertRaises(MatrixError):
+                ls.open_claude("not-an-id")
+
+    def test_a_claude_conversation_opened_from_an_item_carries_its_context(self):
         root = self.home / "project"
         (root / "state").mkdir(parents=True)
         work = self.home / "work"
         work.mkdir()
         item = {"record_id": "r62", "n": 62, "title": "补齐角色流程图", "status": "完成", "who": "我", "next": "发流程图"}
-        with patch("agent_matrix.worker.claude_binary", return_value="/bin/claude"), \
-             patch("agent_matrix.worker.workdir_for", return_value=work), \
-             patch.object(sessions, "open_terminal") as terminal:
-            out = ls.start_for_item(root, None, item, history="你：先画一级页面")
-        line = terminal.call_args.args[0]
-        self.assertIn("--session-id " + out["session"], line)
+        with patch("agent_matrix.worker.workdir_for", return_value=work), patch.object(ls.subprocess, "run") as run:
+            ls.start_for_item(root, None, item, history="你：先画一级页面")
+        url = run.call_args.args[0][1]
+        self.assertTrue(url.startswith("claude://code/new?"))
+        self.assertIn("folder=" + str(work).replace("/", "%2F"), url)
         self.assertIn("先画一级页面", (work / "心响事项.md").read_text(encoding="utf-8"))
-        with closing(ls._db(root)) as db:
-            self.assertEqual(db.execute("SELECT key, rid FROM local_session_items").fetchone(), ("claude:" + out["session"], "r62"))
