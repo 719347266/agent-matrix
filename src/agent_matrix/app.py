@@ -84,7 +84,7 @@ def _num(value):
 
 def build_state(root):
     from . import inbox, thread
-    from .monitor import _snapshot
+    from .snapshot import _snapshot
     from .worker import is_running, read_status
     root = Path(root)
     snap = _snapshot(root)
@@ -296,7 +296,7 @@ def _config_flag(root, name):
 def say(root, n, text):
     """The owner talks to an item's AI conversation: recorded as an addition, and the AI picks it up."""
     from . import thread
-    from .monitor import _snapshot
+    from .snapshot import _snapshot
     row = next((r for r in _snapshot(root).get("rows") or [] if _num(r.get("编号")) == _num(n)), None)
     text = re.sub(r"\s+", " ", str(text or "")).strip()[:1000]
     if not row or not text:
@@ -495,7 +495,7 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/api/session/start", "/api/session/cindy", "/api/session/pickup"):
                 from .config import load
                 from .models import MatrixError
-                from .monitor import _snapshot
+                from .snapshot import _snapshot
                 from .drive import _history_text
                 from . import local_sessions
                 n = int(body.get("n") or 0)
@@ -550,8 +550,8 @@ def start_background(root, config):
         thread.backfill(root)
         inbox.import_history(root)
         drive.install_shim(root)  # `~/.agent-matrix/bin/xinxiang`: the command any AI calls
-        from . import memory
-        memory.backfill_meetings(root)  # earlier meetings become history (quietly, once)
+        from . import meeting_review
+        meeting_review.backfill_meetings(root)  # earlier meetings become history (quietly, once)
     except Exception:
         pass
     try:

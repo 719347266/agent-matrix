@@ -10,19 +10,12 @@ import json
 from zoneinfo import ZoneInfo
 
 from .bitable import js, require_owned
-from .brief_migration import single, number, validate_registry, SOURCE_FIELDS
+from .brief_migration import single, number, validate_registry
+from .schema import SOURCE_FIELDS  # noqa: F401
 from .models import MatrixError
 from .records import read_records
-from .schema import field, date, select
+from .schema import field, date, select, STATUSES, EXTRA, FIELDS, DEFAULT_PROGRESS  # noqa: F401
 
-STATUSES = ['待确认', '未开始', '进行中', '卡住', '待验收', '完成', '取消']
-EXTRA = [field('顺延历史'), date('完成时间'), field('排除本人提醒', 'checkbox'),
-         field('补充材料'), field('拍板结果'), select('交付情况', ['有交付', '无交付', '待补交付'])]
-FIELDS = list(dict.fromkeys([*SOURCE_FIELDS, '编号', '执行方', '进度', '卡点', '完成标准',
-    '交付物链接', '验收结果', '退回意见', '父事项', '顺延次数', '去重键', '来源链接',
-    '预做凭据', '更新时间', '创建时间', '能否AI预做', '类型', '关联任务链接', *[x['name'] for x in EXTRA]]))
-DEFAULT_PROGRESS = {'待确认': '0/1 待确认', '未开始': '0/1 未开始', '进行中': '进行中',
-                    '卡住': '卡住', '待验收': '1/1 已交付', '完成': '完成', '取消': '不做'}
 
 def digest(value):
     return sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -52,7 +45,7 @@ def normalize(key, value):
     if key in {'顺延次数', '延期次数'}:
         return int(value)
     if key in {'交付物链接','AI草稿链接','来源链接','关联任务链接'}:
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         return _draft_url(value)
     return value
 

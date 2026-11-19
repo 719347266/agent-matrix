@@ -8,6 +8,7 @@ import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from . import db as database, memory
 from .bitable import find_value, items, js, require_owned
 from .config import load
 from .feishu import Feishu
@@ -426,6 +427,38 @@ def numbered_line(client, state, review, config, meta, task_ids):
     parts=" / ".join(k+" "+" ".join(v) for k,v in groups.items() if v)
     first=next(v[0] for v in groups.values() if v).lstrip("#")
     return f"{meta.get('topic') or '会议'} · 新增 {total} 件：{parts}\n回复：展开 {first} 看原话"
+
+
+def backfill_meetings(root):
+    """Once: earlier meetings' extractions become history too (quietly: no recall alerts for old news)."""
+    import sqlite3
+    db = memory._db(root)
+    try:
+        if db.execute("SELECT value FROM meta WHERE key='moments-backfill-v1'").fetchone():
+            return 0
+    finally:
+        db.close()
+    count = 0
+    try:
+        st = database.read(Path(root) / "state/state.db", timeout=10)
+        queue = {mid: json.loads(meta) for mid, meta in st.execute("SELECT meeting_id, metadata FROM meeting_queue")}
+        st.close()
+    except sqlite3.Error:
+        queue = {}
+    for path in sorted((Path(root) / "state/meeting-transcripts").glob("*/review.json")):
+        mid = path.parent.name
+        try:
+            review = Review.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        count += len(memory.record_meeting(root, review, {**queue.get(mid, {}), "meeting_id": mid}, announce=False))
+    db = memory._db(root)
+    try:
+        with db:
+            db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('moments-backfill-v1', ?)", (memory._now(),))
+    finally:
+        db.close()
+    return count
 
 
 def main(argv=None):

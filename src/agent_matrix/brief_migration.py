@@ -11,12 +11,13 @@ import json
 from pathlib import Path
 import re
 
+from .values import single
 from .bitable import items, js, require_owned
 from .config import load
 from .feishu import Feishu
 from .models import MatrixError
 from .records import read_records
-from .schema import field, select
+from .schema import field, select, SOURCE_FIELDS
 from .state import State, exclusive_lock
 
 
@@ -24,9 +25,6 @@ STATUS_MAP = {"待确认": "待确认", "待办": "未开始", "未开始": "未
               "进行中": "进行中", "阻塞": "卡住", "卡住": "卡住",
               "草稿已备": "待验收", "待验收": "待验收", "完成": "完成", "取消": "取消"}
 EXECUTORS = {"我", "AI", "别人"}
-SOURCE_FIELDS = ["标题", "方向", "负责人", "截止日", "首次截止日", "延期次数",
-                 "状态", "下一步动作", "优先级", "预计耗时(分钟)", "AI草稿链接",
-                 "预做结果摘要", "预做策略", "预做指令", "来源", "原话引用"]
 
 
 def definitions(table_id):
@@ -42,14 +40,6 @@ def definitions(table_id):
             field("顺延次数", "number", style={"type": "plain", "precision": 0})]
 
 
-def single(value):
-    if value is None or value == [] or value == "":
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
-        return value[0]
-    raise MatrixError("单选字段出现多个值或异常结构；不推定执行方或状态。")
 
 
 def canonical_status(value):
@@ -209,7 +199,7 @@ def apply(config, client, state, proposals, now, excluded_numbers=(15,)):
     Every write goes through Gateway (re-read, patch, read back). A per-record
     log with the old values is saved first so the change can be reverted.
     """
-    from .prework import _draft_url
+    from .values import draft_url as _draft_url
     from .workflow import Gateway, ensure_v1, DEFAULT_PROGRESS
     schema = ensure_v1(client, state)
     gateway = Gateway(client, state)

@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 from . import db as database
-from .merge import similarity
+from .textmatch import similarity
 from .timeutil import TZ
 
 KIND_LABEL = {"decision": "定了", "requirement": "需求", "open_question": "还没定", "waiting": "等条件再定", "action": "要做"}
@@ -49,37 +49,6 @@ def record_meeting(root, review, meta, announce=True):
     return new
 
 
-def backfill_meetings(root):
-    """Once: earlier meetings' extractions become history too (quietly: no recall alerts for old news)."""
-    import sqlite3
-    from .meeting_review import Review
-    db = _db(root)
-    try:
-        if db.execute("SELECT value FROM meta WHERE key='moments-backfill-v1'").fetchone():
-            return 0
-    finally:
-        db.close()
-    count = 0
-    try:
-        st = database.read(Path(root) / "state/state.db", timeout=10)
-        queue = {mid: json.loads(meta) for mid, meta in st.execute("SELECT meeting_id, metadata FROM meeting_queue")}
-        st.close()
-    except sqlite3.Error:
-        queue = {}
-    for path in sorted((Path(root) / "state/meeting-transcripts").glob("*/review.json")):
-        mid = path.parent.name
-        try:
-            review = Review.model_validate_json(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        count += len(record_meeting(root, review, {**queue.get(mid, {}), "meeting_id": mid}, announce=False))
-    db = _db(root)
-    try:
-        with db:
-            db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('moments-backfill-v1', ?)", (_now(),))
-    finally:
-        db.close()
-    return count
 
 
 def _insert(root, source, source_id, title, at, rows):

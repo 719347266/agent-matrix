@@ -283,7 +283,7 @@ def unbind(root, key):
 
 
 def associate(root,key,n):
-    from .monitor import _snapshot
+    from .snapshot import _snapshot
     rec=discover().get(key)
     if not rec: raise MatrixError("这段会话已经不在运行，刷新后再试。")
     rid=next((r.get("record_id") for r in _snapshot(root).get("rows",[]) if str(r.get("编号"))==str(n)),None)

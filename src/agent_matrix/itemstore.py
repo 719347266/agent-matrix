@@ -160,7 +160,7 @@ def ensure(client, state=None):
         state.set("brief-v1:migration-stage", "v1_active")
     if imported(root):
         return
-    from .workflow import FIELDS
+    from .schema import FIELDS
     if feishu_free(client.config):
         import_rows(root, [], list(FIELDS))  # nothing to import: start empty
         return
@@ -418,7 +418,7 @@ def choose(root, mode):
         config.item_store = "local"
         ensure(client)
     if not imported(root) and mode != "local":
-        from .workflow import FIELDS
+        from .schema import FIELDS
         import_rows(root, [], list(FIELDS))  # never used Feishu: start empty
     if mode == "notion":
         queue_all(root)

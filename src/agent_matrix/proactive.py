@@ -131,7 +131,7 @@ def focus(need):
 def ai_line(root):
     """One line: who is doing what right now (any driver), or that the AI is free."""
     try:
-        from .drive import open_jobs
+        from .jobstore import open_jobs
         jobs = open_jobs(root)
     except Exception:
         jobs = []

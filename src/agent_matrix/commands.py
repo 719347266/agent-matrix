@@ -162,7 +162,7 @@ def run_action(root, payload, request_id, progress):
     from .bitable import require_owned
     from .config import load
     from .feishu import Feishu
-    from .monitor import _snapshot
+    from .snapshot import _snapshot
     from .reply import Applier, parse, WAKE_WORKER
     from .state import State, exclusive_lock
     from . import activity, thread
@@ -244,10 +244,10 @@ def enrich_deliverables(root, rows, request_id):
     from .feishu import Feishu
     from .reply import find_deliverable
     from .brief_migration import single
-    from .prework import _draft_url
+    from .values import draft_url as _draft_url
     from .workflow import Gateway, normalize
     from .state import State, exclusive_lock
-    from .monitor import save_snapshot
+    from .snapshot import save_snapshot
     from . import thread, activity
 
     try:

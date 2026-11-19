@@ -57,7 +57,7 @@ class LocalSessions(unittest.TestCase):
         rec = ls._record("cindy","exact-id","不像事项标题",self.now)
         key = rec["key"]
         known = [{"rid":"r6","n":6}]
-        with patch.object(ls,"discover",return_value={key:rec}), patch("agent_matrix.monitor._snapshot",return_value={"rows":[{"record_id":"r6","编号":6}]}):
+        with patch.object(ls,"discover",return_value={key:rec}), patch("agent_matrix.snapshot._snapshot",return_value={"rows":[{"record_id":"r6","编号":6}]}):
             self.assertIsNone(ls.view(self.home,{},[],known)[0]["n"])
             self.assertEqual(ls.view(self.home,{"r6":[{"session":"exact-id"}]},[],known)[0]["n"],6)
             with self.assertRaises(MatrixError): ls.associate(self.home,key,7)

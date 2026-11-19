@@ -92,7 +92,7 @@ def build(config, rows, events, target, edition, *, previous=None, catchup=False
                 elif late==-1: tags.append('明天到期')
             if count>=2: tags.append(f'⚠顺延{count}次')
         url=r.get('交付物链接')
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         url=_draft_url(url)
         suffix=f' [打开]({url})' if st=='待验收' and url else ''
         if ex=='我' and r.get('能否AI预做') and st in {'未开始','进行中'}:
@@ -225,7 +225,7 @@ def describe(r, target, by_number):
     """Plain words for one item: (bold line, grey hint, hint colour, url-to-open).
 
     Read-only: the hint says where the item stands, never what to reply. Acting happens in 心响."""
-    from .prework import _draft_url
+    from .values import draft_url as _draft_url
     n = number(r['编号']); st = single(r['状态']); ex = single(r.get('执行方'))
     title = short(r.get('标题'), 22)
     due = day(r.get('截止日'))

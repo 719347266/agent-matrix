@@ -130,7 +130,7 @@ def connect(root, tok, link, *, api=call):
     every existing item for the first copy. Never echoes the secret back."""
     from . import itemstore
     from .config import load, save
-    from .workflow import FIELDS
+    from .schema import FIELDS
     tok = (tok or "").strip()
     if not tok.startswith(("ntn_", "secret_")):
         raise MatrixError("要 Internal Integration Secret（ntn_ 或 secret_ 开头）。")

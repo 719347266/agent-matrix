@@ -13,11 +13,10 @@ PKG = Path(__file__).resolve().parents[1] / "src" / "agent_matrix"
 # A module may import from its own layer or any layer below it, never from above.
 LAYERS = [
     ("基础", ["models", "config", "timeutil", "schema", "alerts", "cards", "digest", "reply_timing", "llm",
-              "precheck", "db", "lifecycle"]),
-    ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory"]),
-    ("外部连接", ["feishu", "bitable", "records", "delivery", "notion", "linked_sync", "sources.chats",
-                  "sources.slack", "sources.feishu_tasks", "sources"]),
-    ("业务规则", ["workflow", "merge", "automation", "automation_demo", "brief_migration", "brief_v1", "prework",
+              "precheck", "db", "lifecycle", "values", "textmatch", "delivery"]),
+    ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory", "jobstore", "snapshot"]),
+    ("外部连接", ["feishu", "bitable", "records", "notion", "sources.chats", "sources.slack", "sources"]),
+    ("业务规则", ["workflow", "merge", "automation", "linked_sync", "sources.feishu_tasks", "automation_demo", "brief_migration", "brief_v1", "prework",
                   "reply", "meeting_watch", "meeting_review", "chat_review", "background", "proactive",
                   "agents", "agents.daily_brief", "agents.meeting_followup", "agents.meeting_prep",
                   "agents.pre_worker", "agents.recurring", "agents.weekly_review"]),

@@ -12,18 +12,12 @@ import archmap  # noqa: E402
 
 # Imports that still reach into a higher layer: (from, to).
 KNOWN_UPWARD = {
-    ("drive", "monitor"), ("itemstore", "bitable"), ("itemstore", "feishu"), ("itemstore", "records"),
-    ("itemstore", "workflow"), ("linked_sync", "automation"), ("local_sessions", "monitor"),
-    ("memory", "meeting_review"), ("memory", "merge"), ("notion", "workflow"), ("prework_store", "delivery"),
-    ("proactive", "drive"), ("reply", "drive"), ("reply", "monitor"), ("reply", "worker"),
-    ("sources.feishu_tasks", "brief_migration"), ("sources.feishu_tasks", "merge"),
-    ("sources.feishu_tasks", "workflow"),
+    ("itemstore", "bitable"), ("itemstore", "feishu"), ("itemstore", "records"), ("reply", "worker"),
 }
 # Modules still inside an import cycle.
 KNOWN_CYCLIC = {
-    "agents.daily_brief", "agents.pre_worker", "bitable", "brief_migration", "brief_v1", "feishu", "itemstore",
-    "prework", "records", "workflow", "chat_review", "drive", "local_sessions", "monitor", "proactive", "reply",
-    "sessions", "worker", "meeting_review", "memory",
+    "bitable", "feishu", "itemstore", "records", "brief_migration", "workflow", "chat_review", "drive",
+    "local_sessions", "reply", "sessions", "worker",
 }
 # Modules that still open SQLite themselves instead of going through db.py.
 KNOWN_CONNECTS = set()

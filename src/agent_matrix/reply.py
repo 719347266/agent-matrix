@@ -149,7 +149,7 @@ class Applier:
     def __init__(self, config, client, state, *, source, message_ref, immediate=False, progress=None, note=None):
         from .workflow import Gateway
         self.config, self.client, self.state = config, client, state
-        from .monitor import save_snapshot
+        from .snapshot import save_snapshot
         self.gateway = Gateway(client, state, on_rows=(lambda rows: save_snapshot(client.root, rows)) if immediate else None, progress=progress)
         self.immediate = immediate
         self.deferred = []
@@ -187,7 +187,7 @@ class Applier:
         if self.client is None:
             return ""
         try:
-            from .drive import stop_record
+            from .jobstore import stop_record
             return "，已通知 AI 停止" if stop_record(self.client.root, row["record_id"]) else ""
         except Exception:
             return ""
@@ -270,7 +270,7 @@ class Applier:
         if op.verb == "approve":
             if st != "待验收":
                 return f"#{n} {name} 现在是{st}，还没交付，不能验收。"
-            from .prework import _draft_url
+            from .values import draft_url as _draft_url
             self.write(row, {"状态": ["完成"], "验收结果": ["通过"], "完成时间": self.now.isoformat(), "进度": "完成",
                              "交付情况": ["有交付" if _draft_url(row.get("交付物链接")) else "待补交付"]}, op, n)
             self.closed(row, "验收通过")
@@ -376,7 +376,7 @@ class Applier:
 
     def complete(self, row, op, n, name, st, *, no_file):
         """完成 = the work is done; then settle the deliverable: attached, not needed, or still missing."""
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         patch = {} if st == "完成" else {"状态": ["完成"], "完成时间": self.now.isoformat(), "进度": "完成"}
         if no_file:
             patch["交付情况"] = ["无交付"]; note = "，标为无交付"
@@ -411,7 +411,7 @@ class Applier:
     def merge(self, row, op, n, name, into):
         """「31 合并到 3」: #31's facts go into #3 (never overwriting #3's owner/date), #31 is closed as merged."""
         from .merge import merge_into
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         if into == n:
             return f"#{n} 不能合并到自己。"
         target = self.find(into)
@@ -437,7 +437,7 @@ class Applier:
             if not parent or single(parent.get("状态")) != "卡住" or f"#{n}" not in str(parent.get("卡点") or ""):
                 continue
             patch = {"状态": ["未开始"], "卡点": None, "进度": "0/1 可开始"}
-            from .prework import _draft_url
+            from .values import draft_url as _draft_url
             link = _draft_url(row.get("交付物链接"))
             if link and not parent.get("交付物链接"):
                 patch["交付物链接"] = link
@@ -446,7 +446,7 @@ class Applier:
         return None
 
     def expand(self, row):
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         from .workflow import day
         n = number(row["编号"])
         lines = [f"#{n} {row.get('标题')}",
