@@ -126,7 +126,10 @@ def build_state(root):
         threads[n], deliverables[n] = msgs, dv
     from . import local_sessions
     external = local_sessions.view(root, sessions_of, running_sessions, items)
+    from . import cindy_pickup
+    pickups = cindy_pickup.latest(root)
     for item in items:
+        item["cindy_pickup"] = pickups.get(item["rid"])
         item["sessions"] = sessions_of.get(item["rid"], [])
     from . import drive
     ws, running = read_status(root), is_running(root)
@@ -156,6 +159,7 @@ def build_state(root):
                 "prework_enabled": _config_flag(root, "prework_enabled"),
                 "worker_mcp": _config_flag(root, "worker_mcp_tools")}
     settings["engine_sort"] = thread.setting(root, "engine_sort", settings["engine"] if settings["engine"] != "cindy" else "codex")
+    settings["pickup_buddy"] = (root / "state/cindy-pickup.json").is_file()
     settings["cindy_project"] = thread.setting(root, "cindy_project", "")
     try:
         from . import local_sessions
@@ -499,7 +503,8 @@ class Handler(BaseHTTPRequestHandler):
                 item = {"record_id": row["record_id"], "n": n, "title": row.get("标题"), "status": row.get("状态"), "who": row.get("执行方"),
                         "due": str(row.get("截止日") or "")[:10], "source": row.get("来源"), "source_url": _url(row.get("来源链接")),
                         "next": row.get("下一步动作"), "criterion": row.get("完成标准"), "quote": _clean(row.get("原话引用")),
-                        "url": _url(row.get("交付物链接"))}
+                        "url": _url(row.get("交付物链接")), "extra": _clean(row.get("补充材料")),
+                        "rejected": _clean(row.get("退回意见"))}
                 try:
                     start = {"/api/session/cindy": local_sessions.start_in_cindy, "/api/session/start": local_sessions.start_for_item}.get(path, local_sessions.pick_up)
                     return self._send(200, {"ok": True, **start(root, load(root / "config.yaml"), item,

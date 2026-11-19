@@ -381,7 +381,7 @@ def _gpt_said(root, record_id, limit=12):
     return said[-limit:]
 
 
-def write_context(root, item, history=""):
+def write_context(root, item, history="", *, buddy=False):
     """The item's folder becomes the place to pick it up: 心响事项.md with the facts, the conversation so far and what
     the built-in GPT already did, plus AGENTS.md / CLAUDE.md so whichever AI opens the folder reads it first."""
     from . import worker
@@ -394,6 +394,10 @@ def write_context(root, item, history=""):
         lines.append(f"- 做到算完：{item['criterion']}")
     if item.get("quote"):
         lines += ["", "## 原话", str(item["quote"])[:1500]]
+    if buddy:
+        for label, key in (("补充材料", "extra"), ("退回意见", "rejected")):
+            if item.get(key):
+                lines += ["", "## " + label, str(item[key])]
     if item.get("url"):
         lines += ["", "## 已有交付", item["url"]]
     files = [name for name in ("交付.md", "任务单.md", "背景.md", "结果.json") if (folder / name).is_file()]
@@ -408,6 +412,8 @@ def write_context(root, item, history=""):
     guide = (f"这个文件夹是心响事项 #{item['n']}「{item.get('title') or ''}」的工作文件夹。\n"
              "接手时先读 心响事项.md：里面有来龙去脉、之前的对话和已经做出的东西。接着往下做，不要从头来；"
              "先用两三句话说清现在到哪一步、还差什么，再问本人接下来要做什么。\n")
+    if buddy:
+        guide = "豚豚接手：先读 心响事项.md、已有交付和最新反馈，再按所属项目规范直接续做；没有新反馈不重做、不代验收。\n"
     for name in ("AGENTS.md", "CLAUDE.md"):
         (folder / name).write_text(guide, encoding="utf-8")
     return folder
@@ -419,7 +425,17 @@ def start_in_cindy(root, config, item, history=""):
     「打开对话」 goes straight back to it."""
     if not CINDY_APP.is_dir():
         raise MatrixError("这台电脑上没有找到 Cindy。")
-    folder = write_context(root, item, history)
+    from . import cindy_pickup
+    route = cindy_pickup.binding(root)
+    folder = write_context(root, item, history, buddy=bool(route))
+    if route:
+        result = cindy_pickup.enqueue(root, route, item, folder, history)
+        try:
+            subprocess.run(["open", "-a", str(CINDY_APP), "cindy://session/" + route["session"]],
+                           capture_output=True, check=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            result["navigation_failed"] = True  # independent of queue/receipt; never resend here
+        return result
     try:
         subprocess.run(["open", "-a", str(CINDY_APP), "--", str(folder)], capture_output=True, check=True, timeout=15)
     except (OSError, subprocess.SubprocessError) as exc:

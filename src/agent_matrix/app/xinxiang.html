@@ -1016,7 +1016,9 @@ function sessionControl(s, css, label){
 }
 function sessionsTab(i){
   const list=i.sessions||[];
-  const start=`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`;
+  const buddy=D.settings?.pickup_app==="cindy" && D.settings?.pickup_buddy;
+  const label={queued:"等待 Cindy 投递",delivered:"已交给豚豚",error:"未收到送达回执，请打开豚豚对话核对"}[i.cindy_pickup];
+  const start=buddy?`<div class="callout"><div class="what">${esc(label||"带上原对话和已有交付，由豚豚接着做。")}</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在豚豚对话里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`:`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`;
   if(!list.length) return start+`<div class="hint" style="margin:0">还没有 AI 会话绑定这件事。左侧「AI 会话」里正在进行的对话，也可以点「关联到事项…」绑过来。</div>`;
   return start+`<div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
     <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':""}</div>
@@ -1133,7 +1135,9 @@ const pickupName = () => PICKUP_NAME[(D.settings||{}).pickup_app]||"Cindy";
 async function pickUp(n){
   if(!LIVE) return toast("原型里不能打开");
   const where=pickupName();
-  try{ await api("/api/session/pickup",{n},30000);
+  try{ const r=await api("/api/session/pickup",{n},30000);
+    if(r.pickup){ const status={queued:"已排队，等待 Cindy 投递",delivered:"Cindy 已确认送达豚豚",error:"未收到送达回执，请在豚豚对话里核对"}[r.pickup];
+      toast(status+(r.navigation_failed?"；未能打开对话":"")); await load(); return; }
     toast((D.settings||{}).pickup_app==="cindy"?"已在 Cindy 里新建任务，就在这件事的文件夹里。发第一句话（比如「继续」），它会先读这件事的来龙去脉":`已在 ${where} 里接手这件事，它会先读这件事的来龙去脉`); setTimeout(load,5000); }
   catch(e){ toast(e.message||`没能打开 ${where}`); }
 }
