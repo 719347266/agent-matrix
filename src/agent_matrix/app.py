@@ -24,6 +24,8 @@ import threading
 from urllib.parse import urlparse
 import webbrowser
 
+from contextlib import closing
+from . import db as database
 from .timeutil import TZ
 
 PAGE = Path(__file__).with_name("app") / "xinxiang.html"
@@ -225,7 +227,7 @@ def system_info(root):
     names = {"im.message.receive_v1": "飞书回复", "card.action.trigger": "卡片按钮", "task.task.update_user_access_v2": "飞书任务",
              "vc.meeting.participant_meeting_ended_v1": "会议结束", "vc.note.generated_v1": "纪要生成"}
     try:
-        db = sqlite3.connect(f"file:{Path(root) / 'state/state.db'}?mode=ro", uri=True, timeout=5)
+        db = database.read(Path(root) / "state/state.db")
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
         slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
@@ -277,7 +279,7 @@ def _recent_chats(root, limit=30):
     """Chat names seen lately, so the filter can be picked instead of typed."""
     import sqlite3
     try:
-        with sqlite3.connect(Path(root) / "state/state.db") as db:
+        with closing(database.read(Path(root) / "state/state.db")) as db:
             return [r[0] for r in db.execute("SELECT chat_name, MAX(sent_at) m FROM chat_candidates GROUP BY chat_name ORDER BY m DESC LIMIT ?", (limit,))]
     except sqlite3.Error:
         return []

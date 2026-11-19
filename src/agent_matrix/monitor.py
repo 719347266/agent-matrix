@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import sqlite3
 
+from . import db as database
 from . import activity
 from .timeutil import TZ
 
@@ -209,7 +210,7 @@ def classify(rows, now):
 # ---- system checks: plain words, what was done, what you do ----------------------
 
 def _ro(path):
-    return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=3)
+    return database.read(path, timeout=3)
 
 
 def _kv(db, key, default=None):

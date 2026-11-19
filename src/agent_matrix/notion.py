@@ -102,10 +102,6 @@ def properties(row, kinds, numbers):
     return out
 
 
-def _table(db):
-    db.execute("CREATE TABLE IF NOT EXISTS notion_pages (record_id TEXT PRIMARY KEY, page_id TEXT NOT NULL)")
-
-
 def push(config, *, api=call):
     """itemstore.backup push: whatever the queued change was, write the item's current state to its page."""
     tok, database = config.notion_token, config.notion_database_id
@@ -113,7 +109,6 @@ def push(config, *, api=call):
         raise MatrixError("Notion 还没连接。")
 
     def one(db, op, rid, raw):
-        _table(db)
         found = db.execute("SELECT fields FROM items WHERE record_id=?", (rid,)).fetchone()
         if not found:
             return

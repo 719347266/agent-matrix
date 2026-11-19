@@ -14,6 +14,7 @@ import threading
 import time
 from uuid import uuid4
 
+from . import db as database
 from .models import MatrixBusy, MatrixError
 from .timeutil import TZ
 
@@ -29,17 +30,13 @@ class Commands:
         self.guard = threading.Lock()
         self.working = False
         with self.db() as db:
-            db.execute("""CREATE TABLE IF NOT EXISTS commands (
-                id TEXT PRIMARY KEY, payload TEXT NOT NULL, numbers TEXT NOT NULL,
-                status TEXT NOT NULL, message TEXT NOT NULL, created REAL NOT NULL,
-                updated REAL NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0)""")
             db.execute("UPDATE commands SET status='failed', message=?, updated=? WHERE status='running'",
                        ("服务重启了，结果需要核对；点「核对并重试」会先检查上次是否已保存。", time.time()))
         self.start()
 
     @contextmanager
     def db(self):
-        db = sqlite3.connect(self.path, timeout=10)
+        db = database.connect(self.path, "commands", timeout=10)
         db.row_factory = sqlite3.Row
         try:
             with db:

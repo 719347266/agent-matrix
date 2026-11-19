@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import time
 
+from . import db as database
 from .models import MatrixError
 from .timeutil import TZ
 
@@ -27,7 +28,7 @@ ISSUES = (OSError, sqlite3.Error, ValueError, TypeError, KeyError, OverflowError
 
 
 def _ro(p):
-    return sqlite3.connect(p.resolve().as_uri() + "?mode=ro", uri=True, timeout=.2)
+    return database.read(p, timeout=.2)
 
 
 def _record(source, sid, title, stamp, *, sdk=None, cwd=None, working=True, doing="", app=None, live=False, host=None):
@@ -204,12 +205,7 @@ def discover(home=None):
 
 
 def _db(root):
-    from .thread import _db as base
-    db=base(root)
-    db.execute("""CREATE TABLE IF NOT EXISTS local_session_items (
-       key TEXT PRIMARY KEY, rid TEXT NOT NULL, data TEXT NOT NULL)""")
-    db.execute("CREATE TABLE IF NOT EXISTS local_session_skips (key TEXT PRIMARY KEY)")
-    return db
+    return database.open(root, "xinxiang")
 
 
 def _public(rec, present):

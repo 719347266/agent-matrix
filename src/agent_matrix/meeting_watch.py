@@ -40,11 +40,6 @@ class MeetingQueue:
     def __init__(self, state):
         self.state = state
         self.db = state.db
-        self.db.execute("""CREATE TABLE IF NOT EXISTS meeting_queue (
-            meeting_id TEXT PRIMARY KEY, metadata TEXT NOT NULL, status TEXT NOT NULL,
-            attempts INTEGER NOT NULL DEFAULT 0, next_check TEXT NOT NULL,
-            transcript_path TEXT, transcript_sha256 TEXT, delivery_receipt TEXT)""")
-        self.db.commit()
 
     def get(self, meeting_id):
         row = self.db.execute("SELECT meeting_id,metadata,status,attempts,next_check,transcript_path,transcript_sha256,delivery_receipt FROM meeting_queue WHERE meeting_id=?", (meeting_id,)).fetchone()

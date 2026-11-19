@@ -27,6 +27,7 @@ import subprocess
 import sys
 from uuid import uuid4
 
+from . import db as database
 from .models import MatrixBusy, MatrixError
 from .timeutil import TZ
 
@@ -42,21 +43,7 @@ def now():
 # ---- the job table (state/xinxiang.db) ------------------------------------------------------------------
 
 def _db(root):
-    from .thread import _db as base
-    db = base(root)
-    db.execute("""CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT, n INTEGER, ref TEXT,
-        folder TEXT, driver TEXT, status TEXT NOT NULL, step TEXT, rounds INTEGER NOT NULL DEFAULT 0, lease_until TEXT,
-        created TEXT NOT NULL, updated TEXT NOT NULL, progress_at TEXT)""")
-    # Serialize migration only when upgrading an older DB. Polling is read-only afterwards.
-    cols = {c[1] for c in db.execute("PRAGMA table_info(jobs)")}
-    if not {"session", "link"} <= cols:
-        with db:
-            db.execute("BEGIN IMMEDIATE")
-            cols = {c[1] for c in db.execute("PRAGMA table_info(jobs)")}
-            for col in ("session", "link"):
-                if col not in cols:
-                    db.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
-    return db
+    return database.open(root, "xinxiang")
 
 
 def _save(root, job):

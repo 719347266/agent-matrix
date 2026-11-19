@@ -6,9 +6,9 @@ import select
 import time
 from pathlib import Path
 import re
-import sqlite3
 import sys
 
+from . import db as database
 from .models import MatrixError
 
 PROTOCOL = "cindy-script/1"
@@ -29,11 +29,7 @@ def binding(root):
 
 
 def db_for(root):
-    db = sqlite3.connect(Path(root) / "state/cindy-pickup.sqlite", timeout=5)
-    db.execute("""CREATE TABLE IF NOT EXISTS pickup (
-        seq INTEGER PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, session TEXT NOT NULL,
-        rid TEXT NOT NULL, message TEXT NOT NULL, receipt TEXT, error TEXT)""")
-    return db
+    return database.open(root, "pickup", timeout=5)
 
 
 def enqueue(root, route, item, folder, history):

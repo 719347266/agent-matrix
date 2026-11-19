@@ -15,29 +15,13 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
-import sqlite3
 
+from . import db as database
 from .timeutil import TZ
 
 
 def _db(root):
-    path = Path(root) / "state/xinxiang.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=30)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, at TEXT NOT NULL,
-            sender TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, url TEXT, driver TEXT, dedupe TEXT UNIQUE);
-        CREATE INDEX IF NOT EXISTS messages_item ON messages(record_id, id);
-        CREATE TABLE IF NOT EXISTS deliverables (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, version INTEGER NOT NULL,
-            at TEXT NOT NULL, summary TEXT, url TEXT, confirm TEXT, assumptions TEXT, sources TEXT, UNIQUE(record_id, version));
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS judgments (record_id TEXT PRIMARY KEY, at TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT);
-        CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, at TEXT NOT NULL,
-            by TEXT NOT NULL, how TEXT, note TEXT);
-    """)
-    return db
+    return database.open(root, "xinxiang")
 
 
 def _now():

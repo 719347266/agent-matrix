@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 
+from . import db as database
 from .merge import similarity
 from .timeutil import TZ
 
@@ -21,18 +22,7 @@ RECALL_MIN = 0.34
 
 
 def _db(root):
-    from .thread import _db as base
-    db = base(root)
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS moments (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, source_id TEXT NOT NULL,
-            source_title TEXT, at TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, quote TEXT, stamp TEXT,
-            wait_for TEXT, due TEXT, status TEXT NOT NULL DEFAULT 'open', created TEXT NOT NULL,
-            UNIQUE(source, source_id, kind, text));
-        CREATE TABLE IF NOT EXISTS preferences (id INTEGER PRIMARY KEY AUTOINCREMENT, rule TEXT NOT NULL UNIQUE, why TEXT,
-            source TEXT, created TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
-        CREATE TABLE IF NOT EXISTS recalls (waiting_id INTEGER NOT NULL, source_id TEXT NOT NULL, PRIMARY KEY (waiting_id, source_id));
-    """)
-    return db
+    return database.open(root, "xinxiang")
 
 
 def _now():
@@ -71,7 +61,7 @@ def backfill_meetings(root):
         db.close()
     count = 0
     try:
-        st = sqlite3.connect(f"file:{Path(root) / 'state/state.db'}?mode=ro", uri=True, timeout=10)
+        st = database.read(Path(root) / "state/state.db", timeout=10)
         queue = {mid: json.loads(meta) for mid, meta in st.execute("SELECT meeting_id, metadata FROM meeting_queue")}
         st.close()
     except sqlite3.Error:

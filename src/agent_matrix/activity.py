@@ -6,23 +6,13 @@ Best effort by design: logging must never break the real work.
 from datetime import datetime
 import json
 from pathlib import Path
-import sqlite3
 
+from . import db as database
 from .timeutil import TZ
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, at TEXT, kind TEXT, title TEXT, detail TEXT,
-                                   status TEXT, ref TEXT);
-CREATE TABLE IF NOT EXISTS beats (component TEXT PRIMARY KEY, at TEXT, summary TEXT);
-"""
 
 
 def _db(root):
-    path = Path(root) / "state" / "activity.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=5)
-    db.executescript(SCHEMA)
-    return db
+    return database.open(root, "activity", timeout=5)
 
 
 def log(root, kind, title, *, detail="", status="ok", ref=""):

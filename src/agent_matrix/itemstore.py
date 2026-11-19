@@ -14,9 +14,9 @@ from datetime import datetime
 import json
 from pathlib import Path
 import secrets
-import sqlite3
 import string
 
+from . import db as database
 from .models import MatrixError
 from .timeutil import TZ
 
@@ -46,19 +46,7 @@ def is_items_table(config, args):
 
 
 def _db(root):
-    path = Path(root) / "state/items.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=15)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS items (record_id TEXT PRIMARY KEY, n INTEGER, fields TEXT NOT NULL, updated TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT NOT NULL, record_id TEXT NOT NULL,
-            payload TEXT NOT NULL, created TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, error TEXT,
-            state TEXT NOT NULL DEFAULT 'pending');
-        CREATE TABLE IF NOT EXISTS idmap (local_id TEXT PRIMARY KEY, feishu_id TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-    """)
-    return db
+    return database.open(root, "items", timeout=15)
 
 
 def _now():

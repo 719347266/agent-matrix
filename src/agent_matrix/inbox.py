@@ -15,18 +15,12 @@ from pathlib import Path
 import re
 import sqlite3
 
+from . import db as database
 from .timeutil import TZ
 
 
 def _db(root):
-    path = Path(root) / "state/inbox.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=30)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("""CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
-        at TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
-        blocks TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0)""")
-    return db
+    return database.open(root, "inbox")
 
 
 # ---- turning what used to be a Feishu message into blocks --------------------------------------------
@@ -198,7 +192,7 @@ def import_history(root, days=3):
     since = (datetime.now(TZ) - timedelta(days=days)).isoformat()
     count = 0
     try:
-        adb = sqlite3.connect(Path(root) / "state/activity.db", timeout=10)
+        adb = database.read(Path(root) / "state/activity.db", timeout=10)
         rows = adb.execute("SELECT id, at, title, detail FROM events WHERE kind='send' AND status='ok' AND at>=? ORDER BY id",
                            (since,)).fetchall()
         adb.close()

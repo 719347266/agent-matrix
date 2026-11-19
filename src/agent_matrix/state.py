@@ -6,7 +6,7 @@ except ImportError:  # Windows
     fcntl = None
     import msvcrt
 from pathlib import Path
-import sqlite3
+from . import db as database
 from .models import MatrixError, MatrixBusy
 from .timeutil import now_iso
 
@@ -56,12 +56,7 @@ def exclusive_lock(root: Path, wait=None):
 
 class State:
     def __init__(self, path: Path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
-        self.db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        self.db.execute("CREATE TABLE IF NOT EXISTS operations (key TEXT PRIMARY KEY, status TEXT NOT NULL, receipt TEXT, at TEXT NOT NULL)")
-        self.db.execute("CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, command TEXT, started TEXT, ended TEXT, status TEXT, error_type TEXT)")
-        self.db.commit()
+        self.db = database.connect(path, "state")
 
     def get(self, key, default=None):
         row = self.db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()

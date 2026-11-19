@@ -26,8 +26,7 @@ KNOWN_CYCLIC = {
     "sessions", "worker", "meeting_review", "memory",
 }
 # Modules that still open SQLite themselves instead of going through db.py.
-KNOWN_CONNECTS = {"activity", "app", "cindy_pickup", "commands", "inbox", "itemstore", "local_sessions", "memory",
-                  "monitor", "proactive", "state", "thread"}
+KNOWN_CONNECTS = set()
 
 
 class ArchitectureTest(unittest.TestCase):

@@ -22,10 +22,7 @@ MAX_CHATS = 25
 
 
 def table(state):
-    state.db.execute("""CREATE TABLE IF NOT EXISTS chat_candidates (
-        message_id TEXT PRIMARY KEY, chat_id TEXT, chat_name TEXT, chat_mode TEXT, sender_id TEXT,
-        sender_name TEXT, sent_at TEXT, text TEXT, context TEXT, kind TEXT, status TEXT, batch TEXT)""")
-    state.db.commit()
+    """Kept for callers; the table itself is defined in db.py."""
 
 
 def skipped_chat(config, name):
