@@ -153,7 +153,8 @@ def build_state(root):
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
                 "engine": thread.setting(root, "engine", "codex"),
-                "prework_enabled": _config_flag(root, "prework_enabled")}
+                "prework_enabled": _config_flag(root, "prework_enabled"),
+                "worker_mcp": _config_flag(root, "worker_mcp_tools")}
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
@@ -354,13 +355,15 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "engine", body["engine"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
-                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body:
+                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body or "worker_mcp" in body:
                     from .config import load, save  # config.yaml: the listener and worker read these there
                     config = load(root / "config.yaml")
                     if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):
                         config.chat_review_every_minutes = body["chat_review_every_minutes"]
                     if "prework_enabled" in body:
                         config.prework_enabled = bool(body["prework_enabled"])
+                    if "worker_mcp" in body:
+                        config.worker_mcp_tools = ["*"] if body["worker_mcp"] else []
                     save(root / "config.yaml", config)
                     if config.prework_enabled and body.get("prework_enabled"):
                         from .worker import kick  # start on the waiting AI items now, not at the next 2-minute tick
