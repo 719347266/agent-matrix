@@ -259,6 +259,29 @@ class Listener:
         except Exception as exc:
             log("worker kick failed", type(exc).__name__, str(exc)[:200])
 
+    def meeting_check(self, config, client, state, now):
+        """Runs every minute: finds finished meetings on the meeting_watch schedule (every 5 minutes while
+        Feishu does not push meeting events) and starts the AI employee as soon as a transcript is ready.
+        Returns the meetings that just became ready (empty when nothing happened, so the log stays quiet).
+        A failure here is recorded and never stops the other minute jobs."""
+        if not config.meeting_watch_enabled:
+            return None
+        from .meeting_watch import MeetingQueue, MeetingSource, check
+        from . import activity
+        queue = MeetingQueue(state)
+        before = {r["meeting_id"]: r["status"] for r in queue.list()}
+        try:
+            check(config, MeetingSource(client), queue, now)
+        except Exception as exc:
+            activity.log(self.root, "error", "会议检查出错", detail=f"{type(exc).__name__}: {exc}"[:300], status="failed")
+            return None
+        rows = queue.list()
+        activity.beat(self.root, "会议检查", f"待处理 {sum(r['status'] in {'ready', 'prepared', 'needs_attention'} for r in rows)} 场")
+        new = [r["meeting_id"] for r in rows if r["status"] in {"ready", "needs_attention"} and before.get(r["meeting_id"]) != r["status"]]
+        if new:
+            self.wake_worker(config, force=True)
+        return new
+
     SCHEDULE = [("recurring", (6, 0), False), ("morning", (8, 30), True), ("evening", (21, 0), True)]
 
     def fixed_times(self):
@@ -296,6 +319,7 @@ class Listener:
                     out["weekly"] = weekly_review.run(config, client, state, now)
                 from . import monitor
                 out["cindy_alert"] = monitor.alert_if_cindy_stalled(self.root, client, state, now)
+                out["meetings"] = self.meeting_check(config, client, state, now)
                 return out
             jobs.append(("minute", minute))
         if self.every("snapshot", 120):

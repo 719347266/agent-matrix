@@ -56,7 +56,7 @@ if head == ["vc", "+detail"]:
     m = world.get("meetings", {}).get(mid)
     ok({"meetings": [m] if m else [{"meeting_id": mid, "error": "not_found"}]})
 if head == ["vc", "+search"]:
-    ok({"items": [], "has_more": False})
+    ok({"items": [{"id": mid, "meta_data": {"app_link": ""}} for mid in world.get("search", [])], "has_more": False})
 if head == ["calendar", "+agenda"]:
     ok([])
 if head == ["calendar", "+get"]:

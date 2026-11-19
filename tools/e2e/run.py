@@ -428,6 +428,38 @@ def scenario_page(made):
     check(S, "页面数据能生成，含刚才的事项", f"渠道复盘报告" in blob and str(ai.get("n")) in blob, len(blob))
 
 
+def scenario_polling():
+    print("\n[10] 没有会议推送：监听每分钟的定时检查自己发现刚结束的会议", flush=True)
+    S = "无推送轮询"
+    from agent_matrix.state import State
+    mid, note = "9000000000000000010", "sbx-note-10"
+    start = (NOW - timedelta(minutes=45)).replace(microsecond=0)
+    world(lambda w: (w["meetings"].__setitem__(mid, {"meeting_id": mid, "topic": "【测试】没推送的会", "start_time": start.isoformat(),
+                                                     "end_time": (NOW - timedelta(minutes=3)).replace(microsecond=0).isoformat(),
+                                                     "note_id": note}),
+                     w["transcripts"].__setitem__(note, "[00:00:05] 测试\n"),
+                     w.__setitem__("search", [mid])))
+
+    def at(minutes_ago):
+        state = State(ROOT / "state/state.db")
+        try:
+            state.set("listen:heartbeat", datetime.now(TZ).isoformat())
+            state.set("listen:status", {"vc.meeting.participant_meeting_ended_v1": "not_subscribed",
+                                        "vc.note.generated_v1": "not_subscribed", "im.message.receive_v1": "live"})
+            state.set("meeting_watch:last_search", (datetime.now(TZ) - timedelta(minutes=minutes_ago)).isoformat())
+        finally:
+            state.close()
+        return LISTENER.locked(lambda c, cl, s: LISTENER.meeting_check(c, cl, s, datetime.now(TZ)))
+
+    r = at(2)
+    check(S, "上次搜索才 2 分钟：不去搜，会议还没被发现", r == [] and meeting_row(mid) is None, r)
+    r = at(6)
+    check(S, "超过 5 分钟：自己搜到这场会，逐字稿已有就直接就绪", r == [mid] and meeting_row(mid)[0] == "ready", {"new": r, "row": meeting_row(mid)})
+    r = at(6)
+    check(S, "下一分钟再查：不重复报告、不重复排队", r == [] and meeting_row(mid)[0] == "ready", r)
+    world(lambda w: w.__setitem__("search", []))
+
+
 def lifecycle_and_errors():
     print("\n[9] 运行日志：状态流转与错误", flush=True)
     S = "运行日志"
@@ -460,7 +492,7 @@ if __name__ == "__main__":
             step(made)
         except Exception:
             check(step.__name__, "场景运行出错", False, traceback.format_exc()[-600:])
-    for step in (scenario_feishu_task, scenario_idle, lambda: scenario_page(made), lifecycle_and_errors):
+    for step in (scenario_feishu_task, scenario_idle, lambda: scenario_page(made), scenario_polling, lifecycle_and_errors):
         try:
             step()
         except Exception:
