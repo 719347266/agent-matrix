@@ -152,37 +152,6 @@ def import_rows(root, rows, fields):
         db.close()
 
 
-def ensure(client, state=None):
-    """Import the Feishu table the first time the local store is used."""
-    root = Path(client.root)
-    if state is not None and feishu_free(client.config) and state.get("brief-v1:migration-stage") != "v1_active":
-        # Items kept only here are always in the current shape (执行方, 补充材料…); there is no Feishu table to migrate.
-        state.set("brief-v1:migration-stage", "v1_active")
-    if imported(root):
-        return
-    from .schema import FIELDS
-    if feishu_free(client.config):
-        import_rows(root, [], list(FIELDS))  # nothing to import: start empty
-        return
-    from .records import read_remote
-    from .state import State
-    names = list(FIELDS)
-    try:
-        listed = client.call("+field-list", "--base-token", client.config.base_token,
-                             "--table-id", client.config.tables["事项表"])
-        from .bitable import items as listed_items
-        found = [f.get("field_name") or f.get("name") for f in listed_items(listed)]
-        names = list(dict.fromkeys([*names, *[n for n in found if n]]))
-    except Exception:
-        pass
-    own = state is None
-    state = state or State(root / "state/state.db")
-    try:
-        rows = read_remote(client, state, "事项表", names)
-    finally:
-        if own:
-            state.close()
-    import_rows(root, rows, names)
 
 
 # ---- read and write -------------------------------------------------------------------------------------
@@ -250,10 +219,11 @@ def create(root, fields):
 
 
 def apply_call(client, command, args):
-    """What `base +record-batch-update/-create` on the item table does, done locally (instant)."""
+    """What `base +record-batch-update/-create` on the item table does, done locally (instant).
+
+    The caller has made sure the store holds the items already (records.ensure_local)."""
     args = list(args)
     body = json.loads(args[args.index("--json") + 1])
-    ensure(client)
     root = Path(client.root)
     if command == "+record-batch-update":
         done = [update(root, rid, patch) for rid, patch in (body.get("update_records") or {}).items()]
@@ -387,41 +357,3 @@ def queue_all(root):
         db.close()
 
 
-def choose(root, mode):
-    """The owner picks where items are recorded: "feishu" (Feishu table backup), "notion" (connect first,
-    see notion.connect) or "device" (this computer only)."""
-    from .config import load, save
-    root = Path(root)
-    path = root / "config.yaml"
-    config = load(path)
-    if mode == "notion":
-        if not (config.notion_token and config.notion_database_id):
-            raise MatrixError("先连接 Notion。")
-    elif mode == "feishu":
-        if not config.base_token or config.tables.get("事项表") in (None, "local"):
-            raise MatrixError("飞书还没初始化：先装好 lark-cli 并运行 setup。")
-        db = _db(root)
-        try:
-            local_only = db.execute("SELECT count(*) FROM items WHERE record_id LIKE 'recL%' AND record_id NOT IN "
-                                    "(SELECT local_id FROM idmap)").fetchone()[0]
-        finally:
-            db.close()
-        if local_only:  # ponytail: no catch-up of items made while away from Feishu; add a create-from-row backup if needed
-            raise MatrixError(f"有 {local_only} 件事项只在本机，飞书表格里没有，暂不能切回飞书。")
-        mode = "local"
-    elif mode != "device":
-        raise MatrixError("只能选 飞书 / Notion / 本机。")
-    if not imported(root) and config.item_store == "feishu" and config.base_token:
-        from .feishu import Feishu  # items still live in the Feishu table: bring them home first
-        client = Feishu(config, root)
-        client.verify_owner(client.auth())
-        config.item_store = "local"
-        ensure(client)
-    if not imported(root) and mode != "local":
-        from .schema import FIELDS
-        import_rows(root, [], list(FIELDS))  # never used Feishu: start empty
-    if mode == "notion":
-        queue_all(root)
-    config.item_store = mode
-    save(path, config)
-    return mode

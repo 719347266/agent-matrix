@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import re
 
-from .values import single
+from .values import single, number, validate_registry  # noqa: F401
 from .bitable import items, js, require_owned
 from .config import load
 from .feishu import Feishu
@@ -49,26 +49,8 @@ def canonical_status(value):
     return STATUS_MAP[state]
 
 
-def number(value):
-    if isinstance(value, bool) or not isinstance(value, (str, int)) or not re.fullmatch(r"[1-9][0-9]*", str(value)):
-        raise MatrixError("编号必须是平台生成的正整数；不猜测或按列表位置重编号。")
-    return int(value)
 
 
-def validate_registry(rows, previous=None):
-    """Preserve tombstones so deletion/recreation can never silently reuse an ID."""
-    old = previous or {"by_record": {}, "by_number": {}}
-    by_record, by_number = dict(old["by_record"]), dict(old["by_number"])
-    seen_records, seen_numbers = set(), set()
-    for row in rows:
-        rid, n = row.get("record_id"), number(row.get("编号"))
-        if not isinstance(rid, str) or not rid or rid in seen_records or n in seen_numbers:
-            raise MatrixError("事项或编号缺失／重复；停止建立编号映射。")
-        if (rid in by_record and by_record[rid] != n) or (str(n) in by_number and by_number[str(n)] != rid):
-            raise MatrixError("检测到编号重置或复用；保留原编号登记，不覆盖。")
-        seen_records.add(rid); seen_numbers.add(n)
-        by_record[rid], by_number[str(n)] = n, rid
-    return {"by_record": by_record, "by_number": by_number}
 
 
 def check_schema(actual, expected):

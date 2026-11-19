@@ -178,7 +178,7 @@ def validate(config, review, root):
             if not a.due_phrase or a.due_phrase not in m["text"]:
                 raise MatrixError(f"「{a.title}」的截止日缺少原话。")
             sent = datetime.fromisoformat(m["sent_at"].replace(" ", "T")) if m.get("sent_at") else datetime.now(TZ)
-            from .reply import parse_date
+            from .timeutil import parse_date
             found = parse_date(a.due_phrase.rstrip("前之"), sent.date())
             if not found or found.isoformat() != a.due_date:
                 raise MatrixError(f"「{a.title}」的截止日和原话换算不一致。")

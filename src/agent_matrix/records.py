@@ -2,14 +2,16 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from . import itemstore
 from .bitable import items, require_owned
 from .models import MatrixError
+from .schema import FIELDS
+from .state import State
 
 
 def ensure_fields(client, table_name, fields):
     if table_name not in client.config.tables:
         raise MatrixError("尚未绑定表格：" + table_name)
-    from . import itemstore
     if table_name=="事项表" and itemstore.feishu_free(client.config):
         return  # ponytail: items live only in items.db, which always carries every field
     actual=items(client.call("+field-list","--base-token",client.config.base_token,
@@ -22,10 +24,9 @@ def ensure_fields(client, table_name, fields):
 
 def read_records(client, state, table_name, fields):
     """The item table comes from the local store when `item_store: local` (instant); others from Feishu."""
-    from . import itemstore
     require_owned(client.config,state)
     if table_name=="事项表" and itemstore.enabled(client.config) and getattr(client,"use_local_items",True):
-        itemstore.ensure(client,state)
+        ensure_local(client,state)
         return itemstore.rows(client.root,fields)
     return read_remote(client,state,table_name,fields)
 
@@ -69,3 +70,32 @@ def read_remote(client, state, table_name, fields):
                 raise MatrixError("分页游标异常。")
             offset=following
     raise MatrixError("超过单轮读取上限，不返回不完整结果。")
+
+
+def ensure_local(client, state=None):
+    """Import the Feishu table the first time the local store is used."""
+    root = Path(client.root)
+    if state is not None and itemstore.feishu_free(client.config) and state.get("brief-v1:migration-stage") != "v1_active":
+        # Items kept only here are always in the current shape (执行方, 补充材料…); there is no Feishu table to migrate.
+        state.set("brief-v1:migration-stage", "v1_active")
+    if itemstore.imported(root):
+        return
+    if itemstore.feishu_free(client.config):
+        itemstore.import_rows(root, [], list(FIELDS))  # nothing to import: start empty
+        return
+    names = list(FIELDS)
+    try:
+        listed = client.call("+field-list", "--base-token", client.config.base_token,
+                             "--table-id", client.config.tables["事项表"])
+        found = [f.get("field_name") or f.get("name") for f in items(listed)]
+        names = list(dict.fromkeys([*names, *[n for n in found if n]]))
+    except Exception:
+        pass
+    own = state is None
+    state = state or State(root / "state/state.db")
+    try:
+        rows = read_remote(client, state, "事项表", names)
+    finally:
+        if own:
+            state.close()
+    itemstore.import_rows(root, rows, names)

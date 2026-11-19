@@ -136,7 +136,8 @@ class Feishu:
         if command not in allowed or "--yes" in args:
             raise MatrixError("命令不在当前框架允许范围内。")
         if command in {"+record-batch-update", "+record-batch-create"} and self.local_items(args):
-            from . import itemstore
+            from . import itemstore, records
+            records.ensure_local(self)  # first use: bring the Feishu table home before writing locally
             return itemstore.apply_call(self, command, args)  # 心响 local store; Feishu gets it via backup
         argv = ["base", command, *args, "--as", "user", "--format", "json"]
         if write:

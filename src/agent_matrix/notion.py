@@ -128,7 +128,7 @@ def push(config, *, api=call):
 def connect(root, tok, link, *, api=call):
     """Check the secret, create the 心响事项 database under the shared page, switch items to Notion and queue
     every existing item for the first copy. Never echoes the secret back."""
-    from . import itemstore
+    from . import itemstore, storemode
     from .config import load, save
     from .schema import FIELDS
     tok = (tok or "").strip()
@@ -143,7 +143,7 @@ def connect(root, tok, link, *, api=call):
     config = load(path)
     config.notion_token, config.notion_database_id = tok, made["id"]
     save(path, config)
-    itemstore.choose(root, "notion")
+    storemode.choose(root, "notion")
     from .state import State
     state = State(root / "state/state.db")
     try:

@@ -10,7 +10,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from .bitable import js, require_owned
-from .brief_migration import single, number, validate_registry
+from .values import single, number, validate_registry
 from .schema import SOURCE_FIELDS  # noqa: F401
 from .models import MatrixError
 from .records import read_records

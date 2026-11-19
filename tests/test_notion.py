@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from agent_matrix import inbox, itemstore, notion
+from agent_matrix import inbox, itemstore, notion, records, storemode
 from agent_matrix.config import load, save
 from agent_matrix.feishu import Feishu
 from agent_matrix.models import Config, MatrixError
@@ -79,10 +79,10 @@ class NotionTests(unittest.TestCase):
 
     def test_choices_check_what_they_need(self):
         with self.assertRaises(MatrixError):
-            itemstore.choose(self.root, "notion")   # not connected yet
+            storemode.choose(self.root, "notion")   # not connected yet
         with self.assertRaises(MatrixError):
-            itemstore.choose(self.root, "feishu")   # Feishu never set up
-        self.assertEqual(itemstore.choose(self.root, "device"), "device")
+            storemode.choose(self.root, "feishu")   # Feishu never set up
+        self.assertEqual(storemode.choose(self.root, "device"), "device")
         self.assertTrue(itemstore.imported(self.root))
         with self.assertRaises(MatrixError):
             notion.connect(self.root, "xoxp-wrong", "https://www.notion.so/0123456789abcdef0123456789abcdef", api=FakeNotion())
@@ -107,7 +107,7 @@ class NotionTests(unittest.TestCase):
         save(self.root / "config.yaml", config)
         state = State(self.root / "state/state.db")
         try:
-            itemstore.ensure(Feishu(config, self.root, runner=no_lark), state)
+            records.ensure_local(Feishu(config, self.root, runner=no_lark), state)
             self.assertEqual(state.get("brief-v1:migration-stage"), "v1_active")
         finally:
             state.close()

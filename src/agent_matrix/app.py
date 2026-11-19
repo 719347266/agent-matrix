@@ -437,11 +437,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if path in ("/api/store", "/api/notion/connect"):
                 from .models import MatrixError
-                from . import itemstore, notion
+                from . import notion, storemode
                 try:
                     if path == "/api/notion/connect":
                         return self._send(200, {"ok": True, **notion.connect(root, body.get("token"), body.get("page"))})
-                    return self._send(200, {"ok": True, "mode": itemstore.choose(root, body.get("mode"))})
+                    return self._send(200, {"ok": True, "mode": storemode.choose(root, body.get("mode"))})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 except OSError:

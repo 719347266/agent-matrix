@@ -12,12 +12,11 @@ import archmap  # noqa: E402
 
 # Imports that still reach into a higher layer: (from, to).
 KNOWN_UPWARD = {
-    ("itemstore", "bitable"), ("itemstore", "feishu"), ("itemstore", "records"), ("reply", "worker"),
+    ("reply", "worker"),
 }
 # Modules still inside an import cycle.
 KNOWN_CYCLIC = {
-    "bitable", "feishu", "itemstore", "records", "brief_migration", "workflow", "chat_review", "drive",
-    "local_sessions", "reply", "sessions", "worker",
+    "drive", "local_sessions", "sessions", "worker",
 }
 # Modules that still open SQLite themselves instead of going through db.py.
 KNOWN_CONNECTS = set()
