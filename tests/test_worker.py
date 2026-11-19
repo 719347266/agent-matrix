@@ -236,8 +236,10 @@ class ConversationTests(unittest.TestCase):
             self.assertEqual(servers, ["claude_ai_Notion", "pencil", "plugin_chrome-devtools-mcp_chrome-devtools"])  # connected only
             with patch.object(worker, "mcp_servers", lambda binary: servers):
                 every = ClaudeRun(Config(worker_claude=str(fake), worker_mcp_tools=["*"]), work).argv()
-            self.assertIn("mcp__claude_ai_Notion__* mcp__pencil__*", every[every.index("--allowedTools") + 1])
+            self.assertIn("mcp__pencil__* mcp__plugin_chrome-devtools-mcp_chrome-devtools__*", every[every.index("--allowedTools") + 1])
             self.assertIn("mcp__*send*", every[every.index("--disallowedTools") + 1])  # never sends on its own
+            self.assertNotIn("claude_ai_Notion", every[every.index("--allowedTools") + 1])  # plugins + local MCP only
+            self.assertEqual(ClaudeRun(Config(worker_mcp_tools=["*"]), work).env()["ENABLE_CLAUDEAI_MCP_SERVERS"], "false")
             root = Path(tmp) / "root"
             self.assertEqual(engine(root).NAME, "本机 GPT")           # default stays GPT
             conversation.set_setting(root, "engine", "claude")

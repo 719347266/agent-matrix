@@ -61,6 +61,7 @@ class Config(BaseModel):
     # MCP tools the local Claude may use while working, e.g. ["mcp__claude_ai_Notion__notion-fetch"]. Empty = none
     # (safe mode). Non-empty: the owner's own hooks/plugins stay off, only these MCP tools are allowed.
     worker_mcp_tools: list[str] = Field(default_factory=list)
+    worker_claudeai_mcp: bool = False  # also the claude.ai connectors (they shadow same-server plugins until signed in)
     worker_concurrency: int = Field(default=10, ge=1, le=20)  # jobs the built-in GPT works on at the same time
 
     @model_validator(mode="after")
