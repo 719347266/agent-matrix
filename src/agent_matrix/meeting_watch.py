@@ -151,12 +151,23 @@ def ingest(config, source, queue, mid, now):
     return queue.get(mid)["status"]
 
 
+MEETING_PUSH = ("vc.meeting.participant_meeting_ended_v1", "vc.note.generated_v1")
+SEARCH_WITH_PUSH = timedelta(minutes=30)
+SEARCH_WITHOUT_PUSH = timedelta(minutes=5)
+
+
 def _search_due(queue, now):
-    """Full re-scan every 30 minutes; in between the listener pushes new meetings."""
+    """Full re-scan every 30 minutes while the listener receives meeting pushes; every 5 minutes when those
+    pushes are not live (e.g. the Feishu tenant offers no user-identity meeting events), so a finished meeting
+    is still picked up within minutes. Without a running listener: every check."""
     last = queue.state.get("meeting_watch:last_search")
     beat = queue.state.get("listen:heartbeat")
     listening = beat and now - parse_time(beat) < timedelta(minutes=3)
-    return not listening or not last or now - parse_time(last) >= timedelta(minutes=30)
+    if not listening or not last:
+        return True
+    status = queue.state.get("listen:status") or {}
+    pushed = all(status.get(key) == "live" for key in MEETING_PUSH)
+    return now - parse_time(last) >= (SEARCH_WITH_PUSH if pushed else SEARCH_WITHOUT_PUSH)
 
 
 def check(config, source, queue, now):

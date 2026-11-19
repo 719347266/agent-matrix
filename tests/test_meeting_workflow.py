@@ -204,3 +204,44 @@ class MeetingWorkflowTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+class SearchIntervalTests(unittest.TestCase):
+    """How often Feishu is searched for finished meetings: 30 min with live meeting pushes, 5 min without."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = State(Path(self.tmp.name) / "state.db")
+        self.addCleanup(self.state.close)
+        self.queue = MeetingQueue(self.state)
+        self.now = datetime(2026, 11, 19, 17, 0, tzinfo=TZ)
+        self.state.set("listen:heartbeat", (self.now - timedelta(seconds=30)).isoformat())
+
+    def due(self, minutes_since_search, status):
+        from agent_matrix.meeting_watch import _search_due
+        self.state.set("meeting_watch:last_search", (self.now - timedelta(minutes=minutes_since_search)).isoformat())
+        self.state.set("listen:status", status)
+        return _search_due(self.queue, self.now)
+
+    def test_without_meeting_pushes_search_every_five_minutes(self):
+        status = {"vc.meeting.participant_meeting_ended_v1": "not_subscribed", "vc.note.generated_v1": "not_subscribed",
+                  "im.message.receive_v1": "live"}
+        self.assertFalse(self.due(4, status))
+        self.assertTrue(self.due(5, status))
+
+    def test_one_meeting_push_missing_still_means_five_minutes(self):
+        status = {"vc.meeting.participant_meeting_ended_v1": "live", "vc.note.generated_v1": "error 1"}
+        self.assertTrue(self.due(6, status))
+
+    def test_with_both_meeting_pushes_live_search_every_thirty_minutes(self):
+        status = {"vc.meeting.participant_meeting_ended_v1": "live", "vc.note.generated_v1": "live"}
+        self.assertFalse(self.due(29, status))
+        self.assertTrue(self.due(30, status))
+
+    def test_listener_down_or_first_run_searches_every_time(self):
+        from agent_matrix.meeting_watch import _search_due
+        self.assertTrue(_search_due(self.queue, self.now))  # never searched yet
+        self.state.set("meeting_watch:last_search", self.now.isoformat())
+        self.state.set("listen:heartbeat", (self.now - timedelta(minutes=10)).isoformat())
+        self.assertTrue(_search_due(self.queue, self.now))
