@@ -596,26 +596,53 @@ const byDue=(a,b)=>(a.due||"9")>(b.due||"9")?1:(a.due||"9")<(b.due||"9")?-1:a.n-
 /* ---------- pages ---------- */
 const REPORTS=new Set(["brief","prep","weekly"]);   // read as a whole message, even when only one item is in it
 const itemOf = m => !REPORTS.has(m.kind)&&(m.refs||[]).length===1&&byN(m.refs[0]);
+/* What one message means to the owner, in plain words: [label, colour, title, one line under it]. */
+function inboxText(m,one){
+  const t=String(m.title||""), src=t.includes(" · ")?t.split(" · ")[0]:"", lead=cleanHint(leadOf(m).replace(MD_LINKS,"").trim());
+  const name=one?`#${one.n} ${one.title}`:t;
+  if(m.kind==="done") return ["AI 交付","amber",name,one?(one.status==="待验收"?"AI 做完了，等你验收":`AI 交付过，现在：${statusOf(one)[0]}`):"AI 做完了，等你验收"];
+  if(m.kind==="blocked") return ["AI 问你","red",name,one&&one.blocker?one.blocker:lead];
+  if(m.kind==="new") return ["新事项","violet",one?name:t.split("：")[0],one?(src?`来自${src}`:""):(m.refs||[]).map(n=>"#"+n).join(" ")];
+  if(m.kind==="prep") return ["会议","",t,meetingSoon(m)?"快开始了":"会前提醒"];
+  if(/校验拦掉|和录音对不上/.test(t)) return ["提示","",t.replace(/^⚠\s*/,"").replace(/有内容被校验拦掉了.*/,"有几条内容和录音对不上，没有采用"),"点开看是哪几条"];
+  if(/已并入/.test(t)) return ["会议","",t.replace(" · 另有 ","：").replace("是已有的事，已并入","并进了已有的"),"没有新增事项"];
+  const [k,c]=kindOf(m); return [k,c,name,lead];
+}
+const meetingSoon = m => Date.now()-new Date(m.at).getTime() < 45*60000;          // sent ~30 minutes before the meeting
+/* need: the owner has to do something now.  today / earlier: just so you know. */
+function inboxBucket(m){
+  const when=String(m.at||"").slice(0,10)===TODAY?"today":"old";
+  // waiting on the owner only while one of its items still is: an approved or answered one is history
+  if(m.kind==="done"||m.kind==="blocked") return (m.refs||[]).map(byN).some(i=>i&&["待验收","卡住"].includes(i.status))?"need":when;
+  if(m.kind==="prep") return meetingSoon(m)?"need":"old";
+  if(m.kind==="system"&&String(m.title).startsWith("⚠")&&!/校验拦掉|和录音对不上/.test(m.title)&&!m.read) return "need";
+  return when;
+}
+function inboxRow(m,list){
+  const one=itemOf(m), unread=one?unreadOf(one.n).length>0:!m.read, more=one?list.filter(x=>itemOf(x)===one).length-1:0;
+  const [k,c,title,sub]=inboxText(m,one), opens=!one&&hasBody(m), open=opens&&S.openMsg===m.id;
+  const click=one?`openItem(${one.n})`:opens?`openMsg(${m.id})`:"";
+  const join=m.kind==="prep"&&meetingSoon(m)&&(leadOf(m).match(MD_LINK)||[])[2];
+  const acts=join?`<a class="btn pri" href="${esc(join)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">进入会议</a>`
+    :one?rowButtons(one).map(b=>btn(one,b)).join(""):opens?`<span class="fold">${open?"收起":"展开"}</span>`:"";
+  return `<div class="row ev ${unread?"unread":""} ${one&&S.item===one.n||open?"sel":""} ${click?"":"flat"}" ${click?`onclick="${click}"`:""} ${opens?`aria-expanded="${open}"`:""}><span class="ud"></span><span class="pill ${c}" style="justify-self:start">${k}</span>
+      <div style="min-width:0"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}${more>0?`　另有 ${more} 条`:""}</div></div>
+      <div class="meta"><span class="ago">${esc(ago(m.at))}</span></div><div class="acts">${acts}</div></div>${one?inlineForm(one):open?msgBody(m):""}`;
+}
 function inboxPage(){
-  const tab=S.inboxTab||(unreadCount()?"未读":"全部");
-  const list=D.inbox.filter(m=>tab==="未读"?!m.read||m.id===S.openMsg:true);  // opening marks it read; it stays open
-  // one row per item: its newest message, unread if any of its messages is
-  const seen=new Set(), rows=[];
-  for(const m of list){
-    const one=itemOf(m);
-    const key=one?"n"+one.n:"m"+m.id;
+  const all=S.inboxTab==="全部";
+  // one row per item: its newest message
+  const seen=new Set(), groups={need:[],today:[],old:[]};
+  for(const m of D.inbox){
+    const one=itemOf(m), key=one?"n"+one.n:"m"+m.id;
     if(seen.has(key)) continue; seen.add(key);
-    const unread=one?unreadOf(one.n).length>0:!m.read, more=one?list.filter(x=>itemOf(x)===one).length-1:0;
-    const [k,c]=kindOf(m), opens=!one&&hasBody(m), open=opens&&S.openMsg===m.id;
-    const click=one?`openItem(${one.n})`:opens?`openMsg(${m.id})`:"";
-    const lead=one?m.title:leadOf(m).replace(MD_LINKS,"$1");
-    rows.push(`<div class="row ev ${unread?"unread":""} ${one&&S.item===one.n||open?"sel":""} ${click?"":"flat"}" ${click?`onclick="${click}"`:""} ${opens?`aria-expanded="${open}"`:""}><span class="ud"></span><span class="pill ${c}" style="justify-self:start">${k}</span>
-      <div style="min-width:0"><div class="t">${esc(one?`#${one.n} ${one.title}`:m.title)}</div><div class="s">${esc(lead)}${more>0?`　另有 ${more} 条`:""}</div></div>
-      <div class="meta"><span class="ago">${esc(ago(m.at))}</span></div><div class="acts">${one?rowButtons(one).map(b=>btn(one,b)).join(""):opens?`<span class="fold">${open?"收起":"展开"}</span>`:""}</div></div>${one?inlineForm(one):open?msgBody(m):""}`);
+    groups[inboxBucket(m)].push(inboxRow(m,D.inbox));
   }
-  const tabs=["未读","全部"].map(k=>`<button class="chip ${k===tab?"on":""}" onclick="S.inboxTab='${k}';render()">${k}${k==="未读"&&unreadCount()?` ${unreadCount()}`:""}</button>`).join("");
+  const sec=(title,rows,empty)=>rows.length||empty?`<div class="sec-h">${title}<span class="n">${rows.length||""}</span></div><div class="list">${rows.join("")||`<div class="empty">${empty}</div>`}</div>`:"";
+  const tabs=[["","最近"],["全部","全部"]].map(([k,l])=>`<button class="chip ${(all?"全部":"")===k?"on":""}" onclick="S.inboxTab='${k}';render()">${l}</button>`).join("");
   return `<div class="chips" style="align-items:center">${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
-    <div class="list">${rows.join("")||`<div class="empty">${tab==="未读"?"没有新动态。新进来的事、AI 交付和提问都会出现在这里。":"还没有消息"}</div>`}</div>`;
+    ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天发生的",groups.today,all?"":"今天还没有新动态。")}
+    ${all?sec("更早",groups.old,""):groups.old.length?`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxTab='全部';render();return false">查看更早的 ${groups.old.length} 条</a></p>`:""}`;
 }
 function openMsg(id){ const m=D.inbox.find(x=>x.id===id); if(!m) return; if(!m.read){ m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); announce(); } S.openMsg=S.openMsg===id?null:id; render(); }
 
@@ -1293,7 +1320,7 @@ function render(){
 // "#item-61" (a notification, the menu or a link) opens that item; "#inbox" opens the inbox.
 function openFromHash(){
   const h=location.hash;
-  if(h==="#inbox"&&D){ history.replaceState(null,"",location.pathname+location.search); S.view="inbox"; S.inboxTab="未读"; S.q=""; render(); return true; }
+  if(h==="#inbox"&&D){ history.replaceState(null,"",location.pathname+location.search); S.view="inbox"; S.inboxTab=""; S.q=""; render(); return true; }
   const m=h.match(/^#item-(\d+)$/);
   if(!m||!D||!byN(+m[1])) return false;
   history.replaceState(null,"",location.pathname+location.search);

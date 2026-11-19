@@ -116,5 +116,19 @@ function reset(item) {
   assert.match(page,/onclick="openItem\(9\)"/); assert.match(page,/逾期1天/);
   assert.doesNotMatch(page,/回复：/);
   assert.match(page,/>看板 ↗/);
+  // The inbox sorts by what the owner has to do, and says it in plain words.
+  evaluate(`TODAY="2026-11-17"; D.items=[{n:65,title:"标签更新",status:"待验收",who:"AI"},{n:66,title:"付费归因",status:"完成",who:"AI"},{n:74,title:"加到总表",status:"未开始",who:"AI"}];
+    D.inbox=[{id:1,at:"2026-11-17T09:00:00",kind:"done",title:"AI 做完了，请你验收",refs:[65],read:true,blocks:[]},
+             {id:2,at:"2026-11-17T09:01:00",kind:"done",title:"AI 做完了，请你验收",refs:[66],read:true,blocks:[]},
+             {id:3,at:"2026-11-17T09:02:00",kind:"new",title:"聊天 · 新增 1 件：AI #74",text:"回复：展开 74 看原话",refs:[74],read:true,blocks:[]},
+             {id:4,at:"2026-11-16T12:29:00",kind:"prep",title:"13:00 复盘会",text:"30 分钟后开始",refs:[],read:true,blocks:[]},
+             {id:5,at:"2026-11-17T12:46:00",kind:"system",title:"⚠ 会议「例会」有内容被校验拦掉了，可能漏了待办",text:"去掉 1 条",refs:[],read:true,blocks:[]}]; S.inboxTab="";`);
+  assert.deepEqual(plain("D.inbox.map(inboxBucket)"), ["need","today","today","old","today"]);
+  assert.equal(evaluate('inboxBucket({kind:"blocked",at:"2026-11-15T09:00:00",title:"AI 卡住，需要你补材料",refs:[]})'),"old","an old question about an item that is gone asks nothing of the owner");
+  page=evaluate("inboxPage()");
+  assert.match(page,/要你处理[\s\S]*#65 标签更新[\s\S]*今天发生的[\s\S]*#74 加到总表/);
+  assert.match(page,/来自聊天/); assert.match(page,/和录音对不上，没有采用/); assert.match(page,/查看更早的 1 条/);
+  assert.doesNotMatch(page,/校验拦掉|展开 74 看原话|13:00 复盘会/);
+  assert.match(evaluate('S.inboxTab="全部"; inboxPage()'),/更早[\s\S]*13:00 复盘会/);
   console.log("Client checks passed: new, running, cancel, restore, complete, closed-item conversation, stale status, concurrency copy, briefs opened in the inbox.");
 })().catch(e => { console.error(e); process.exitCode=1; });

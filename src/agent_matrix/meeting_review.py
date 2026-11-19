@@ -396,8 +396,8 @@ def publish(config, client, state, review):
     if dropped:  # never lose what the AI found without saying so
         from . import inbox
         inbox.add(client.root,"meeting-dropped:"+review.meeting_id,
-                  f"⚠ 会议「{meta.get('topic') or '会议'}」有内容被校验拦掉了，可能漏了待办\n"+"\n".join(dropped[:8])
-                  +"\n原话和逐字稿对不上才会被拦。要找回，把会议名发给维护心响的 AI 看一下。",kind="system")
+                  f"会议「{meta.get('topic') or '会议'}」有几条内容和录音对不上，没有采用\n"+"\n".join(dropped[:8])
+                  +"\nAI 整理出的这几条，在录音文字里找不到对应的原话，所以没有记成事项。如果确实漏了事，直接新建一条就行。",kind="system")
         activity.log(client.root,"error",f"会议「{meta.get('topic') or '会议'}」校验拦掉了 {len(dropped)} 处内容",detail="；".join(dropped),status="failed")
     try:  # 经历层: what was decided, asked, required and left waiting, with the words (and old waiting topics come back)
         from . import memory

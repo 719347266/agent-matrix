@@ -148,7 +148,8 @@ def add(root, key, content, *, kind=None):
 def messages(root, limit=100, unread_only=False):
     db = _db(root)
     try:
-        rows = db.execute("SELECT id, at, kind, title, summary, blocks, read FROM messages WHERE key!='history-imported' " +
+        rows = db.execute("SELECT id, at, CASE WHEN key LIKE 'prep-%' THEN 'prep' ELSE kind END, title, summary, blocks, read "
+                          "FROM messages WHERE key!='history-imported' AND key NOT LIKE 'banner-test-%' AND key NOT LIKE 'test-alert-%' " +
                           ("AND read=0 " if unread_only else "") + "ORDER BY at DESC, id DESC LIMIT ?", (limit,)).fetchall()
     finally:
         db.close()
