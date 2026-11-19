@@ -7,6 +7,7 @@
 """
 from datetime import datetime, timedelta
 
+from .. import activity
 from ..brief_migration import number, single
 from ..models import MatrixError
 
@@ -96,8 +97,8 @@ def sync(config, client, state, now, *, notify=True):
             try:
                 from ..thread import closed
                 closed(client.root, row["record_id"], "你", "在飞书任务里勾了完成")
-            except Exception:
-                pass
+            except Exception as exc:
+                activity.swallowed(client.root, "sources.feishu_tasks.sync", exc)
     if merged:
         from .. import activity
         activity.log(client.root, "detect", "飞书任务：" + "、".join(f"#{n}" for n in merged) + " 是已有的事，已关联，不重复建")

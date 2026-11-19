@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 import webbrowser
 
 from contextlib import closing
+from . import activity
 from . import db as database
 from .timeutil import TZ
 
@@ -179,8 +180,8 @@ def build_state(root):
         settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model}
         settings.update(apps=found, pickup_app=local_sessions.pickup_choice(root, found),
                         gpt_open=local_sessions.gpt_open_choice(root, found))
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "app.build_state", exc)
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
@@ -552,8 +553,8 @@ def start_background(root, config):
         drive.install_shim(root)  # `~/.agent-matrix/bin/xinxiang`: the command any AI calls
         from . import meeting_review
         meeting_review.backfill_meetings(root)  # earlier meetings become history (quietly, once)
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "app.start_background", exc)
     try:
         server = make_server(root, config.app_port)
     except OSError:

@@ -27,6 +27,7 @@ import subprocess
 import sys
 from uuid import uuid4
 
+from . import activity
 from .workenv import shim_path  # noqa: F401
 from .jobstore import now, _db, _save, get, open_jobs, drivers, stop_record  # noqa: F401
 from . import db as database
@@ -156,8 +157,8 @@ def _prepare_learn(root, config, driver):
     try:
         from .snapshot import _snapshot
         snap = {r.get("record_id"): r for r in _snapshot(root).get("rows") or []}
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "drive._prepare_learn", exc)
     for rid, h in hist.items():
         for m in h.get("messages", []):
             if m["from"] == "me" and m["kind"] == "feedback" and len(m["text"]) >= 6 and m["at"] > (since[5:16].replace("T", " ") if since else ""):
@@ -286,8 +287,8 @@ def _prepare_chat(root, config, driver):
             pass
         data = add_followups(client, json.loads(path.read_text(encoding="utf-8")), now())
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "drive._prepare_chat", exc)
     header = (f"本批聊天：batch_id = {batch}。候选消息：{Path(prep['candidates_path']).name}；结构见 review.schema.json。\n"
               "只需要在当前文件夹写好 review.json；校验和发布由程序做。")
     return {"id": f"chat-{re.sub(r'[^A-Za-z0-9_-]', '', batch)}", "kind": "chat", "title": "提取聊天待办", "folder": str(folder),
@@ -395,8 +396,8 @@ def _open(root, job, driver):
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "drive._open", exc)
     if job["kind"] == "item" and "cindy" in str(driver).lower():
         job["instructions"] = cindy_header(root, job) + job["instructions"]
     job.update(driver=driver, status="open", rounds=0, step="领到了")
@@ -485,8 +486,8 @@ def fail(root, job, problem):
         inbox.add(root, f"job-failed:{job['id']}:{job.get('rounds', 0)}",
                   f"⚠ {job.get('title') or 'AI 的活'}没做成\n原因：{str(problem)[:200]}\n系统会在 30 分钟后自动再试一次；"
                   f"急的话在「系统」页点「立即检查」。", kind="system")
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "drive.fail", exc)
     return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
 
 

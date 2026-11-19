@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path
 import subprocess
+from . import activity
 from .models import Config, MatrixError
 from .delivery import require_message_receipt
 
@@ -171,8 +172,8 @@ class Feishu:
             return receipt
         try:  # Feishu messages (the 08:30 / 21:00 briefs) keep a copy in the local inbox too
             inbox.add(self.root, "feishu:" + key, content, kind="brief" if str(key).startswith("brief") else None)
-        except Exception:
-            pass
+        except Exception as exc:
+            activity.swallowed(self.root, "feishu._send_logged", exc)
         try:
             try:
                 self._exec([*argv, "--dry-run"])

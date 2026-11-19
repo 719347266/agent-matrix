@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 
+from .. import activity
 from ..brief_migration import number, single
 from ..meeting_watch import MeetingQueue, parse_time
 
@@ -92,8 +93,8 @@ def build(config, rows, event, queue, root, now):
                  for m in sorted(past, key=lambda m: {"waiting": 0, "open_question": 1, "decision": 2}.get(m["kind"], 3))[:5]]
         if lines:
             blocks.append(brief_v1._block("上次讨论到这里", "purple", lines))
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "agents.meeting_prep.build", exc)
 
     # Brand or company words that appear in many titles are configured locally (config.topic_stopwords).
     keys = {k for k in _keywords(topic) if not any(w in k for w in config.topic_stopwords)}
@@ -150,8 +151,8 @@ def run(config, client, state, now, *, preview_event=None, horizon=45, lead=5):
         try:
             detail = client._exec(["calendar", "+get", "--event-id", event["event_id"], "--as", "user", "--format", "json"])
             event = {**event, **(detail.get("event", detail) if isinstance(detail, dict) else {})}
-        except Exception:
-            pass  # the card still works without the join link
+        except Exception as exc:
+            activity.swallowed(client.root, "agents.meeting_prep.run", exc)
         card = build(config, rows, event, queue, client.root, now)
         if card is None:
             if not preview_event:

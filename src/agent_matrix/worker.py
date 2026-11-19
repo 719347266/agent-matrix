@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 
+from . import activity
 from .models import MatrixBusy, MatrixError
 from .workenv import (now, status_path, read_status, _STATUS_LOCK, write_status, _alive, is_running, _version_key, codex_binary, owner_codex_home, worker_codex_home, _env, work_base, scratch, provider_overrides, project, _cli, _check, claude_binary, kick)  # noqa: F401
 from .engines import (CodexRun, MCP_CACHE_SECONDS, MCP_DENY, mcp_servers, ClaudeRun, ENGINES, engine, test_engine)  # noqa: F401
@@ -257,8 +258,8 @@ def run_loop(root, config, *, max_jobs=200):
                 activity.log(root, "error", f"{name}处理「{str(job.get('title'))[:16]}」出错", detail=str(exc)[:300], status="failed")
                 try:
                     drive.release(root, config, job["id"])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    activity.swallowed(root, "worker.run_loop", exc)
             finally:
                 with take:
                     active.pop(job["id"], None)
@@ -277,8 +278,8 @@ def run_loop(root, config, *, max_jobs=200):
             for job in list(active.values()):  # interrupted: give unfinished work back at once
                 try:
                     drive.release(root, config, job["id"])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    activity.swallowed(root, "worker.run_loop", exc)
             write_status(root, running=False, stage="空闲", step="", record_id=None, n=None, title="", queue=[])
             activity.beat(root, "AI 员工", "空闲")
     return {"ok": True, "jobs": counter["n"]}

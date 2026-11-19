@@ -21,6 +21,7 @@ import re
 import sys
 from zoneinfo import ZoneInfo
 
+from . import activity
 from .timeutil import WEEKDAYS, parse_date  # noqa: F401
 from .bitable import js, require_owned
 from .brief_migration import single, number
@@ -135,8 +136,8 @@ class Applier:
         try:
             from .thread import closed
             closed(self.client.root, row["record_id"], "AI" if self.source == "ai" else "你", how, self.note)
-        except Exception:
-            pass
+        except Exception as exc:
+            activity.swallowed(self.client.root, "reply.closed", exc)
 
     def rows(self):
         return self.gateway.rows()
@@ -171,8 +172,8 @@ class Applier:
             try:
                 from .prework import add_note
                 add_note(self.client.root, row["record_id"], said + op.arg)
-            except Exception:
-                pass
+            except Exception as exc:
+                activity.swallowed(self.client.root, "reply.write", exc)
         return receipt
 
     def ready_after(self, row, patch):
@@ -536,8 +537,8 @@ def handle(config, client, state, text, *, source, message_ref):
         try:  # new material, a rejection or "先做": the AI employee starts now, not on the next tick
             from .workenv import kick
             kick(client.root, config, force=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            activity.swallowed(client.root, "reply.handle", exc)
     return "\n".join([*lines, *problems])
 
 

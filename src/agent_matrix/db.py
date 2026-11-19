@@ -11,6 +11,7 @@ processes starting together cannot half-upgrade a file.
 """
 from pathlib import Path
 import sqlite3
+import time
 
 FILES = {
     "state": "state/state.db",
@@ -135,14 +136,39 @@ def upgrade(db, schema):
         raise
 
 
+def _wal(db, timeout):
+    """Switch the file to WAL when it is free. WAL only makes readers and the writer wait less; if another
+    process is using the file right now (an older version still running during an update), carry on in the
+    current mode and let a later connection switch it."""
+    try:
+        if db.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+            return
+        db.execute("PRAGMA busy_timeout=200")
+        db.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        db.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+
+
 def connect(path, schema, *, timeout=30):
     """A read-write connection to this file, created and upgraded to `schema` if needed."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, timeout=timeout)
-    db.execute("PRAGMA journal_mode=WAL")
-    upgrade(db, schema)
-    return db
+    _wal(db, timeout)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            # Two processes starting together both want to upgrade. SQLite does not always wait for the
+            # other one on its own, so wait here.
+            upgrade(db, schema)
+            return db
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) and "busy" not in str(exc) or time.monotonic() >= deadline:
+                db.close()
+                raise
+            time.sleep(0.05)
 
 
 def open(root, schema, *, timeout=30):

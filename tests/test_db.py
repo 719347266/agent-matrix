@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -63,10 +64,40 @@ class DatabaseTest(unittest.TestCase):
             except Exception as exc:
                 errors.append(exc)
 
-        threads = [threading.Thread(target=start) for _ in range(8)]
-        [t.start() for t in threads]
-        [t.join() for t in threads]
-        self.assertEqual(errors, [])
+        for name in ("state", "xinxiang"):
+            threads = [threading.Thread(target=start) for _ in range(16)]
+            [t.start() for t in threads]
+            [t.join() for t in threads]
+            self.assertEqual(errors, [])
+            self.root = Path(tempfile.mkdtemp(dir=self.tmp.name))
+
+    def test_a_file_held_open_by_an_older_version_still_opens_and_keeps_its_rows(self):
+        path = self.root / "state/state.db"
+        path.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(path)) as old:  # the older listener: connected, not in WAL, idle
+            old.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            old.execute("INSERT INTO kv VALUES ('a', '1')")
+            old.commit()
+            with closing(db.connect(path, "state", timeout=5)) as new:
+                self.assertEqual(new.execute("SELECT value FROM kv WHERE key='a'").fetchone(), ("1",))
+                self.assertEqual(db.version(new), len(db.SCHEMAS["state"]))
+            self.assertEqual(old.execute("SELECT value FROM kv WHERE key='a'").fetchone(), ("1",))
+
+    def test_switching_to_wal_gives_up_quietly_while_someone_is_reading(self):
+        path = self.root / "state/state.db"
+        path.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(path)) as old, closing(sqlite3.connect(path)) as new:
+            old.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            old.commit()
+            old.execute("BEGIN")
+            old.execute("SELECT * FROM kv").fetchall()  # holds a read lock
+            started = time.monotonic()
+            db._wal(new, 30)
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(new.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+            old.rollback()
+            db._wal(new, 30)
+            self.assertEqual(new.execute("PRAGMA journal_mode").fetchone()[0], "wal")
 
     def test_read_never_creates_a_file(self):
         with self.assertRaises(sqlite3.Error):

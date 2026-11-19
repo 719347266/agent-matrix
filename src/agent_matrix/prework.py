@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 from pydantic import BaseModel, ConfigDict, Field
+from . import activity
 from .values import draft_url as _draft_url
 from .agents.pre_worker import FIELDS, assess, fingerprint
 from .bitable import items, js, require_owned
@@ -257,8 +258,8 @@ def add_note(root, record_id, text):
     try:  # the same line goes into the item's conversation in 心响
         from .thread import from_note
         from_note(root, record_id, body, stamp=stamp)
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "prework.add_note", exc)
     return line
 
 

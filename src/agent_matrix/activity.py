@@ -27,6 +27,12 @@ def log(root, kind, title, *, detail="", status="ok", ref=""):
         pass
 
 
+def swallowed(root, where, exc):
+    """Something optional failed and the caller carries on. Leave a trace instead of nothing: it shows in the
+    activity log as kind "error", status "swallowed" (not "failed", so it raises no alert)."""
+    log(root, "error", "已跳过的错误：" + where, detail=f"{type(exc).__name__}: {exc}", status="swallowed")
+
+
 def resolve(root, ref):
     """A later success settles earlier failures of the same thing; they stop showing as problems."""
     try:

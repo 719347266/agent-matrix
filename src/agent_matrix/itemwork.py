@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 
+from . import activity
 from .models import MatrixBusy, MatrixError
 from .state import State, exclusive_lock
 from .timeutil import TZ
@@ -258,8 +259,8 @@ class Item:
                        for j in jobstore.open_jobs(self.root)):
                     return  # a restored run already owns this lease
                 WorkQueue(state).release(self.rid, self.version)
-        except Exception:
-            pass
+        except Exception as exc:
+            activity.swallowed(self.root, "itemwork.release", exc)
 
     def mirror_reply(self):
         """What the AI said at the end of its turn goes into the item's conversation in 心响."""

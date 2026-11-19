@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from . import activity
 from . import itemstore
 from .bitable import items, require_owned
 from .models import MatrixError
@@ -89,8 +90,8 @@ def ensure_local(client, state=None):
                              "--table-id", client.config.tables["事项表"])
         found = [f.get("field_name") or f.get("name") for f in items(listed)]
         names = list(dict.fromkeys([*names, *[n for n in found if n]]))
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "records.ensure_local", exc)
     own = state is None
     state = state or State(root / "state/state.db")
     try:
