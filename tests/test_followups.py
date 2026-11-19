@@ -36,6 +36,8 @@ class ChatCatchTests(unittest.TestCase):
         self.assertIsNotNone(ready(CONFIG, [line("人生模拟器反馈", kind="@你")], NOW))
         self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW))                # not due yet: waits
         self.assertIsNotNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW, "every"))    # the pace came round
+        private = {**line("你们测试服有没有空升级一下包"), "chat_mode": "p2p"}
+        self.assertIsNotNone(ready(CONFIG, [private], NOW))                                  # a private ask: at once
         self.assertIsNotNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW, "2026-11-18T14:30"))
         night = NOW.replace(hour=23)
         self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], night, "every"))      # late: morning

@@ -316,7 +316,12 @@ class Listener:
         if self.every("slack", 60):  # search: ~2 calls per poll, well under Slack limits
             def slack_poll(config, client, state):
                 from .sources import slack
-                return slack.poll(config, self.root, state, datetime.now(TZ)) if config.chat_watch_enabled else "off"
+                if not config.chat_watch_enabled:
+                    return "off"
+                out = slack.poll(config, self.root, state, datetime.now(TZ))
+                if isinstance(out, dict) and out.get("candidates"):
+                    self.wake_worker(config)  # don't wait for the 2-minute kick; the worker decides if it's time
+                return out
             jobs.append(("slack", slack_poll))
         if self.every("tasks", 900) and not no_feishu:
             def tasks(config, client, state):

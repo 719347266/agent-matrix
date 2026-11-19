@@ -81,15 +81,16 @@ def _sent(message, now):
 def ready(config, waiting, now, slot=None):
     """When the waiting chat lines go to the AI. Chats are read every few minutes; each extraction costs a model
     call, so it runs only when there is something worth it:
-        @you, or someone asks you with a time or a push (今天 / 尽快 / 3点)  → at once
+        @you, a private ask, or someone asks you with a time or a push (今天 / 尽快 / 3点)  → at once
         otherwise at the pace chosen on the 系统 page: every N minutes (chat_review_every_minutes), or the fixed times
         late at night only the urgent ones run; the rest wait for the morning
     Returns why it should run now, or None."""
     if not waiting:
         return None
-    urgent = [m for m in waiting if m.get("kind") == "@你" or (m.get("kind") == "找你的" and URGENT.search(m.get("text") or ""))]
+    urgent = [m for m in waiting if m.get("kind") == "@你" or (m.get("kind") == "找你的" and (
+        m.get("chat_mode") == "p2p" or URGENT.search(m.get("text") or "")))]  # a private ask is someone waiting on you
     if urgent:
-        return f"有 {len(urgent)} 条 @你、带时间或催办，马上提取"
+        return f"有 {len(urgent)} 条私聊、@你、带时间或催办，马上提取"
     hour = now.strftime("%H:%M")
     if hour < config.chat_extract_from or hour >= config.chat_extract_until:
         return None
