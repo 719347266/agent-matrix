@@ -32,9 +32,11 @@ class LocalSessions(unittest.TestCase):
         for index, (sid, status) in enumerate([("underlying","busy"),("standalone","running"),("idle","idle")]):
             (folder / f"{index}.json").write_text(json.dumps(dict(pid=os.getpid(),sessionId=sid,status=status,updatedAt=self.now*1000)))
         records = ls.discover(self.home)
-        self.assertEqual(set(records), {"cindy:current","claude:standalone"})
+        # open conversations are listed whether replying or waiting; the Claude one Cindy drives is shown once, as Cindy
+        self.assertEqual({k: v["working"] for k, v in records.items()},
+                         {"cindy:current": True, "cindy:finished": False, "claude:standalone": True, "claude:idle": False})
 
-    def test_codex_finished_or_aborted_not_running_even_with_tool_left_over(self):
+    def test_codex_finished_or_aborted_are_waiting_not_replying(self):
         base = self.home / ".codex"
         folder = base / "sessions"
         folder.mkdir(parents=True)
@@ -47,7 +49,9 @@ class LocalSessions(unittest.TestCase):
                 db.execute("INSERT INTO threads VALUES(?,?,?,?,?,0)",(sid,sid,str(folder),str(path),self.now))
         (base/"process_manager").mkdir()
         (base/"process_manager/chat_processes.json").write_text(json.dumps([dict(osPid=os.getpid(),updatedAtMs=self.now*1000,conversationId="ended")]))
-        self.assertEqual(set(ls.discover(self.home)), {"codex:working"})
+        found = ls.discover(self.home)
+        self.assertEqual({k: v["working"] for k, v in found.items()},
+                         {"codex:working": True, "codex:ended": False, "codex:aborted": False})
 
     def test_unbound_then_verified_binding_preserves_original_session(self):
         rec = ls._record("cindy","exact-id","不像事项标题",self.now)
@@ -65,3 +69,38 @@ class LocalSessions(unittest.TestCase):
             self.assertEqual(hist["r6"][0]["status"],"recorded")
             self.assertEqual(sessions.open_session(self.home,None,hist["r6"][0]["job"]),{"opened":"cindy"})
             self.assertEqual(native.call_args.args[0], ["open","cindy://session/exact-id"])
+
+    def test_latest_request_skips_tool_results_and_system_notes(self):
+        folder = self.home / ".claude/projects/-Users-x-proj"
+        folder.mkdir(parents=True)
+        rows = [{"type": "user", "message": {"content": "第一句"}},
+                {"type": "user", "message": {"content": [{"type": "text", "text": "<pasted_content id=\"a\">把 #62 的流程图补齐</pasted_content><system-reminder>内部提示</system-reminder>"}]}},
+                *[{"type": "user", "message": {"content": [{"type": "tool_result", "content": "x" * 50}]}} for _ in range(30)]]
+        (folder / "abcd-1234.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows))
+        self.assertEqual(ls._last_request(self.home, "abcd-1234"), "把 #62 的流程图补齐")
+
+    def test_an_unbound_conversation_suggests_the_item_it_names(self):
+        items = [{"rid": "r6", "n": 6, "title": "整理聚光投放测试策略", "status": "进行中"},
+                 {"rid": "r9", "n": 9, "title": "已经做完的事情", "status": "完成"}]
+        named = ls._record("claude", "c-1", "随便聊聊", self.now, doing="帮我看下 #6 的数据")
+        titled = ls._record("claude", "c-2", "整理聚光投放测试策略", self.now)
+        closed = ls._record("claude", "c-3", "接着做 #9", self.now)
+        with patch.object(ls, "discover", return_value={r["key"]: r for r in (named, titled, closed)}):
+            out = {r["key"]: r["suggest"] for r in ls.view(self.home, {}, [], items)}
+        self.assertEqual(out, {"claude:c-1": 6, "claude:c-2": 6, "claude:c-3": None})
+
+    def test_a_claude_conversation_opened_from_an_item_is_bound_with_its_context(self):
+        root = self.home / "project"
+        (root / "state").mkdir(parents=True)
+        work = self.home / "work"
+        work.mkdir()
+        item = {"record_id": "r62", "n": 62, "title": "补齐角色流程图", "status": "完成", "who": "我", "next": "发流程图"}
+        with patch("agent_matrix.worker.claude_binary", return_value="/bin/claude"), \
+             patch("agent_matrix.worker.workdir_for", return_value=work), \
+             patch.object(sessions, "open_terminal") as terminal:
+            out = ls.start_for_item(root, None, item, history="你：先画一级页面")
+        line = terminal.call_args.args[0]
+        self.assertIn("--session-id " + out["session"], line)
+        self.assertIn("先画一级页面", (work / "心响事项.md").read_text(encoding="utf-8"))
+        with closing(ls._db(root)) as db:
+            self.assertEqual(db.execute("SELECT key, rid FROM local_session_items").fetchone(), ("claude:" + out["session"], "r62"))

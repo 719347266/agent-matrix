@@ -76,6 +76,30 @@ class InboxTests(unittest.TestCase):
         inbox.mark_read(self.root)
         self.assertEqual(inbox.unread(self.root), 0)
 
+    def test_read_only_brief_is_kept_whole_in_the_inbox(self):
+        from datetime import date
+        from agent_matrix import inbox
+        from agent_matrix.brief_v1 import build_card
+        rows = [{"record_id": "r26", "编号": 26, "标题": "核对清单", "状态": ["待验收"], "执行方": ["AI"],
+                 "交付物链接": "https://x.feishu.cn/docx/a", "预做结果摘要": "清单已整理"},
+                {"record_id": "r24", "编号": 24, "标题": "定发布日期", "状态": ["待确认"], "执行方": ["我"]},
+                {"record_id": "r9", "编号": 9, "标题": "写周报", "状态": ["进行中"], "执行方": ["我"], "截止日": "2026-11-17"}]
+        events = [{"summary": "周会", "start_time": {"datetime": "2026-11-17T10:00:00+08:00"},
+                   "end_time": {"datetime": "2026-11-17T11:00:00+08:00"}, "self_rsvp_status": "accept"}]
+        c = build_card(Config(base_url="https://x.feishu.cn/base/b"), rows, events, date(2026, 11, 17), "morning")
+        inbox.add(self.root, "feishu:brief:morning:2026-11-17", c, kind="brief")
+        m = inbox.messages(self.root)[0]
+        self.assertEqual((m["kind"], m["refs"]), ("brief", [9, 26, 24]))
+        sections = [b for b in m["blocks"] if b["type"] == "section"]
+        self.assertEqual([s["title"] for s in sections], ["今天的会 · 1 场", "今天你要做 · 1 件", "AI 做好了，等你看 · 1 件", "需要你定 · 1 件"])
+        self.assertIn("周会", sections[0]["more"])
+        self.assertEqual([(r["head"], r["hint"], r["url"], r["actions"]) for s in sections[1:] for r in s["rows"]],
+                         [("#9 写周报", "今天到期", None, []), ("#26 核对清单", "清单已整理", "https://x.feishu.cn/docx/a", []),
+                          ("#24 定发布日期", "还没定什么时候做完", None, [])])
+        flat = json.dumps(m["blocks"], ensure_ascii=False)
+        self.assertNotIn("只读", flat)                         # the Feishu footer is not repeated inside 心响
+        self.assertNotIn("看板", flat)
+
     def test_local_channel_never_calls_feishu(self):
         from agent_matrix import inbox
         from agent_matrix.feishu import Feishu
@@ -146,6 +170,18 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(kinds[:2], [("system", "say"), ("me", "feedback")])
         self.assertEqual(data["deliverables"]["44"][0]["v"], 1)   # delivered before versions were kept
         self.assertFalse(data["demo"])
+
+    def test_inbox_messages_come_with_their_whole_content(self):
+        from agent_matrix import inbox
+        from agent_matrix.brief_v1 import _block, _read_row, card
+        inbox.add(self.root, "brief", card("11/17 周二 · 早报", "你要做 1 件", "blue", [_block("今天你要做 · 1 件", "blue", [
+            _read_row(("#1 验收头像", "今天到期", "orange", None))])], "只读", None), kind="brief")
+        inbox.add(self.root, "old", "11/16 早报\n你要做\n#1 验收头像 · 今天到期\n其余0件 · 回复：1 过 / 1 退 意见")
+        _, body = self.get("/api/state", {"X-Xinxiang-Token": self.server.token})
+        box = {m["title"]: m for m in json.loads(body)["inbox"]}
+        section = box["11/17 周二 · 早报"]["blocks"][1]
+        self.assertEqual((section["title"], section["rows"][0]["head"]), ("今天你要做 · 1 件", "#1 验收头像"))
+        self.assertEqual(box["11/16 早报"]["blocks"], [{"type": "text", "text": "你要做\n#1 验收头像 · 今天到期\n其余0件 · 回复：1 过 / 1 退 意见"}])
 
 
 if __name__ == "__main__":
