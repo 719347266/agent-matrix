@@ -15,6 +15,8 @@ COMMIT = re.compile(r"我来|我去|我会|我负责|我晚点|我稍后|我待�
 ASK = re.compile(r"麻烦|帮忙|帮我|帮看|能不能|可不可以|可以.{0,10}吗|需要你|请你|辛苦|尽快|抓紧|跟进|确认一下|"
                  r"看一下|过一下|反馈|评审|审核|ddl|DDL|deadline|截止|之前(给|发|交|完成|出)|记得|别忘")
 WHEN = re.compile(r"今天|今晚|明天|后天|周[一二三四五六日天]|下周|本周|这周|月底|\d{1,2}[:：点]\d{0,2}|\d{1,2}月\d{1,2}|\d{1,2}[./-]\d{1,2}")
+# In a private chat most asks are casual: "借我登一下" "账号密码有吗" "加好了和我说一下".
+P2P_ASK = re.compile(r"[?？]|吗|一下|借我|给我|和我说|告诉我|跟我说|好了没|怎么样了|进展")
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
 MAX_CHATS = 25
 
@@ -54,7 +56,7 @@ def classify(text, *, from_owner, chat_mode, names, mentioned=False):
     if len(text) < 6:
         return None
     to_owner = chat_mode == "p2p" or any(w in text for w in names)
-    if to_owner and (ASK.search(text) or WHEN.search(text) or (chat_mode == "p2p" and re.search(r"[?？]", text))):
+    if to_owner and (ASK.search(text) or WHEN.search(text) or (chat_mode == "p2p" and P2P_ASK.search(text))):
         return "找你的"
     return None
 

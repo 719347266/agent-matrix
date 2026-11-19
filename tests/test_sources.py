@@ -27,6 +27,9 @@ class ChatFilterTests(unittest.TestCase):
         self.assertIsNone(keep("周五前帮忙看下这个需求"))            # group line not addressed to the owner
         self.assertEqual(keep("能不能明天把数据发我", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("哈哈哈哈哈好", chat_mode="p2p"))
+        self.assertEqual(keep("哥们，你们超管后台借我登一下", chat_mode="p2p"), "找你的")  # casual private asks
+        self.assertEqual(keep("兄弟，加好了和我说一下", chat_mode="p2p"), "找你的")
+        self.assertIsNone(keep("你的头像哈哈哈哈哈哈", chat_mode="p2p"))
         self.assertIsNone(keep("嗯嗯"))
 
 
