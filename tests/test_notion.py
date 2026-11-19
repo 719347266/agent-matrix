@@ -87,6 +87,18 @@ class NotionTests(unittest.TestCase):
         with self.assertRaises(MatrixError):
             notion.connect(self.root, "xoxp-wrong", "https://www.notion.so/0123456789abcdef0123456789abcdef", api=FakeNotion())
 
+    def test_ai_picks_up_its_items_without_a_feishu_account(self):
+        from datetime import date
+        from agent_matrix.agents.pre_worker import assess
+        from agent_matrix.workflow import FIELDS
+        config = Config(item_store="device", prework_enabled=True)
+        row = {f: None for f in FIELDS}
+        row.update({"record_id": "recL1", "标题": "测试服升级 tracks 包", "执行方": ["AI"], "状态": ["未开始"],
+                    "负责人": [{"id": ""}], "截止日": "2026-11-21T00:00:00.000+08:00", "编号": "5"})
+        out = assess(config, [row, {**row, "record_id": "recL2", "执行方": ["我"]}], today=date(2026, 11, 19))
+        self.assertTrue(out["ok"])
+        self.assertEqual([c["record_id"] for c in out["candidates"]], ["recL1"])  # only the AI's own item
+
     def test_linked_items_and_people_read_as_text(self):
         kinds = notion.schema(["标题", "父事项", "负责人", "排除本人提醒", "方向"])
         props = notion.properties({"标题": "子事项", "父事项": [{"id": "recA"}], "负责人": [{"id": "ou_1", "name": "小王"}],

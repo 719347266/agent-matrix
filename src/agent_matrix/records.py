@@ -9,6 +9,9 @@ from .models import MatrixError
 def ensure_fields(client, table_name, fields):
     if table_name not in client.config.tables:
         raise MatrixError("尚未绑定表格：" + table_name)
+    from . import itemstore
+    if table_name=="事项表" and itemstore.feishu_free(client.config):
+        return  # ponytail: items live only in items.db, which always carries every field
     actual=items(client.call("+field-list","--base-token",client.config.base_token,
                             "--table-id",client.config.tables[table_name]))
     names={f.get("name",f.get("field_name")) for f in actual}
