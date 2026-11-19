@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from .bitable import js, require_owned
 from .values import single, number, validate_registry
 from .schema import SOURCE_FIELDS  # noqa: F401
+from . import activity, lifecycle
 from .models import MatrixError
 from .records import read_records
 from .schema import field, date, select, STATUSES, EXTRA, FIELDS, DEFAULT_PROGRESS  # noqa: F401
@@ -55,6 +56,20 @@ def matches(row, patch):
 def visible(row):
     return not row.get('排除本人提醒')
 
+def note_transition(root, row, patch, source):
+    """Check a status change against lifecycle.ALLOWED. Today an unlisted change is only recorded."""
+    if '状态' not in patch:
+        return
+    reason = lifecycle.problem(row.get('状态'), patch.get('状态'))
+    if not reason:
+        return
+    if lifecycle.ENFORCE:
+        raise MatrixError(reason + '，未写入。')
+    number = row.get('编号')
+    activity.log(root, 'lifecycle', (f'#{number} ' if number else '') + reason + f'（来自 {source}）',
+                 status='observed', ref=row.get('record_id') or '')
+
+
 class Gateway:
     def __init__(self, client, state, *, on_rows=None, progress=None):
         self.client, self.state, self.config = client, state, client.config
@@ -92,6 +107,7 @@ class Gateway:
                     self.state.confirm(key, receipt)
                 return receipt
             raise MatrixError('上次写入未核实或后来被修改；未重放，请核对该事项。')
+        note_transition(self.client.root, fresh, patch, source)
         # Do not overwrite a simultaneous human change, including ownership/due date.
         if not matches(fresh, {k:v for k,v in before.items() if k not in {'record_id', '更新时间'}}):
             raise MatrixError('事项刚被修改，请重新读取后处理。')
