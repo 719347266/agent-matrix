@@ -159,6 +159,7 @@ def build_state(root):
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
                 "engine": thread.setting(root, "engine", "codex"),
+                "onboarded": bool(thread.setting(root, "onboarded", False)),
                 "prework_enabled": _config_flag(root, "prework_enabled"),
                 "worker_mcp": _config_flag(root, "worker_mcp_tools")}
     settings["engine_sort"] = thread.setting(root, "engine_sort", settings["engine"] if settings["engine"] != "cindy" else "codex")
@@ -178,6 +179,7 @@ def build_state(root):
         found = local_sessions.apps(load_config(root / "config.yaml"))
         cfg = load_config(root / "config.yaml")
         settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model}
+        settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(apps=found, pickup_app=local_sessions.pickup_choice(root, found),
                         gpt_open=local_sessions.gpt_open_choice(root, found))
     except Exception as exc:
@@ -252,7 +254,7 @@ def system_info(root):
                   "skip_chats": config.chat_skip_chats, "skip_words": config.chat_skip_words, "recent_chats": _recent_chats(root)}
     except Exception:
         found, record = {}, {}
-    return {"engines": found, "slack": slack, "record": record, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    return {"engines": found, "slack": slack, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -412,6 +414,17 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "gpt_open", body["gpt_open"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
+                if "onboarded" in body:
+                    thread.set_setting(root, "onboarded", bool(body["onboarded"]))
+                if "owner_name" in body or "owner_aliases" in body:  # how the owner is addressed in meetings and chats
+                    from .config import load as load_config, save as save_config
+                    config = load_config(root / "config.yaml")
+                    name = " ".join(str(body.get("owner_name") or "").split())[:40]
+                    if name:  # an empty name would make every meeting action "not the owner's"
+                        config.owner_name = name
+                    if isinstance(body.get("owner_aliases"), list):
+                        config.owner_aliases = list(dict.fromkeys(str(a).strip()[:20] for a in body["owner_aliases"] if str(a).strip()))[:10]
+                    save_config(root / "config.yaml", config)
                 if (body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body or "worker_mcp" in body
                         or "chat_skip_chats" in body or "chat_skip_words" in body):
                     from .config import load, save  # config.yaml: the listener and worker read these there

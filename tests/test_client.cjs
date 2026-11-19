@@ -44,8 +44,16 @@ function reset(item) {
   evaluate('S.working=true'); // a late job snapshot cannot resurrect a closed item
   assert.equal(evaluate("isWorking(byN(45))"), false);
   assert.match(evaluate("statusOf(byN(45))[0]"),/已完成/);
-  assert.match(evaluate("sysPage()"),/Slack/);
-  for (const label of ["Notion","只存本机","本机 AI","整理"]) assert.ok(evaluate("sysPage()").includes(label));
+  const settings = ["ai","src","data","general"].map(tab => evaluate(`S.setTab="${tab}"; sysPage()`)).join("");
+  for (const label of ["Slack","Notion","只存本机","本机 AI","整理","新手引导"]) assert.ok(settings.includes(label), label);
+  assert.ok(!evaluate('S.setTab="ai"; sysPage()').includes("Slack"), "one settings tab at a time");
+  assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
+  for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
+    evaluate(`S.ob={step:${step}}`);
+    assert.ok(evaluate("obView()").includes(evaluate(`OB[${step}].title`)));
+  }
+  assert.match(evaluate("S.ob={step:OB.length-1}; obView()"),/开始使用/);
+  evaluate("S.ob=null");
   evaluate('S.item=45; byN(45).status="进行中"; document.querySelector("#saybox").value="电话确认了"; sendNote(true)');
   assert.equal(evaluate("byN(45).closed.by"),"你");
   assert.match(evaluate("thread(byN(45))"),/电话确认了/);
