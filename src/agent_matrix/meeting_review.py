@@ -39,6 +39,8 @@ class Action(Grounded):
     done_when: str | None = Field(default=None,max_length=60)
     # Number of an open item this is the same thing as (see open_items.json); merged instead of re-created.
     same_as: int | None = None
+    # Number of an item this one continues (the next step after it); see related_items.json. Not the same thing.
+    follows: int | None = None
 
 
 class Waiting(Grounded):
@@ -370,6 +372,9 @@ def publish(config, client, state, review):
         if not isinstance(ids,list) or len(ids)!=1:
             raise MatrixError("事项创建回执缺少唯一记录 ID，停止。")
         task_ids.extend(ids)
+        if rows is not None:
+            from . import itemlinks
+            itemlinks.link_by_number(client.root, rows, ids[0], action.follows)
     meta=row["metadata"]
     record={"会议ID":review.meeting_id,"标题":meta.get("topic"),"开始时间":parse_time(meta["start_time"]).isoformat(),
             "结束时间":parse_time(meta["end_time"]).isoformat(),"逐字稿状态":["已获取"],"提取状态":["已完成"],"提取待办数":len(task_ids)}

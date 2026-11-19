@@ -55,9 +55,14 @@ class ChatReviewTests(unittest.TestCase):
         self.assertEqual((fields["执行方"], fields["状态"], fields["来源"]), (["我"], ["未开始"], ["聊天"]))
 
     def test_guesses_are_rejected_and_low_confidence_dropped(self):
-        for bad in ({"quote": "没说过的话"}, {"commitment_phrase": "我来负责"}, {"owner_name": "李大伟"}, {"due_date": "2026-11-21"}):
+        for bad in ({"quote": "没说过的话"}, {"commitment_phrase": "我来负责"}, {"owner_name": "李大伟"}):
             with self.assertRaises(MatrixError):
                 validate(CONFIG, ChatReview(batch_id="b1", actions=[self.action(**bad)]), self.root)
+        # a date that does not follow from the words is never written: the item is kept without one (待确认)
+        kept = validate(CONFIG, ChatReview(batch_id="b1", actions=[self.action(due_date="2026-11-21")]), self.root)
+        self.assertEqual([a.due_date for a, _ in kept], [None])
+        self.assertEqual(chat_fields(CONFIG, *kept[0])["状态"], ["待确认"])
+        self.assertNotIn("截止日", chat_fields(CONFIG, *kept[0]))
         self.assertEqual(validate(CONFIG, ChatReview(batch_id="b1", actions=[self.action(confidence=0.5)]), self.root), [])
 
     def test_review_runs_only_at_set_times(self):

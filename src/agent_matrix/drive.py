@@ -217,6 +217,22 @@ def _try_existing_review(root, source_dir, validate, publish, label):
     return True
 
 
+def _write_related(root, folder):
+    """related_items.json: what a new item may be the next step of: everything still open, plus what was
+    finished in the last two weeks."""
+    from .snapshot import _snapshot
+    since = (now() - timedelta(days=14)).isoformat()[:10]
+    out = []
+    for r in _snapshot(root).get("rows") or []:
+        status = r.get("状态") or ""
+        if r.get("排除本人提醒") or status == "取消" or not r.get("编号"):
+            continue
+        if status == "完成" and str(r.get("完成时间") or r.get("更新时间") or "")[:10] < since:
+            continue
+        out.append({"编号": int(str(r["编号"])), "标题": r.get("标题"), "状态": status})
+    (Path(folder) / "related_items.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def _prepare_meeting(root, config, driver):
     from .meeting_review import Review
     from .workenv import _check, _cli, scratch
@@ -246,6 +262,7 @@ def _prepare_meeting(root, config, driver):
             if (source / name).is_file():
                 shutil.copyfile(source / name, folder / name)
         (folder / "review.json").unlink(missing_ok=True)
+        _write_related(root, folder)
         topic = str((prep.get("metadata") or {}).get("topic") or m.get("topic") or "会议")
         header = (f"本次会议：{topic}。meeting_id = {mid}，transcript_sha256 = {prep['transcript_sha256']}。\n"
                   f"逐字稿：transcript.md；没完成的事项：{open_name}；review.json 的结构见 review.schema.json。\n"
@@ -279,6 +296,7 @@ def _prepare_chat(root, config, driver):
         if (source / name).is_file():
             shutil.copyfile(source / name, folder / name)
     (folder / "review.json").unlink(missing_ok=True)
+    _write_related(root, folder)
     try:  # what was said after each candidate, so things already settled are not turned into todos
         from .background import add_followups
         from .workenv import project

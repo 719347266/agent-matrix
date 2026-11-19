@@ -11,7 +11,7 @@ Pushed events (one `lark-cli event consume` child each):
   task.task.update_user_access_v2          Feishu task changed → synced into the task table
   card.action.trigger                      a tapped card button → applied, the card turns into "✓ 已完成"
 Timers: prep cards ~30 min before meetings, brief catch-up, Friday review (every minute);
-chat reading (every 10 min); Feishu task sync fallback (every 15 min); the AI employee is
+chat reading (every 2 min); Feishu task sync fallback (every 15 min); the AI employee is
 started every 2 minutes when it is not already working (it exits when nothing is left).
 
 A subscription the Feishu console has not enabled yet is retried every 10 minutes, so
@@ -330,7 +330,7 @@ class Listener:
                 monitor.save_snapshot(self.root, rows)
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
-        if self.every("chats", 600) and not no_feishu:
+        if self.every("chats", 120) and not no_feishu:
             def chat_poll(config, client, state):
                 from .sources import chats
                 if not config.chat_watch_enabled:

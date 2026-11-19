@@ -79,3 +79,25 @@ def direct(root, record_id):
     """{"before": [...], "after": [...]}: the items linked to this one directly."""
     edges = pairs(root)
     return {"before": [a for a, b in edges if b == record_id], "after": [b for a, b in edges if a == record_id]}
+
+
+def link_by_number(root, rows, later, number, by="AI"):
+    """The AI said a new item continues item `number`: string them together. A number that is not an item, the
+    item itself or a loop is simply not linked (never an error: a wrong guess must not hold up the new item)."""
+    if not number or not later:
+        return False
+    earlier = next((r.get("record_id") for r in rows if str(r.get("编号") or "").strip() == str(number)), None)
+    try:
+        link(root, earlier, later, by=by)
+        return True
+    except MatrixError:
+        return False
+
+
+def made_by(root):
+    """{(earlier, later): who strung them} so the page can say which links the AI made."""
+    db = _db(root)
+    try:
+        return {(a, b): by for a, b, by in db.execute("SELECT earlier, later, by FROM item_links")}
+    finally:
+        db.close()

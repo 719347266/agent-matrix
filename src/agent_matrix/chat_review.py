@@ -42,6 +42,8 @@ class ChatAction(BaseModel):
     ai_can_prep: bool = False
     done_when: str | None = Field(default=None, max_length=60)
     confidence: float = Field(ge=0, le=1)
+    # Number of an item this one continues (the next step after it); see related_items.json. Not the same thing.
+    follows: int | None = None
 
 
 class ChatReview(BaseModel):
@@ -175,13 +177,13 @@ def validate(config, review, root):
             if a.owner_name != sender and not named and not private_to_owner:
                 raise MatrixError(f"「{a.title}」的负责人{a.owner_name}既不是发消息的人，也没被点名；改为 null。")
         if a.due_date:
-            if not a.due_phrase or a.due_phrase not in m["text"]:
-                raise MatrixError(f"「{a.title}」的截止日缺少原话。")
+            # "下周", "月底": no exact day can be worked out from the words. The date is left empty (the item
+            # then waits for the owner to set one) instead of sending the whole batch back to the model.
             sent = datetime.fromisoformat(m["sent_at"].replace(" ", "T")) if m.get("sent_at") else datetime.now(TZ)
             from .timeutil import parse_date
-            found = parse_date(a.due_phrase.rstrip("前之"), sent.date())
+            found = parse_date(a.due_phrase.rstrip("前之"), sent.date()) if a.due_phrase and a.due_phrase in m["text"] else None
             if not found or found.isoformat() != a.due_date:
-                raise MatrixError(f"「{a.title}」的截止日和原话换算不一致。")
+                a.due_date = a.due_phrase = None
         if a.confidence >= MIN_CONFIDENCE:
             kept.append((a, m))
     return kept
@@ -219,6 +221,7 @@ def publish(config, client, state, review):
     kept = validate(config, review, client.root)
     gateway = Gateway(client, state)
     created = []
+    from . import itemlinks
     from .merge import find_same, merge_into
     rows, merged = gateway.rows(), []
     for a, m in kept:
@@ -230,6 +233,7 @@ def publish(config, client, state, review):
             merged.append(target.get("编号"))
             continue
         created.append(gateway.create(task_fields(config, a, m), key, "chat-review")["record_id_list"][0])
+        itemlinks.link_by_number(client.root, rows, created[-1], a.follows)
     state.db.execute("UPDATE chat_candidates SET status='done' WHERE batch=?", (review.batch_id,))
     state.db.commit()
     state.set("chat-review:open", None)

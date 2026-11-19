@@ -156,6 +156,7 @@ def scenario_meeting():
     check(S, "同一推送重复到达：状态不变、不重复排队", r == "ready" and meeting_row(mid)[0] == "ready", r)
 
     before = inbox_marker()
+    earlier = next(i for i in items().values() if one(i.get("状态")) not in ("取消",) and not i.get("排除本人提醒"))
     job = drive.next_job(ROOT, CONFIG, "测试AI", kinds=["meeting"])
     check(S, "AI 领到「提取会议待办」这件活", job and job["kind"] == "meeting" and job["ref"]["meeting_id"] == mid,
           job and {k: job.get(k) for k in ("id", "kind", "title")})
@@ -164,6 +165,8 @@ def scenario_meeting():
     folder = Path(job["folder"])
     got = (folder / "transcript.md").read_text()
     check(S, "活的文件夹里有逐字稿和未完成事项清单", got == transcript and (folder / "open_items.json").exists())
+    related = json.loads((folder / "related_items.json").read_text()) if (folder / "related_items.json").exists() else []
+    check(S, "还有一份「可能接着哪件事做」的清单", any(x["编号"] == earlier["n"] for x in related), len(related))
     digest = sha256(got.encode()).hexdigest()
     lines = transcript.splitlines()
     due = (start.date() + timedelta(days=1)).isoformat()
@@ -174,10 +177,10 @@ def scenario_meeting():
             {"title": "【测试】渠道复盘报告", "text": "出一版渠道复盘报告，重点看投放回收", "quote": "渠道复盘报告明天我来出一版",
              "timestamp": "00:01:05", "reference": lines[0], "owner_name": OWNER_NAME, "due_date": due, "due_phrase": "明天",
              "direction": "mine", "commitment_phrase": "我来", "confidence": 0.95, "executor": "AI",
-             "done_when": "有回收对比和结论"},
+             "done_when": "有回收对比和结论", "follows": earlier["n"]},
             {"title": "【测试】约供应商谈报价", "text": "约供应商开会谈报价", "quote": "供应商那边我来约一次会",
              "timestamp": "00:04:00", "reference": lines[3], "owner_name": OWNER_NAME, "direction": "mine",
-             "commitment_phrase": "我来", "confidence": 0.9, "executor": "我"},
+             "commitment_phrase": "我来", "confidence": 0.9, "executor": "我", "follows": 99999},
             {"title": "【测试】投放素材", "text": "准备投放素材", "quote": "投放素材我负责", "timestamp": "00:02:10",
              "reference": lines[1], "owner_name": "王小明", "direction": "others", "commitment_phrase": "我负责",
              "confidence": 0.9},
@@ -195,6 +198,10 @@ def scenario_meeting():
     check(S, "本人的 AI 活：执行方 AI、未开始、截止日按「明天」换算",
           one(ai.get("执行方")) == "AI" and one(ai.get("状态")) == "未开始" and str(ai.get("截止日", "")).startswith(due),
           {k: ai.get(k) for k in ("执行方", "状态", "截止日")})
+    from agent_matrix import itemlinks
+    check(S, "AI 说这件事接着另一件做：两件事被串起来，标明是 AI 串的",
+          itemlinks.made_by(ROOT).get((earlier["record_id"], ai.get("record_id"))) == "AI", itemlinks.pairs(ROOT))
+    check(S, "AI 填了不存在的编号：不串、也不影响建事项", itemlinks.direct(ROOT, me.get("record_id")) == {"before": [], "after": []})
     check(S, "本人自己做的、没说日期：待确认", one(me.get("执行方")) == "我" and one(me.get("状态")) == "待确认",
           {k: me.get(k) for k in ("执行方", "状态")})
     check(S, "别人负责的：执行方别人、不提醒本人", one(other.get("执行方")) == "别人" and other.get("排除本人提醒") is True,

@@ -105,11 +105,15 @@ def build_state(root):
         from . import itemlinks
         from .textmatch import similarity
         linked = itemlinks.pairs(root)
+        by_ai = {pair for pair, who in itemlinks.made_by(root).items() if who == "AI"}
     except Exception:
-        linked = []
-    before_of, after_of = {}, {}
+        linked, by_ai = [], set()
+    before_of, after_of, ai_of = {}, {}, {}
     for a, b in linked:
         if n_of.get(a) is not None and n_of.get(b) is not None:
+            if (a, b) in by_ai:  # the page marks these, so a wrong guess is easy to spot and undo
+                ai_of.setdefault(a, []).append(n_of[b])
+                ai_of.setdefault(b, []).append(n_of[a])
             after_of.setdefault(a, []).append(n_of[b])
             before_of.setdefault(b, []).append(n_of[a])
     titled = [(r["record_id"], r.get("标题") or "") for r in rows if n_of.get(r.get("record_id")) is not None and not r.get("排除本人提醒")]
@@ -134,6 +138,7 @@ def build_state(root):
                 "finished_at": str(r.get("完成时间") or "")[:16].replace("T", " "),
                 "reply_timing": timings.get(r["record_id"]), "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], []),
                 "before": before_of.get(r["record_id"], []), "after": after_of.get(r["record_id"], []),
+                "ai_linked": ai_of.get(r["record_id"], []),
                 "related": suggest(r["record_id"], r.get("标题") or "") if linked is not None else []}
         items.append(item)
         h = history.get(r["record_id"], {})
