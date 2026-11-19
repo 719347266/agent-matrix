@@ -180,8 +180,9 @@ def run(config, client, state, *, edition='morning', target_date=None, preview=F
     result['card']=build_card(config,rows,events,target,edition,catchup=result['text'].count('补发')>0,
                               rolls=rolls,board_url=state.get('brief-v1:board-url'))
     if preview:return result
-    # The 08:30 / 21:00 briefs are the only messages still sent on Feishu (a copy also lands in the local inbox).
-    receipt=deliver_card(client,state,key,result['card'],channel='feishu')
+        # The briefs go to Feishu only when the owner wants them there and Feishu is connected; they are always in the inbox.
+    on_feishu=getattr(config,'brief_channel','feishu')=='feishu' and not client.feishu_free()
+    receipt=deliver_card(client,state,key,result['card'],channel='feishu' if on_feishu else 'local')
     state.set('brief-v1:last-ai',result['ai_signatures'])
     for k in result['included_notices']:
         notice=state.get(k);notice['delivered']=message_id(receipt);state.set(k,notice)

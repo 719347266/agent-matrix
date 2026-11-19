@@ -45,6 +45,13 @@ class Config(BaseModel):
     # Where messages to the owner go: "local" = the local client's inbox (Feishu is only the database),
     # "feishu" = Feishu private chat as before.
     notify_channel: Literal["local", "feishu"] = "local"
+    # The 08:30 / 21:00 briefs: "feishu" = also sent to the owner on Feishu, "local" = only in the 心响 inbox.
+    brief_channel: Literal["feishu", "local"] = "feishu"
+    # What happens to things other people send the owner (chats, meetings, Feishu tasks):
+    #   "all"      全能: anything asked of the owner becomes an item and the AI starts on it
+    #   "accepted" 全自动: only what the owner agreed to take ("好的", "我来") becomes an item, then the AI starts
+    #   "manual"   手动: nothing is picked up; the owner adds items by hand
+    intake_mode: Literal["all", "accepted", "manual"] = "all"
     # Where the items live: "local" = state/items.db on this computer (instant clicks), with the Feishu
     # table kept as a backup written in the background; "feishu" = read and write the Feishu table directly;
     # "notion" = state/items.db, backed up to a Notion database, no Feishu needed; "device" = state/items.db only.

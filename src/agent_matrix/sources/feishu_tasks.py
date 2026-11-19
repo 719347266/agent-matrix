@@ -80,8 +80,15 @@ def sync(config, client, state, now, *, notify=True):
                        key="feishu-task-merge:" + task["guid"], now=now)
             merged.append(target.get("编号"))
             continue
-        receipt = gateway.create(fields_for(task, config, now.tzinfo), key, "feishu-task")
+        fields = fields_for(task, config, now.tzinfo)
+        waits = getattr(config, "intake_mode", "all") == "accepted"
+        if waits:  # 全自动: a task someone assigned waits for the owner's yes before it counts
+            fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
+        receipt = gateway.create(fields, key, "feishu-task")
         created.append(receipt["record_id_list"][0])
+        if waits:
+            from ..thread import judge
+            judge(client.root, created[-1], "ask", "别人在飞书任务里分给你的，等你确认接不接")
     # Completion follows the Feishu task, whether the item was created from it or merged with it.
     by_link = {}
     for r in all_rows:

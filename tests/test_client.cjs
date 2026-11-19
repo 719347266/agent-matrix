@@ -128,6 +128,18 @@ function reset(item) {
   await evaluate("setLink(1,2,false)");
   assert.deepEqual(plain("[byN(1).after,byN(2).before]"),[[],[]]);
   assert.equal(evaluate('CMD.link(2,"https://x/docx/NEW")'),"2 交付链接 https://x/docx/NEW");
+  // Every path is the owner's choice: what is taken in, which tools are read, where briefs go; and items can be added by hand.
+  evaluate('D.settings={intake_mode:"accepted",sources:{meetings:true,chats:false,tasks:true},brief_channel:"feishu"}; D.system={record:{feishu_ready:true}}; S.setTab="src"');
+  let src=evaluate("sysPage()");
+  for (const label of ["全能模式","全自动模式","手动模式","读会议","读聊天","读飞书任务","Slack"]) assert.ok(src.includes(label), label);
+  assert.match(src,/class="mode on" aria-pressed="true" onclick="setSetting\('intake_mode','accepted'\)"/);
+  assert.match(evaluate('S.setTab="general"; sysPage()'),/早晚简报也发到飞书/);
+  evaluate('D.system={record:{feishu_ready:false}}');   // nothing connected: no Feishu switches, notifications stay in the app
+  assert.match(evaluate('S.setTab="src"; sysPage()'),/没有接入/); assert.doesNotMatch(evaluate("sysPage()"),/读会议/);
+  assert.match(evaluate('S.setTab="general"; sysPage()'),/所有通知都只在心响里/);
+  await evaluate('setSetting("intake_mode","all")');
+  assert.deepEqual(plain("[D.settings.intake_mode,D.settings.auto_assign,D.settings.prework_enabled]"),["all",true,true]);
+  evaluate("addOpen()"); assert.match(evaluate("addView()"),/要做什么[\s\S]*谁来做[\s\S]*创建/); evaluate("S.adding=null");
   // The inbox sorts by what the owner has to do, and says it in plain words.
   evaluate(`TODAY="2026-11-17"; D.items=[{n:65,title:"标签更新",status:"待验收",who:"AI"},{n:66,title:"付费归因",status:"完成",who:"AI"},{n:74,title:"加到总表",status:"未开始",who:"AI"}];
     D.inbox=[{id:1,at:"2026-11-17T09:00:00",kind:"done",title:"AI 做完了，请你验收",refs:[65],read:true,blocks:[]},

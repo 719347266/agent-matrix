@@ -67,7 +67,8 @@ button:disabled{opacity:.5;cursor:wait}
 .topbar{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:12px;padding:12px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
 .topbar h1{font-size:16px;font-weight:650;margin:0;white-space:nowrap}
 .topbar h1 .c{color:var(--ink3);font-weight:500;margin-left:6px}
-.search{margin-left:auto;position:relative;flex:0 1 340px}
+.search{position:relative;flex:0 1 340px}
+#add-btn{margin-left:auto}
 .search input{width:100%;padding-left:30px;background:var(--panel)}
 .search svg{position:absolute;left:9px;top:50%;width:15px;height:15px;margin-top:-7.5px;stroke:var(--ink3);fill:none;stroke-width:1.8}
 .content{padding:16px 24px 90px}
@@ -251,6 +252,11 @@ button:disabled{opacity:.5;cursor:wait}
 .set-sec+.set-sec{margin-top:22px}
 .set-adv{margin:20px 0 0}.set-adv>summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink2);margin:0 2px 8px}
 .states{display:flex;gap:6px 16px;flex-wrap:wrap}
+.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mode{display:flex;flex-direction:column;gap:6px;text-align:left;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--panel);color:var(--ink)}
+.mode span{font-size:12.5px;color:var(--ink2);font-weight:400}.mode:hover{background:var(--hover)}
+.mode.on{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset}
+@container (max-width:640px){.modes{grid-template-columns:1fr}}
 .ob-mask{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(10,10,14,.5);padding:20px}
 .ob{width:min(600px,100%);max-height:calc(100vh - 40px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 26px 18px;box-shadow:0 24px 60px rgba(0,0,0,.28)}
 .ob h2{margin:14px 0 4px;font-size:19px}.ob-sub{margin:0 0 16px;color:var(--ink2)}
@@ -262,7 +268,7 @@ button:disabled{opacity:.5;cursor:wait}
 .ob-card span{font-size:12.5px;color:var(--ink2)}
 .ob-field{display:block;margin:0 0 12px}.ob-field span{display:block;font-size:12.5px;color:var(--ink2);margin:0 0 4px}.ob-field input{width:100%;height:34px;padding:4px 10px}
 .ob-foot{display:flex;gap:8px;align-items:center;margin-top:18px}
-@media (max-width:560px){.ob-cards{grid-template-columns:1fr}}
+@media (max-width:560px){.ob-cards,.modes{grid-template-columns:1fr}}
 .set-sec{scroll-margin-top:70px}
 .set-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);gap:6px 28px;align-items:center;padding:14px 16px;border-top:1px solid var(--line2)}
 .set-row:first-child{border-top:0}
@@ -339,6 +345,7 @@ button:disabled{opacity:.5;cursor:wait}
   <main class="main">
     <div class="topbar">
       <h1 id="ttl">心响</h1>
+      <button class="btn pri" id="add-btn" onclick="addOpen()">＋ 新建事项</button>
       <label class="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
         <input id="q" placeholder="搜索事项" oninput="S.q=this.value.trim();render()" onkeydown="searchKey(event)" aria-label="搜索事项"></label>
     </div>
@@ -350,6 +357,7 @@ button:disabled{opacity:.5;cursor:wait}
 <div id="actions" role="status" aria-live="polite"></div>
 <div id="viewer"></div>
 <div id="onboard"></div>
+<div id="adder"></div>
 <div class="toast" id="toast" role="status"><span id="toast-text"></span><button id="toast-btn"></button></div>
 <script>
 /* appearance: follow the system unless the owner picked one (remembered on this computer) */
@@ -376,7 +384,7 @@ async function api(path, body, ms=12000){
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
-function midEdit(){ return !!S.ob||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
+function midEdit(){ return !!S.ob||!!S.adding||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
@@ -585,6 +593,7 @@ function sub(i){
   if(isWorking(i)){ const c=jobOf(i); return `<div class="s"><b>${esc(c.driver||"AI")}</b> 正在做：${esc(String(c.step||"").replace(/^\d\/4\s*/,""))}，已 ${c.minutes} 分钟</div><div class="bar"><i style="width:${stepIndex(c)*25}%"></i></div>`; }
   if(blockedAI(i)) return `<div class="s wrap"><b>AI 问：</b>${esc(i.blocker)}</div>`;
   const j = D.judgments && D.judgments[i.n];
+  if(j && i.status==="待确认" && j.decision==="ask") return `<div class="judge"><b>等你确认接不接</b>　${esc(j.reason||"")}</div>`;
   if(j && i.status==="待确认") return `<div class="judge"><b>AI 判断：${esc({ai:"能独立做",prep:"需要你，AI 可先备材料",me:"需要你自己来",skip:"不用做",done:"已经办完"}[j.decision]||"")}</b>　${esc(j.reason||"")}</div>`;
   const dv=(D.deliverables[i.n]||[]).length;
   const parts=[i.source?`来自${esc(i.source)}`:"", dv&&["完成","待验收"].includes(i.status)?`AI 交付 v${dv}`:"", i.rejected&&i.status==="进行中"?"按你的意见在改":""].filter(Boolean);
@@ -769,8 +778,12 @@ function autoSwitch(){
     ? "已开启：AI 先看这件事之后的聊天，你已经办完的直接关掉、不用做的放下，能独立做的接手，要你拍板的先备材料，只能你做的留在这里。"
     : "开启后，新进来的事先让 AI 看上下文再判断：办完的关掉、不用做的放下、能做的接手、要你来的先备材料。对外发送、审批、付款这类事 AI 不会接手。"}</span></div></div>`;
 }
+const SOURCE_KEY={meeting_watch_enabled:"meetings",chat_watch_enabled:"chats",feishu_tasks_enabled:"tasks"};
 async function setSetting(key, on){
-  D.settings = {...(D.settings||{}), [key]:on}; render();
+  D.settings = {...(D.settings||{}), [key]:on};
+  if(SOURCE_KEY[key]) D.settings.sources={...(D.settings.sources||{}), [SOURCE_KEY[key]]:on};
+  if(key==="intake_mode"){ if(on!=="manual") D.settings.prework_enabled=true; if(on==="all") D.settings.auto_assign=true; }
+  render();
   if(LIVE){ try{ await api("/api/settings",{[key]:on}); toast("已保存"); }catch(e){ toast("没保存成功，连不上本机服务"); } load(); }
 }
 async function toggleAuto(on){
@@ -801,6 +814,28 @@ function memPage(){
 }
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
 function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }
+/* ---------- 手动新建一件事 ---------- */
+function addOpen(){ S.adding={who:"我"}; render(); setTimeout(()=>$("#add-title")?.focus(),30); }
+function addClose(){ ["add-title","add-note","add-due"].forEach(k=>drafts.delete(k)); S.adding=null; render(); }
+function addView(){
+  const a=S.adding;
+  return `<div class="ob-mask" onclick="if(event.target===this)addClose()"><div class="ob" role="dialog" aria-modal="true" aria-label="新建事项">
+    <h2 style="margin-top:0">新建事项</h2>
+    <label class="ob-field"><span>要做什么</span><input id="add-title" data-draft="add-title" maxlength="60" placeholder="一句话写清楚这件事" onkeydown="if(event.key==='Enter')addSubmit();if(event.key==='Escape')addClose()"></label>
+    <label class="ob-field"><span>补充说明（可不填）</span><textarea id="add-note" data-draft="add-note" rows="3" style="width:100%" placeholder="背景、要求、做到什么程度算完"></textarea></label>
+    <div class="ob-field"><span>谁来做</span><div class="chips" style="margin:0">${[["我","我自己做"],["AI","交给 AI"]].map(([k,l])=>`<button class="chip ${a.who===k?"on":""}" onclick="S.adding.who='${k}';render()">${l}</button>`).join("")}</div></div>
+    <label class="ob-field"><span>什么时候要（可不填）</span><input id="add-due" data-draft="add-due" placeholder="明天、周五、11-25" onkeydown="if(event.key==='Enter')addSubmit()"></label>
+    <div class="ob-foot"><span style="flex:1"></span><button class="btn" onclick="addClose()">取消</button><button class="btn pri" ${a.busy?"disabled":""} onclick="addSubmit()">${a.busy?"正在创建…":"创建"}</button></div></div></div>`;
+}
+async function addSubmit(){
+  const a=S.adding; if(!a||a.busy) return;
+  const title=$("#add-title").value.trim(), note=$("#add-note").value.trim(), due=$("#add-due").value.trim();
+  if(!title) return $("#add-title").focus();
+  if(!LIVE){ const n=Math.max(0,...D.items.map(i=>i.n))+1; D.items.unshift({n,title,who:a.who,status:"未开始",next:note||title,created:TODAY,before:[],after:[],related:[]}); addClose(); toast(`已创建 #${n}。原型`); return openItem(n); }
+  a.busy=true; render();
+  try{ const r=await api("/api/item/new",{title,note,due,who:a.who},40000); addClose(); toast(`已创建 #${r.n}${a.who==="AI"?"，AI 马上开始":""}`); await load(); if(byN(r.n)) openItem(r.n); }
+  catch(e){ a.busy=false; render(); toast(e.confirmed?e.message:"没创建成功，连不上本机服务"); }
+}
 /* ---------- 新手引导：第一次打开时走一遍，之后在 设置 → 通用 里能再打开 ---------- */
 function obOpen(){ S.ob={step:0}; render(); }
 async function obSaveMe(){
@@ -818,16 +853,18 @@ const OB=[
   {key:"me",title:"怎么称呼你",sub:"会议和群聊里提到这些称呼时，才算是你的事。",body:st=>{ const me=st.me||{};
     return `<label class="ob-field"><span>你的名字</span><input id="ob-name" data-draft="ob-name" value="${esc(me.name||"")}" placeholder="和飞书里的名字一致"></label>
       <label class="ob-field"><span>同事还怎么叫你</span><input id="ob-alias" data-draft="ob-alias" value="${esc((me.aliases||[]).join("、"))}" placeholder="可以留空；多个用顿号隔开"></label>`; }},
-  {key:"source",title:"从哪里收进新的事",sub:"下面是现在的连接情况，可以以后再在设置里调整。",body:(st,s)=>{ const r=s.record||{};
-    return `<div class="list">${setRow("后台程序","收消息、整理、提醒都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)}
-      ${setRow("飞书",r.feishu_ready?"":"还没有连接飞书，只能手动添加事项。","",r.feishu_ready?pushLine(s):"")}
-      ${setRow("Slack",s.slack?`已连接 ${esc(s.slack.team||"")}`:"可选。需要时到 设置 → 消息来源 里连接。",`<span class="eng-state ${s.slack?"ok":""}">${s.slack?"已连接":"未连接"}</span>`)}</div>`; }},
+  {key:"source",title:"接入你的办公工具",sub:"接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",body:(st,s)=>{ const r=s.record||{}, on=st.sources||{};
+    return `<div class="list">${r.feishu_ready
+        ?setRow("飞书","已接入","",pushLine(s))+setRow("读会议","",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","",toggle("feishu_tasks_enabled",on.tasks))
+        :setRow("飞书","没有接入。需要的话，按安装说明运行一次 setup。",`<span class="eng-state">未接入</span>`)}
+      ${setRow("Slack",s.slack?`已接入 ${esc(s.slack.team||"")}`:"需要时到 设置 → 消息来源 里粘贴 Token 连接。",`<span class="eng-state ${s.slack?"ok":""}">${s.slack?"已接入":"未接入"}</span>`)}
+      ${setRow("后台程序","收消息、整理、提醒都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)}</div>`; }},
+  {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在 设置 → 消息来源 里随时能换。",body:st=>modeCards(st)},
   {key:"ai",title:"让哪个 AI 来做事",sub:"选一个并测一下能不能连通。以后可以随时换。",body:(st,s)=>{ const found=s.engines||{}, cindy=st.cindy||{};
     return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]]))}
       ${st.engine==="cindy"?cindyRows(cindy):engineRow(st.engine==="claude"?"claude":"codex",st,found[st.engine==="claude"?"claude":"codex"])}</div>`; }},
-  {key:"auto",title:"让 AI 做到哪一步",sub:"两个开关都可以随时在页面上改。对外发送、审批、付款，AI 永远不会碰。",body:st=>
-    `<div class="list">${setRow("新进来的事，AI 先判断",st.auto_assign?"AI 先看上下文：办完的关掉，能做的接手，要你定的先备材料。":"已关：新进来的事都等你来定谁做。",toggle("auto_assign",st.auto_assign))}
-      ${setRow("自动开工",st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled))}</div>`},
+  {key:"notify",title:"通知发到哪",sub:"AI 做完了、卡住了、有新的事，都会在心响里提醒你。",body:(st,s)=>
+    `<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`},
 ];
 function obView(){
   const i=S.ob.step, step=OB[i], last=i===OB.length-1;
@@ -912,12 +949,24 @@ function sourceSection(s){
   const slackHelp=me?"":`<details><summary>怎么拿到这个 Token</summary><div class="d" style="margin-top:6px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头）。</div></details>`;
   const tried=!t?"":t.busy?`<div class="hint" style="margin:0">正在读 Slack，最多要一分钟</div>`:t.error?`<div class="hint" style="margin:0;color:var(--red)">${esc(t.error)}</div>`
     :`<div class="hint" style="margin:0 0 6px">最近 24 小时：看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑，不建事项）</div>${(t.lines||[]).map(m=>`<div class="d">· ${esc(m.text)}（${esc(m.chat_name)} ${esc(m.sender_name)}）</div>`).join("")}`;
-  return setSec("src","从哪里收进新的事","",
-    setRow("飞书","飞书里只发 08:30 早报和 21:00 晚报，其余消息都在心响里。","",pushLine(s))
+  const st=D.settings||{}, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready;
+  const feishu=!fs?setRow("飞书","没有接入。要接入，按安装说明运行一次 setup；不接也可以，事项自己新建就行。",`<span class="eng-state">未接入</span>`)
+    :setRow("飞书","","",pushLine(s))
+     +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
+     +setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))
+     +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));
+  return setSec("mode","收到消息怎么处理","",`<div class="set-row" style="display:block">${modeCards(st)}</div>`)
+   +setSec("src","从哪里收进新的事",manual?"现在是手动模式，下面这些来源都不会自动收。":"",
+    feishu
     +setRow("Slack",slackDesc,slackCtl,slackHelp+tried)
     +filterRow(r)
     +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
       `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`));
+}
+const MODES=[["all","全能模式","别人找你的事都接进来，AI 直接开始做。"],["accepted","全自动模式","你答应了（回了「好的」「我来」）才接进来，然后 AI 开始做。"],["manual","手动模式","什么都不自动接，要做的事自己新建。"]];
+function modeCards(st){
+  const cur=st.intake_mode||"all";
+  return `<div class="modes">${MODES.map(([k,l,d])=>`<button class="mode ${cur===k?"on":""}" aria-pressed="${cur===k}" onclick="setSetting('intake_mode','${k}')"><b>${l}</b><span>${d}</span></button>`).join("")}</div>`;
 }
 const PUSH=[["im.message.receive_v1","你的回复"],["card.action.trigger","卡片按钮"],["task.task.update_user_access_v2","飞书任务"]];
 function pushLine(s){
@@ -942,10 +991,17 @@ function dataSection(s){
       `<div class="chips">${[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]].map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>`,form)
     +setRow("备份状态",storeLine(s.store||{},mode),""));
 }
+function notifyRow(s){
+  const st=D.settings||{}, fs=(s.record||{}).feishu_ready;
+  return fs?setRow("早晚简报也发到飞书",st.brief_channel==="local"?"已关：08:30 早报和 21:00 晚报只在心响里。":"08:30 早报和 21:00 晚报同时发到你的飞书。其余通知都只在心响里。",
+      `<div class="switch ${st.brief_channel!=="local"?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${st.brief_channel!=="local"}" tabindex="0" onclick="setSetting('brief_channel','${st.brief_channel==="local"?"feishu":"local"}')"><div class="tr"></div></div>`)
+    :setRow("通知","所有通知都只在心响里。","");
+}
 function generalSection(s){
   const t=savedTheme();
   return setSec("general","通用","",
     setRow("新手引导","重新走一遍首次设置。",`<button class="btn" onclick="obOpen()">打开引导</button>`)
+    +notifyRow(s)
     +setRow("外观","",`<div class="chips">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)
     +setRow("后台程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`));
 }
@@ -1331,7 +1387,7 @@ function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on)
 function render(){
   const focused=document.activeElement, focusKey=focused?.dataset?.draft;
   const selection=focusKey?[focused.selectionStart,focused.selectionEnd]:null;
-  for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft]")) drafts.set(field.dataset.draft,field.value);
+  for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft], #adder [data-draft]")) drafts.set(field.dataset.draft,field.value);
   putHTML("#actions",commandView());
   for(const b of document.querySelectorAll("[data-n]")) b.disabled=!!pendingFor(Number(b.dataset.n));
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
@@ -1349,8 +1405,9 @@ function render(){
   let changed=putHTML("#main",solo?`<div class="solo">${itemView(item)}</div>`:page());
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
+  changed=putHTML("#adder",S.adding?addView():"")||changed;
   if(changed){
-    for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft]")){
+    for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft], #adder [data-draft]")){
       if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);
       if(focusKey===field.dataset.draft){
         field.focus({preventScroll:true});

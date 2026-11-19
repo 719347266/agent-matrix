@@ -467,6 +467,33 @@ def scenario_polling():
     world(lambda w: w.__setitem__("search", []))
 
 
+def scenario_modes():
+    print("\n[11] 三种接收模式和手动新建", flush=True)
+    S = "接收模式"
+    from agent_matrix import manual
+    from agent_matrix.config import save
+    global CONFIG
+    made = manual.add(ROOT, "【测试】手动新建的事", who="我", due="明天")
+    row = next((i for i in items().values() if i["n"] == made["n"]), {})
+    check(S, "手动新建：有编号、状态未开始、截止日算好", made["n"] > 0 and one(row.get("状态")) == "未开始" and row.get("截止日"), row.get("标题"))
+    CONFIG = CONFIG.model_copy(update={"intake_mode": "manual"})
+    save(ROOT / "config.yaml", CONFIG)
+    world(lambda w: w["tasks"].append({"guid": "sbx-task-manual", "summary": "【测试】手动模式下来的任务", "url": "https://applink.feishu.cn/client/todo/detail?guid=sbx-task-manual",
+                                       "members": [{"id": OWNER, "role": "assignee"}], "created_at": str(int(NOW.timestamp() * 1000))}))
+    r = dispatch("task.task.update_user_access_v2", {})
+    r2 = dispatch("vc.meeting.participant_meeting_ended_v1", {"meeting_id": "9000000000000000099"})
+    check(S, "手动模式：飞书任务和会议推送都不接", r == "manual" and r2 == "manual" and not by_key("feishu-task:sbx-task-manual"), {"task": r, "meeting": r2})
+    CONFIG = CONFIG.model_copy(update={"intake_mode": "accepted"})
+    save(ROOT / "config.yaml", CONFIG)
+    r = dispatch("task.task.update_user_access_v2", {})
+    got = by_key("feishu-task:sbx-task-manual")
+    from agent_matrix.thread import judgments
+    check(S, "全自动模式：别人分来的任务先进「等你确认接不接」，不直接开工",
+          len(got) == 1 and one(got[0].get("状态")) == "待确认" and judgments(ROOT).get(got[0]["record_id"], {}).get("decision") == "ask", r)
+    CONFIG = CONFIG.model_copy(update={"intake_mode": "all"})
+    save(ROOT / "config.yaml", CONFIG)
+
+
 def lifecycle_and_errors():
     print("\n[9] 运行日志：状态流转与错误", flush=True)
     S = "运行日志"
@@ -499,7 +526,7 @@ if __name__ == "__main__":
             step(made)
         except Exception:
             check(step.__name__, "场景运行出错", False, traceback.format_exc()[-600:])
-    for step in (scenario_feishu_task, scenario_idle, lambda: scenario_page(made), scenario_polling, lifecycle_and_errors):
+    for step in (scenario_feishu_task, scenario_idle, lambda: scenario_page(made), scenario_polling, scenario_modes, lifecycle_and_errors):
         try:
             step()
         except Exception:

@@ -216,6 +216,8 @@ class Listener:
         return "updated" if in_place else "handled"
 
     def on_meeting(self, config, client, state, event):
+        if config.intake_mode == "manual":
+            return "manual"
         from .meeting_watch import MeetingQueue, MeetingSource, ingest
         mid = event.get("meeting_id") or (event.get("note_source") or {}).get("source_entity_id")
         if not mid:
@@ -226,6 +228,8 @@ class Listener:
 
     def on_task(self, config, client, state, event):
         from .sources import feishu_tasks
+        if config.intake_mode == "manual":
+            return "manual"
         return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if config.feishu_tasks_enabled else "off"
 
     def dispatch(self, key, event):
@@ -264,7 +268,7 @@ class Listener:
         Feishu does not push meeting events) and starts the AI employee as soon as a transcript is ready.
         Returns the meetings that just became ready (empty when nothing happened, so the log stays quiet).
         A failure here is recorded and never stops the other minute jobs."""
-        if not config.meeting_watch_enabled:
+        if not config.meeting_watch_enabled or config.intake_mode == "manual":
             return None
         from .meeting_watch import MeetingQueue, MeetingSource, check
         from . import activity
@@ -333,14 +337,14 @@ class Listener:
         if self.every("chats", 120) and not no_feishu:
             def chat_poll(config, client, state):
                 from .sources import chats
-                if not config.chat_watch_enabled:
+                if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
         if self.every("slack", 60):  # search: ~2 calls per poll, well under Slack limits
             def slack_poll(config, client, state):
                 from .sources import slack
-                if not config.chat_watch_enabled:
+                if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
                 out = slack.poll(config, self.root, state, datetime.now(TZ))
                 if isinstance(out, dict) and out.get("candidates"):
@@ -350,7 +354,8 @@ class Listener:
         if self.every("tasks", 900) and not no_feishu:
             def tasks(config, client, state):
                 from .sources import feishu_tasks
-                return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if config.feishu_tasks_enabled else "off"
+                on = config.feishu_tasks_enabled and config.intake_mode != "manual"
+                return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if on else "off"
             jobs.append(("tasks", tasks))
         if self.every("worker", 120):
             self.wake_worker(load(self.path))

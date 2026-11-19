@@ -40,3 +40,11 @@ notion_database_id: ''
 
 # 本机 Claude 干活时可用的 MCP 工具。["*"] = 你在 Claude 里已连上的全部 MCP（发送、发布、合并、删除类一律禁止）；[] = 不用。
 worker_mcp_tools: []
+
+# 别人找你的事怎么处理（也可以在心响「设置 → 消息来源」或首次引导里选）：
+#   all      全能模式：别人找你的事都接进来，AI 直接开始做
+#   accepted 全自动模式：你答应了（回了「好的」「我来」）才接进来，然后 AI 开始做
+#   manual   手动模式：什么都不自动接，要做的事在心响里自己新建
+intake_mode: all
+# 08:30 早报和 21:00 晚报：feishu = 同时发到飞书；local = 只在心响里。其余通知一直只在心响里。
+brief_channel: feishu

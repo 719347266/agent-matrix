@@ -204,6 +204,8 @@ def build_state(root):
         cfg = load_config(root / "config.yaml")
         settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model}
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
+        settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
+                        sources={"meetings": cfg.meeting_watch_enabled, "chats": cfg.chat_watch_enabled, "tasks": cfg.feishu_tasks_enabled})
         settings.update(apps=found, pickup_app=local_sessions.pickup_choice(root, found),
                         gpt_open=local_sessions.gpt_open_choice(root, found))
     except Exception as exc:
@@ -420,6 +422,15 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
                 return self._send(200, {"ok": True, "rules": memory.rules(root)})
+            if path == "/api/item/new":  # the owner adds an item by hand
+                from . import manual
+                from .models import MatrixBusy, MatrixError
+                try:
+                    return self._send(200, {"ok": True, **manual.add(root, body.get("title"), body.get("who") or "我", body.get("due"), body.get("note"))})
+                except MatrixBusy:
+                    return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/item/link":  # string two items together (or take the link away): earlier → later
                 from . import itemlinks
                 from .models import MatrixError
@@ -463,6 +474,25 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if "onboarded" in body:
                     thread.set_setting(root, "onboarded", bool(body["onboarded"]))
+                switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled")
+                if (body.get("intake_mode") in ("all", "accepted", "manual") or body.get("brief_channel") in ("feishu", "local")
+                        or any(k in body for k in switches)):
+                    from .config import load as load_config, save as save_config
+                    config = load_config(root / "config.yaml")
+                    if body.get("brief_channel") in ("feishu", "local"):
+                        config.brief_channel = body["brief_channel"]
+                    for key in switches:
+                        if key in body:
+                            setattr(config, key, bool(body[key]))
+                    if config.meeting_watch_enabled and not config.meeting_watch_started_at:  # only meetings from today on
+                        config.meeting_watch_started_at = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+                    if body.get("intake_mode") in ("all", "accepted", "manual"):
+                        config.intake_mode = body["intake_mode"]
+                        if config.intake_mode != "manual":  # what is taken in gets worked on
+                            config.prework_enabled = True
+                        if config.intake_mode == "all":      # 全能: the AI also decides on its own what it can do
+                            thread.set_setting(root, "auto_assign", True)
+                    save_config(root / "config.yaml", config)
                 if "owner_name" in body or "owner_aliases" in body:  # how the owner is addressed in meetings and chats
                     from .config import load as load_config, save as save_config
                     config = load_config(root / "config.yaml")

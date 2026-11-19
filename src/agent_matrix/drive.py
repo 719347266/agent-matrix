@@ -305,6 +305,8 @@ def _prepare_chat(root, config, driver):
             pass
         data = add_followups(client, json.loads(path.read_text(encoding="utf-8")), now())
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        # the batch keeps them too: the program checks the owner's "好的" against these lines, not the model's word
+        (source / path.name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception as exc:
         activity.swallowed(root, "drive._prepare_chat", exc)
     header = (f"本批聊天：batch_id = {batch}。候选消息：{Path(prep['candidates_path']).name}；结构见 review.schema.json。\n"

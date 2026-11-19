@@ -44,6 +44,8 @@ class ChatAction(BaseModel):
     confidence: float = Field(ge=0, le=1)
     # Number of an item this one continues (the next step after it); see related_items.json. Not the same thing.
     follows: int | None = None
+    # The owner's own words agreeing to take it ("好的", "我来"), copied from the message's `after` lines.
+    accepted_quote: str | None = Field(default=None, max_length=80)
 
 
 class ChatReview(BaseModel):
@@ -149,6 +151,22 @@ def _batch(root, batch_id):
     return json.loads((Path(root) / "state/chat-batches" / batch_id / "candidates.json").read_text())
 
 
+def owner_accepted(config, a, m):
+    """Did the owner agree to take this? Their own message is a yes; otherwise one of the lines they wrote
+    after it must contain the words the model quoted. Checked in code: the model cannot invent a "好的"."""
+    if m.get("sender_name") == "我":
+        return True
+    quote = (a.accepted_quote or "").strip()
+    if not quote:
+        return False
+    names = {config.owner_name, "我", *getattr(config, "owner_aliases", [])} - {""}
+    for line in m.get("after") or []:
+        head, _, said = str(line).partition("] ")
+        if quote in said and any(head.endswith(" " + name) for name in names):
+            return True
+    return False
+
+
 def validate(config, review, root):
     from .meeting_review import aliases, resolve_due, MIN_CONFIDENCE
     batch = _batch(root, review.batch_id)
@@ -184,6 +202,9 @@ def validate(config, review, root):
             found = parse_date(a.due_phrase.rstrip("前之"), sent.date()) if a.due_phrase and a.due_phrase in m["text"] else None
             if not found or found.isoformat() != a.due_date:
                 a.due_date = a.due_phrase = None
+        if (getattr(config, "intake_mode", "all") == "accepted" and a.owner_name == config.owner_name
+                and not owner_accepted(config, a, m)):
+            continue  # 全自动: asked of the owner but not taken on by them, so it is not an item
         if a.confidence >= MIN_CONFIDENCE:
             kept.append((a, m))
     return kept

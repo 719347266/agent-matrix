@@ -366,12 +366,19 @@ def publish(config, client, state, review):
                        detail=f"[{action.timestamp}] {action.quote}",key=prefix+":merge:"+fields["去重键"],now=datetime.now(TZ))
             merged.append(target.get("编号"))
             continue
+        handed=(getattr(config,"intake_mode","all")=="accepted" and fields["执行方"][0]!="别人"
+                and speaker_of(transcript,action.quote) not in (None,config.owner_name))
+        if handed:  # 全自动: someone else gave it to the owner in the meeting; it waits for the owner's yes
+            fields.update({"状态":["待确认"],"进度":"0/1 待确认"})
         receipt=state.once(prefix+":"+fields["去重键"],lambda f=fields:client.call("+record-batch-create",*coords,
                            "--table-id",config.tables["事项表"],"--json",js({"create_records":[f]}),write=True))
         ids=receipt.get("record_id_list")
         if not isinstance(ids,list) or len(ids)!=1:
             raise MatrixError("事项创建回执缺少唯一记录 ID，停止。")
         task_ids.extend(ids)
+        if handed:
+            from .thread import judge
+            judge(client.root,ids[0],"ask","别人在会上交给你的，等你确认接不接")
         if rows is not None:
             from . import itemlinks
             itemlinks.link_by_number(client.root, rows, ids[0], action.follows)
