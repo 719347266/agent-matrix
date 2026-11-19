@@ -124,7 +124,7 @@ function reset(item) {
              {id:4,at:"2026-11-16T12:29:00",kind:"prep",title:"13:00 复盘会",text:"30 分钟后开始",refs:[],read:true,blocks:[]},
              {id:5,at:"2026-11-17T12:46:00",kind:"system",title:"⚠ 会议「例会」有内容被校验拦掉了，可能漏了待办",text:"去掉 1 条",refs:[],read:true,blocks:[]}]; S.inboxTab="";`);
   assert.deepEqual(plain("D.inbox.map(inboxBucket)"), ["need","today","today","old","today"]);
-  assert.equal(evaluate('inboxBucket({kind:"blocked",at:"2026-11-15T09:00:00",title:"AI 卡住，需要你补材料",refs:[]})'),"old","an old question about an item that is gone asks nothing of the owner");
+  assert.equal(evaluate('inboxBucket({kind:"blocked",at:"2026-11-15T09:00:00",title:"AI 卡住，需要你补材料",refs:[],read:true})'),"old","an old question about an item that is gone asks nothing of the owner");
   page=evaluate("inboxPage()");
   assert.match(page,/要你处理[\s\S]*#65 标签更新[\s\S]*今天发生的[\s\S]*#74 加到总表/);
   assert.match(page,/来自聊天/); assert.match(page,/和录音对不上，没有采用/); assert.match(page,/查看更早的 1 条/);

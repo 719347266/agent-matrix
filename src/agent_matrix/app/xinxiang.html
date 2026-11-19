@@ -611,7 +611,8 @@ function inboxText(m,one){
 const meetingSoon = m => Date.now()-new Date(m.at).getTime() < 45*60000;          // sent ~30 minutes before the meeting
 /* need: the owner has to do something now.  today / earlier: just so you know. */
 function inboxBucket(m){
-  const when=String(m.at||"").slice(0,10)===TODAY?"today":"old";
+  // unread, or open right now, is never tucked away under "更早"
+  const when=String(m.at||"").slice(0,10)===TODAY||!m.read||m.id===S.openMsg?"today":"old";
   // waiting on the owner only while one of its items still is: an approved or answered one is history
   if(m.kind==="done"||m.kind==="blocked") return (m.refs||[]).map(byN).some(i=>i&&["待验收","卡住"].includes(i.status))?"need":when;
   if(m.kind==="prep") return meetingSoon(m)?"need":"old";
