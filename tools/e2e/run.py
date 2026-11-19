@@ -275,8 +275,8 @@ def scenario_bad_extraction():
     before = inbox_marker()
     out = drive.submit(ROOT, CONFIG, job["id"])
     check(S, "原话对不上的那条被自动去掉，没有入表", out.get("ok") and not by_key("meeting:" + mid), out)
-    warned = [m for m in inbox_since(before) if "校验拦掉" in m["title"] + m["summary"]]
-    check(S, "本人收到「有内容被校验拦掉了」的提醒", bool(warned), [m["title"] for m in inbox_since(before)])
+    warned = [m for m in inbox_since(before) if "和录音对不上，没有采用" in m["title"] + m["summary"]]
+    check(S, "本人收到「有几条内容和录音对不上，没有采用」的提示", bool(warned), [m["title"] for m in inbox_since(before)])
 
 
 def write_delivery(folder, version_note):

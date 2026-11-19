@@ -89,6 +89,10 @@ SCHEMAS = {
         "CREATE TABLE IF NOT EXISTS recalls (waiting_id INTEGER NOT NULL, source_id TEXT NOT NULL, PRIMARY KEY (waiting_id, source_id))",
         "CREATE TABLE IF NOT EXISTS local_session_items (key TEXT PRIMARY KEY, rid TEXT NOT NULL, data TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS local_session_skips (key TEXT PRIMARY KEY)",
+    ], [
+        # items the owner strung together: `later` continues `earlier` (itemlinks.py)
+        """CREATE TABLE IF NOT EXISTS item_links (earlier TEXT NOT NULL, later TEXT NOT NULL, created TEXT NOT NULL,
+            by TEXT NOT NULL DEFAULT '本人', PRIMARY KEY (earlier, later))""",
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

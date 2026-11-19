@@ -196,6 +196,13 @@ button:disabled{opacity:.5;cursor:wait}
 .prop{min-width:0}.prop .k{font-size:11.5px;color:var(--ink3);margin-bottom:2px}
 .prop .v{font-size:13px;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
 .prop .v.muted{color:var(--ink3)}
+.quiet-link{font-size:12px;color:var(--ink3);margin-left:6px}.quiet-link:hover{color:var(--brand)}
+.chain{display:flex;flex-direction:column;gap:6px;margin:10px 24px 0;font-size:12.5px}
+.chain>div{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.chain .k{color:var(--ink3);min-width:4.5em}
+.chain-item{display:inline-flex;align-items:center;gap:6px;max-width:100%;border:1px solid var(--line);border-radius:7px;padding:2px 4px 2px 8px}
+.chain-item a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22em}.chain-item em{font-style:normal;color:var(--ink3)}
+.chain-item .x{border:0;background:none;color:var(--ink3);padding:0 4px;font-size:14px;line-height:1}.chain-item .x:hover{color:var(--red)}
+.chain-item.maybe{border-style:dashed}.chain-pick{padding:0;background:none;gap:6px;flex-wrap:wrap}.chain-pick select{height:28px}.chain-pick input{flex:1;min-width:160px}
 .tabs{display:flex;gap:2px;padding:14px 24px 0;border-bottom:1px solid var(--line2)}
 .tab{border:0;background:none;padding:6px 10px 9px;color:var(--ink2);font-size:13px;position:relative}
 .tab:hover{color:var(--ink)}
@@ -524,7 +531,7 @@ const avatar = i => i.who==="AI"?`<span class="who ai" title="AI 做">AI</span>`
 
 /* ---------- actions ---------- */
 const CMD={restore:n=>`${n} 恢复`,approve:n=>`${n} 过`,reject:(n,t)=>`${n} 退 ${t}`,revise:(n,t)=>`${n} 改 ${t}`,add:(n,t)=>`${n} + ${t}`,me:n=>`${n} 我来`,ai:n=>`${n} AI做`,cancel:n=>`${n} 不做`,
-  done:n=>`${n} 完成`,date:(n,t)=>`${n} ${t}`,first:n=>`${n} 先做`,cont:n=>`${n} 继续`,answer:(n,t)=>`${n} + ${t}`};
+  done:n=>`${n} 完成`,link:(n,t)=>`${n} 交付链接 ${t}`,date:(n,t)=>`${n} ${t}`,first:n=>`${n} 先做`,cont:n=>`${n} 继续`,answer:(n,t)=>`${n} + ${t}`};
 /* one row, at most two quiet actions; everything else is in the detail panel */
 function rowButtons(i){
   if(blockedAI(i)) return [["回答…","answer","pri","直接回答 AI 的问题"]];
@@ -558,7 +565,7 @@ async function apply(n,k,arg){
     return submitCommand(body,[n]);
   }
   const i=byN(n);
-  const words={restore:"恢复",approve:"通过",reject:"退回："+arg,revise:"要改："+arg,add:"补充："+arg,answer:arg,me:"我自己来做",ai:"交给 AI 做",cancel:"不做了",done:"完成了",date:"改日期到 "+arg,first:"先做这件",cont:"按现有资料先做出来"}[k];
+  const words={restore:"恢复",approve:"通过",reject:"退回："+arg,revise:"要改："+arg,add:"补充："+arg,answer:arg,me:"我自己来做",ai:"交给 AI 做",cancel:"不做了",done:"完成了",date:"改日期到 "+arg,link:"交付链接换成 "+arg,first:"先做这件",cont:"按现有资料先做出来"}[k];
   say(n,"me","feedback",words);
   if(k==="restore"){ i.status="待确认"; i.finished=null; i.blocker=null; if(D.judgments) delete D.judgments[n]; }
   if(["cancel","done","approve"].includes(k) && n===DEMO_N){ S.working=false; clearInterval(demoWork.h); }
@@ -568,6 +575,7 @@ async function apply(n,k,arg){
   if(k==="ai"){ i.who="AI"; if(i.status==="待确认") i.status="未开始"; }
   if(k==="cancel") i.status="取消";
   if(k==="date") i.due_note=arg;
+  if(k==="link") i.url=arg;
   toast(`已处理（相当于回复「${CMD[k](n,arg)}」）。原型，不改数据`);
   render();
 }
@@ -1149,18 +1157,51 @@ function itemView(i){
   const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
     ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
     [i.status==="取消"?"关闭":"完成",closedText(i)],
-    ["交付",dvs||i.url?`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}`:""],
+    ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="act(${i.n},'link','粘贴新的交付链接',this);return false">${i.url?"换链接":"填链接"}</a>`}`],
     ["来源",`${esc(i.source||"手动")}${i.source_url?`<a href="${esc(i.source_url)}" target="_blank" rel="noopener">原处 ↗</a>`:""}`],
     ["更新",esc(ago(i.updated))]];
   return `<div class="d-head"><div class="d-top"><span class="num">#${i.n}</span>${pill(i)}
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
+    ${chainView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
     <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
 }
+/* ---------- 串起来的事：这件事前面接着哪件、后面还有哪件 ---------- */
+function chainView(i){
+  const tag=(n,dir)=>{ const x=byN(n); if(!x) return ""; const [e,l]=dir==="before"?[n,i.n]:[i.n,n];
+    return `<span class="chain-item"><a href="#" onclick="openItem(${n});return false">#${n} ${esc(x.title)}</a><em>${esc(statusOf(x)[0])}</em><button class="x" title="解开" aria-label="解开和 #${n} 的关联" onclick="setLink(${e},${l},false)">×</button></span>`; };
+  const before=(i.before||[]).map(n=>tag(n,"before")).join(""), after=(i.after||[]).map(n=>tag(n,"after")).join("");
+  const maybe=(i.related||[]).map(byN).filter(Boolean).filter(x=>!(i.before||[]).includes(x.n)&&!(i.after||[]).includes(x.n));
+  const picking=S.linking===i.n;
+  const pick=picking?`<div class="inline chain-pick" onclick="event.stopPropagation()"><select id="link-dir" aria-label="先后"><option value="before">这件事接着它做</option><option value="after">它接着这件事做</option></select>
+      <input id="link-pick" list="link-items" data-draft="link-pick-${i.n}" placeholder="输入编号或标题里的字" onkeydown="if(event.key==='Enter')pickLink(${i.n});if(event.key==='Escape'){S.linking=null;render()}">
+      <datalist id="link-items">${D.items.filter(x=>x.n!==i.n&&!x.hidden).slice(0,200).map(x=>`<option value="#${x.n} ${esc(x.title)}">`).join("")}</datalist>
+      <button class="btn pri" onclick="pickLink(${i.n})">串起来</button><button class="btn ghost" onclick="S.linking=null;render()">取消</button></div>`:"";
+  return `<div class="chain">
+    ${before?`<div><span class="k">前面的事</span>${before}</div>`:""}${after?`<div><span class="k">后面的事</span>${after}</div>`:""}
+    ${maybe.length&&!picking?`<div><span class="k">可能相关</span>${maybe.map(x=>`<span class="chain-item maybe"><a href="#" onclick="openItem(${x.n});return false">#${x.n} ${esc(x.title)}</a><button class="btn link" onclick="linkByAge(${i.n},${x.n})">串起来</button></span>`).join("")}</div>`:""}
+    ${picking?pick:`<div><a href="#" class="quiet-link" style="margin:0" onclick="S.linking=${i.n};render();setTimeout(()=>$('#link-pick')?.focus(),30);return false">${before||after?"再串一件":"和别的事串起来"}</a></div>`}</div>`;
+}
+async function setLink(earlier,later,on){
+  if(!LIVE){ const a=byN(earlier), b=byN(later); if(!a||!b) return;
+    a.after=(a.after||[]).filter(n=>n!==later); b.before=(b.before||[]).filter(n=>n!==earlier);
+    if(on){ a.after.push(later); b.before.push(earlier); } S.linking=null; render(); return; }
+  try{ await api("/api/item/link",{earlier,later,on}); S.linking=null; toast(on?`已串起来：#${earlier} → #${later}`:"已解开"); }
+  catch(e){ toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); }
+  load();
+}
+function pickLink(n){
+  const m=String($("#link-pick")?.value||"").match(/^#?(\d{1,5})/), other=m&&byN(+m[1]);
+  if(!other||other.n===n){ toast("从下拉里选一件事，或输入它的编号"); return $("#link-pick")?.focus(); }
+  drafts.delete("link-pick-"+n);
+  return $("#link-dir").value==="before"?setLink(other.n,n,true):setLink(n,other.n,true);
+}
+/* a suggested pair: the one created first is the earlier step */
+function linkByAge(n,other){ const a=byN(n), b=byN(other); return (a.created||"")<=(b.created||"")?setLink(n,other,true):setLink(other,n,true); }
 function sendSay(){
   const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus();
   if(LIVE){ if(pendingFor(S.item)) return; return submitCommand({kind:"say",n:S.item,text:t},[S.item]); }

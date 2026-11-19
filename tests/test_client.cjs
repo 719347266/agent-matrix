@@ -116,6 +116,18 @@ function reset(item) {
   assert.match(page,/onclick="openItem\(9\)"/); assert.match(page,/逾期1天/);
   assert.doesNotMatch(page,/回复：/);
   assert.match(page,/>看板 ↗/);
+  // An item shows the line it is on, offers likely relatives, and lets the owner replace the deliverable link.
+  evaluate(`D.items=[{n:1,title:"标签调研",status:"完成",who:"AI",created:"2026-11-10",after:[2],before:[],related:[]},
+    {n:2,title:"标签需求文档",status:"待验收",who:"AI",created:"2026-11-12",before:[1],after:[],related:[3],url:"https://x/docx/OLD"},
+    {n:3,title:"标签上线排期",status:"未开始",who:"我",created:"2026-11-14",before:[],after:[],related:[2]}]; S.item=2; S.linking=null;`);
+  let view=evaluate("itemView(byN(2))");
+  assert.match(view,/前面的事[\s\S]*#1 标签调研/); assert.match(view,/可能相关[\s\S]*#3 标签上线排期[\s\S]*串起来/); assert.match(view,/换链接/);
+  assert.match(evaluate("itemView(byN(3))"),/填链接/);
+  await evaluate("linkByAge(2,3)");
+  assert.deepEqual(plain("[byN(2).after,byN(3).before]"),[[3],[2]],"the item created first is the earlier step");
+  await evaluate("setLink(1,2,false)");
+  assert.deepEqual(plain("[byN(1).after,byN(2).before]"),[[],[]]);
+  assert.equal(evaluate('CMD.link(2,"https://x/docx/NEW")'),"2 交付链接 https://x/docx/NEW");
   // The inbox sorts by what the owner has to do, and says it in plain words.
   evaluate(`TODAY="2026-11-17"; D.items=[{n:65,title:"标签更新",status:"待验收",who:"AI"},{n:66,title:"付费归因",status:"完成",who:"AI"},{n:74,title:"加到总表",status:"未开始",who:"AI"}];
     D.inbox=[{id:1,at:"2026-11-17T09:00:00",kind:"done",title:"AI 做完了，请你验收",refs:[65],read:true,blocks:[]},

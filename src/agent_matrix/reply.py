@@ -60,6 +60,7 @@ VERBS = [
     (r"(继续|接着做|继续做|往下做)", "resume"),
     (r"给\s*(\S{1,12})", "delegate"),
     (r"([A-Da-d])", "option"),
+    (r"(?:交付链接|换链接)\s*[:：]?\s*(\S+)", "link"),   # the owner points the deliverable at a new link
     (r"\+\s*(.+)", "material"),
 ]
 
@@ -91,7 +92,7 @@ def parse(text, today):
         for pattern, verb in VERBS:
             found = re.fullmatch(pattern, rest)
             if found:
-                arg = found.group(found.lastindex) if verb in {"reject", "revise", "delegate", "option", "material", "merge"} else ""
+                arg = found.group(found.lastindex) if verb in {"reject", "revise", "delegate", "option", "material", "merge", "link"} else ""
                 if verb == "reject" and not arg.strip():
                     problems.append(f"#{numbers[0]} 退回的话，要改哪里？例如：{numbers[0]} 退 少了定价")
                     break
@@ -167,7 +168,7 @@ class Applier:
     def write(self, row, patch, op, n):
         receipt = self.gateway.update(row, patch, self.key(op, n), f"reply:{self.source}:{self.ref}")
         # What the owner says about an item goes into its notebook, so whoever works on it next sees it.
-        said = {"reject": "本人退回：", "revise": "本人要改：", "material": "本人补充：", "reschedule": "本人改期到 ", "delegate": "本人交给 "}.get(op.verb)
+        said = {"reject": "本人退回：", "revise": "本人要改：", "material": "本人补充：", "reschedule": "本人改期到 ", "delegate": "本人交给 ", "link": "本人把交付链接换成："}.get(op.verb)
         if said and self.client is not None:
             try:
                 from .prework import add_note
@@ -235,9 +236,9 @@ class Applier:
             return f"#{n} {name} → AI 在原来的对话里接着改，改好出新版本 ✓"
         if st == "取消" and op.verb == "cancel":
             return f"#{n} {name} 已经标为不做 ✓" + self.stop_ai(row)
-        if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete"}:
+        if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete", "link"}:
             return f"#{n} {name} 已经是{st}，没动。"
-        if st == "取消" and op.verb in {"no_deliverable", "material", "complete"}:
+        if st == "取消" and op.verb in {"no_deliverable", "material", "complete", "link"}:
             return f"#{n} {name} 已经取消了，没动。"
         if op.verb == "approve":
             if st != "待验收":
@@ -296,6 +297,21 @@ class Applier:
             patch = self.ready_after(row, {"拍板结果": op.arg.upper()})
             self.write(row, patch, op, n)
             return f"#{n} {name} → 选 {op.arg.upper()} ✓"
+        if op.verb == "link":
+            from .values import draft_url
+            url, old = draft_url(op.arg.strip()), draft_url(row.get("交付物链接"))
+            if not url:
+                return f"#{n} {name} 这不是一个能打开的链接（要以 http 开头），没改。"
+            if url == old:
+                return f"#{n} {name} 交付已经是这个链接 ✓"
+            patch = {"交付物链接": url}
+            if st == "完成" or single(row.get("交付情况")) == "待补交付":
+                patch["交付情况"] = ["有交付"]
+            self.write(row, patch, op, n)
+            if self.client is not None:  # kept as a new version, so the earlier link can still be found
+                from .thread import add_deliverable
+                add_deliverable(self.client.root, row["record_id"], summary="你换了交付链接", url=url)
+            return f"#{n} {name} → 交付链接换好了 ✓"
         if op.verb == "material" and (st == "完成" or single(row.get("交付情况")) == "待补交付"):
             link = re.search(r"https?://\S+", op.arg)
             if not link:

@@ -101,6 +101,23 @@ def build_state(root):
     except Exception:
         sessions_of, running_sessions = {}, []
     items, threads, deliverables = [], {}, {}
+    try:  # which items the owner strung together, and which look related but are not linked yet
+        from . import itemlinks
+        from .textmatch import similarity
+        linked = itemlinks.pairs(root)
+    except Exception:
+        linked = []
+    before_of, after_of = {}, {}
+    for a, b in linked:
+        if n_of.get(a) is not None and n_of.get(b) is not None:
+            after_of.setdefault(a, []).append(n_of[b])
+            before_of.setdefault(b, []).append(n_of[a])
+    titled = [(r["record_id"], r.get("标题") or "") for r in rows if n_of.get(r.get("record_id")) is not None and not r.get("排除本人提醒")]
+
+    def suggest(rid, title):
+        joined = {x for pair in linked if rid in pair for x in pair}
+        scored = sorted(((similarity(title, t), other) for other, t in titled if other != rid and other not in joined), reverse=True)
+        return [n_of[other] for score, other in scored[:3] if score >= 0.45]
     for r in rows:
         n = n_of.get(r.get("record_id"))
         if n is None:
@@ -115,7 +132,9 @@ def build_state(root):
                 "finished": _day(r.get("完成时间")), "hidden": bool(r.get("排除本人提醒")),
                 "updated": str(r.get("更新时间") or "")[:19], "created": str(r.get("创建时间") or "")[:19],
                 "finished_at": str(r.get("完成时间") or "")[:16].replace("T", " "),
-                "reply_timing": timings.get(r["record_id"]), "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], [])}
+                "reply_timing": timings.get(r["record_id"]), "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], []),
+                "before": before_of.get(r["record_id"], []), "after": after_of.get(r["record_id"], []),
+                "related": suggest(r["record_id"], r.get("标题") or "") if linked is not None else []}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -396,6 +415,19 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
                 return self._send(200, {"ok": True, "rules": memory.rules(root)})
+            if path == "/api/item/link":  # string two items together (or take the link away): earlier → later
+                from . import itemlinks
+                from .models import MatrixError
+                from .snapshot import _snapshot
+                rid = {int(r.get("编号") or 0): r.get("record_id") for r in _snapshot(root).get("rows") or []}
+                earlier, later = rid.get(int(body.get("earlier") or 0)), rid.get(int(body.get("later") or 0))
+                if not earlier or not later:
+                    return self._send(400, {"ok": False, "reply": "找不到这个编号的事项。"})
+                try:
+                    itemlinks.link(root, earlier, later) if body.get("on", True) else itemlinks.unlink(root, earlier, later)
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True})
             if path == "/api/backup/retry":
                 from . import itemstore
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})

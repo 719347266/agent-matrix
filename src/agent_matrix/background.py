@@ -218,6 +218,24 @@ def related_items(rows, row, limit=5):
     return out
 
 
+def linked_items(root, rows, row):
+    """(before, after): the items the owner strung on one line with this one, as lines for 背景.md."""
+    from . import itemlinks
+    by_id = {r.get("record_id"): r for r in rows}
+
+    def line(rid):
+        r = by_id.get(rid)
+        if not r or _number(r) is None:
+            return None
+        link, summary = _one(r.get("交付物链接")), _one(r.get("预做结果摘要"))
+        return (f"- #{_number(r)} {_one(r.get('标题'))}（{_one(r.get('状态'))}）" + (f" 交付：{link}" if link else "")
+                + (f" 结论：{summary}" if summary else ""))
+    me = row.get("record_id")
+    before = [x for x in map(line, itemlinks.upstream(root, me)) if x]
+    after = [x for x in map(line, itemlinks.downstream(root, me)) if x]
+    return before, after
+
+
 # ---- the pack ---------------------------------------------------------------------------------------
 
 DIG_MORE = """## 不够就自己继续扒（只读，扒到够为止）
@@ -238,6 +256,14 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
     if links:
         parts += ["## 本人给过的链接（先读这些；里面有上一版就在它基础上改）",
                   *[f"- {u}（出自{k}）" for k, u in links[:10]], ""]
+    try:  # the owner strung these together: this item continues the ones before it
+        before, after = linked_items(root, rows, row)
+    except Exception:
+        before, after = [], []
+    if before:
+        parts += ["## 这件事接着前面这些事做（本人串起来的，离得最近的在前；先读它们的交付，在它们的基础上往下做，口径保持一致）", *before, ""]
+    if after:
+        parts += ["## 后面还有这些事要接着做（这次的成果要能让它们直接用）", *after, ""]
     excerpt, transcript = transcript_excerpt(root, row)
     if excerpt:
         where = str(transcript)
@@ -268,7 +294,7 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
         parts += ["## 这件事的工作笔记（之前做到哪、卡在哪）", notes, ""]
     if previous:
         parts += ["## 上一版交付", f"`{previous}`：在它的基础上改，不要从头写。", ""]
-    if len(parts) == 2:
+    if len(parts) == 2:  # nothing found at all
         parts += ["程序没找到现成的背景。按下面的办法自己去扒，至少查一次文档和一次聊天再下结论。", ""]
     parts.append(DIG_MORE)
     return "\n".join(parts)
