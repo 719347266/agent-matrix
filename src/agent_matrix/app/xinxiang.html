@@ -238,6 +238,38 @@ button:disabled{opacity:.5;cursor:wait}
 .scard .task .ok{flex:none;border:1px solid var(--line);border-radius:5px;padding:0 6px;color:var(--ink)}
 .scard select{min-width:0;flex:1;font-size:12px;padding:2px 4px;border-radius:6px}
 .aicard{max-height:60vh;overflow:auto}
+/* settings: one row = what it is (left) and its control (right) */
+.set-nav{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 6px;position:sticky;top:0;z-index:2}
+.set-sec{scroll-margin-top:70px}
+.set-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);gap:6px 28px;align-items:center;padding:14px 16px;border-top:1px solid var(--line2)}
+.set-row:first-child{border-top:0}
+.set-row .k{font-weight:600}
+.set-row .d{font-size:12.5px;color:var(--ink3);margin-top:2px;max-width:46em}
+.set-row .ctl{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.set-row .below{grid-column:1/-1}
+.set-row .ctl .chips{margin:0}
+.set-row input.model{width:180px;height:28px;padding:3px 8px;font-size:12.5px}
+.eng-state{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink3)}
+.eng-state:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--line)}
+.eng-state.ok{color:var(--green)}.eng-state.ok:before{background:var(--green)}
+.eng-state.bad{color:var(--red)}.eng-state.bad:before{background:var(--red)}
+.eng-state.busy:before{background:var(--blue);animation:blink 1.2s infinite}
+.set-row details summary{cursor:pointer;color:var(--brand);font-size:12.5px}
+@container (max-width:640px){.set-row{grid-template-columns:1fr}.set-row .ctl{justify-content:flex-start}}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(16,16,24,.38);display:flex;align-items:center;justify-content:center;padding:24px}
+.modal .box{background:var(--panel);border-radius:14px;box-shadow:var(--shadow);width:min(760px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+.modal .mh{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line2)}
+.modal .mh b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modal .mh .x{margin-left:auto}
+.modal .mb{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.modal .mf{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--ink3)}
+.modal .mf .btn{margin-left:auto}
+.tr-run{font:12px/1.6 ui-monospace,"SF Mono",Menlo,monospace;color:var(--ink2);background:var(--hover);border-radius:8px;padding:6px 10px;white-space:pre-wrap;word-break:break-word;max-height:7.5em;overflow:hidden}
+.tr-task{border-left:3px solid var(--brand);padding:2px 0 2px 10px;color:var(--ink2);white-space:pre-wrap;word-break:break-word}
+.tr-task.short{max-height:9em;overflow:hidden}
+.tr-ai{background:var(--hover);border-radius:12px 12px 12px 4px;padding:8px 12px;white-space:pre-wrap;word-break:break-word;line-height:1.65}
+.tr-sys{align-self:center;font-size:12px;color:var(--green)}
+.tr-at{font-size:11px;color:var(--ink3);margin-bottom:2px}
 @container (max-width:520px){.props{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .solo{background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column}
 .solo .d-head{position:static;border-radius:12px 12px 0 0}
@@ -293,6 +325,7 @@ button:disabled{opacity:.5;cursor:wait}
   <section class="detail" id="detail" aria-label="事项详情"></section>
 </div>
 <div id="actions" role="status" aria-live="polite"></div>
+<div id="viewer"></div>
 <div class="toast" id="toast" role="status"><span id="toast-text"></span><button id="toast-btn"></button></div>
 <script>
 /* appearance: follow the system unless the owner picked one (remembered on this computer) */
@@ -710,32 +743,118 @@ function memPage(){
 }
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
 function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }
+/* ---------- 设置: AI 执行 / AI 对话 / 消息来源 / 数据 / 通用 ---------- */
+const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
+const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}"><div class="sec-h">${title}</div>${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
+const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
 function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
-  const builtin=st.builtin_driver!==false, t=savedTheme();
-  const seen=(w.drivers||[]).map(d=>`<div class="row flat"><span class="ud"></span><span class="who ai">AI</span><div style="min-width:0"><div class="t">${esc(d.driver)}</div><div class="s">最近 ${esc(d.last)}，做完 ${d.done||0} 件${d.open?`，正在做 ${d.open} 件`:""}</div></div><div></div><div></div></div>`).join("");
-  return `<div class="sec-h">通用</div><div class="list"><div class="kv">
-    <div>外观</div><div class="chips" style="margin:0">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>
-    <div>数据在哪</div><div>${storeLine(s.store||{}, (s.record||{}).mode)}</div>
-    <div>本机常驻程序</div><div>${esc(s.listener||"运行中")}</div>
-    <div>飞书推送</div><div>${esc(s.subs||"")}</div>
-    <div>飞书消息</div><div>只发 08:30 早报、21:00 晚报；其余都在心响里，并弹系统提醒</div></div></div>
-  ${recordBlock(s.record||{})}
-  ${sourcesBlock(s.slack)}
-  <div class="sec-h">谁来驱动</div><p class="hint">任何 AI 都能接入：本机 GPT、Claude、Cindy、Cursor……能运行命令的都行。每件事的对话存在心响里，换谁来做都接得上。</p>
-  <div class="switch ${builtin?"on":""}" role="switch" aria-checked="${builtin}" tabindex="0" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 AI 也来干活</b><br><span>${builtin?"开着：有活就自动做，最多同时 10 件。":"关着：只等外部 AI 来领活。"}</span></div></div>
-  ${engineChoice(st.engine||"codex", s.engines||{})}
-  <div class="sec-h">最近接入过的 AI</div><div class="list">${seen||'<div class="empty">还没有记录</div>'}</div>
-  <div class="sec-h">让任何 AI 接入<span class="aside">把下面这段发给它</span></div>
-  <div class="list guide"><pre id="guide">${esc(D.guide||"")}</pre><button class="btn pri" onclick="copyGuide()">复制接入说明</button></div>`; }
-function recordBlock(r){
-  const mode=r.mode||"feishu", opts=[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]];
-  const say={feishu:"事项存在本机，点了立刻生效；飞书多维表格在后台备份，手机上也能看。需要先装好 lark-cli 并初始化。",
-    notion:"事项存在本机，点了立刻生效；Notion 里的「心响事项」数据库在后台同步，手机上也能看。在 Notion 里改的内容会被下一次同步覆盖。",
-    device:"事项只存在这台电脑上，不需要飞书，也不同步到别处。"}[mode];
-  const form=(S.pickNotion||(mode==="notion"&&!r.notion))?`<div class="inline" style="flex-wrap:wrap;padding:12px 0 0;background:none;border:0"><input id="notiontok" type="password" autocomplete="off" placeholder="Integration Secret（ntn_…）"><input id="notionpage" autocomplete="off" placeholder="共享给它的页面链接" onkeydown="if(event.key==='Enter')notionOn()"><button class="btn pri" onclick="notionOn()">连接</button></div>
-    <p class="hint" style="margin:8px 0 0">在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> 新建 Internal integration，复制 Secret；再打开一个页面，右上角 ··· → Connections 加上它，Share → Copy link 粘过来。心响会在这个页面下建「心响事项」数据库。</p>`:"";
-  return `<div class="sec-h">事项记在哪</div><div class="list guide"><div class="chips" style="margin:0">${opts.map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>
-    <p class="hint" style="margin:8px 0 0">${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}</p>${form}</div>`;
+  const nav=[["run","AI 执行"],["talk","AI 对话"],["src","消息来源"],["data","数据"],["general","通用"]];
+  return `<div class="chips set-nav">${nav.map(([k,l])=>`<button class="chip" onclick="document.getElementById('set-${k}').scrollIntoView({behavior:'smooth'})">${l}</button>`).join("")}</div>`
+    +runSection(st,s,w)+talkSection(st)+sourceSection(s)+dataSection(s)+generalSection(s);
+}
+const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"]};
+function engineRow(name,st,found){
+  const [label,cli,key]=ENG[name], t=(st.engine_tests||{})[name], busy=S.testing&&S.testing[name], model=(st.models||{})[name]||"";
+  const state=found===false?`<span class="eng-state bad">没找到 ${cli}</span>`:busy?`<span class="eng-state busy">正在测试…</span>`
+    :!t?`<span class="eng-state">还没测试</span>`:t.ok?`<span class="eng-state ok">已连通，${t.seconds} 秒（${esc(t.at)}）</span>`:`<span class="eng-state bad">连不上（${esc(t.at)}）</span>`;
+  const used=[st.engine===name?"做事":"",st.engine_sort===name?"整理":""].filter(Boolean).join("、");
+  const err=t&&!t.ok&&!busy&&t.error?`<div class="d" style="color:var(--red);margin-top:6px">${esc(t.error)}</div>`:"";
+  return setRow(`${label}<span class="hint" style="margin:0 0 0 8px;font-weight:400">${cli}${used?`　正在用于：${used}`:""}</span>`,
+    `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="claude"?"留空用账号默认":"模型名"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
+    `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err);
+}
+function runSection(st,s,w){
+  const builtin=st.builtin_driver!==false, found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy";
+  const local=[["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]];
+  const seen=(w.drivers||[]).map(d=>`<div>${esc(d.driver)}：最近 ${esc(d.last)}，做完 ${d.done||0} 件${d.open?`，正在做 ${d.open} 件`:""}</div>`).join("");
+  return setSec("run","AI 执行","心响里的事交给哪个 AI 做。每个都可以先测一下能不能连通。",
+    setRow("做事用哪个","交给 AI 的事项：找背景、写交付、按你的意见改。选 Cindy：Cindy 在你的项目里定时来领活，用你在 Cindy 里的订阅和项目规范，一件事一个 Cindy 对话。",
+      choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...local]))
+    +(useCindy?cindyRows(cindy):"")
+    +setRow("整理用哪个","会议和聊天里提取待办、判断新进来的事、从反馈里学规矩。在本机跑，快、省。",choice("engine_sort",st.engine_sort||"codex",local))
+    +setRow("本机 AI 自动干活", builtin?`开着：本机 AI 有活就做${useCindy?"（做事交给了 Cindy，本机只做整理）":"，最多同时 10 件"}。`:"关着：本机不干活，只等外部 AI 来领活。",
+      `<div class="switch ${builtin?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${builtin}" tabindex="0" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div></div>`)
+    +engineRow("codex",st,found.codex)+engineRow("claude",st,found.claude)
+    +setRow("外部 AI 接入","Claude Code、Cursor 等任何能运行命令的 AI，都能领心响的活来做。",`<button class="btn" onclick="copyGuide()">复制接入说明</button>`,
+      `<details><summary>查看接入说明${seen?"和最近接入过的 AI":""}</summary><div class="guide" style="padding:10px 0 0"><pre id="guide">${esc(D.guide||"")}</pre>${seen?`<div class="hint" style="margin:0">${seen}</div>`:""}</div></details>`));
+}
+function cindyRows(c){
+  const projects=c.projects||[], sch=c.schedule;
+  const proj=setRow("Cindy 在哪个项目做","Cindy 在这个项目里做事：用这个项目的规范、模板和记忆，不会当成在给心响做需求。",
+    `<div class="chips">${projects.slice(0,6).map(p=>`<button class="chip ${c.project===p.folder?"on":""}" title="${esc(p.folder)}" onclick="setSetting('cindy_project',${esc(JSON.stringify(p.folder))})">${esc(p.name)}</button>`).join("")||'<span class="hint" style="margin:0">Cindy 里还没有项目</span>'}</div>`);
+  const state=!sch?`<span class="eng-state bad">还没建好</span>`:sch.status!=="active"?`<span class="eng-state bad">已暂停</span>`
+    :sch.hooked===false?`<span class="eng-state bad">缺前置检查</span>`:!c.same_project?`<span class="eng-state bad">项目对不上</span>`
+    :sch.hooked==null?`<span class="eng-state">等它跑第一轮</span>`
+    :`<span class="eng-state ok">已连通${sch.last_check?`，${esc(sch.last_check.at.slice(-5))} ${esc(sch.last_check.result)}`:sch.last_run?`，上次 ${esc(sch.last_run)} 来看过`:"，还没跑过"}</span>`;
+  const why=!sch?"Cindy 里还没有「心响｜领活来做」这个定时任务。复制下面的话，在 Cindy 任意一个任务里粘贴发送，它会自己建好。在建好之前，交给 AI 的事会先排队等着。"
+    :sch.status!=="active"?"Cindy 里的定时任务被暂停了，去 Cindy 的定时任务里打开它。"
+    :sch.hooked===false?"定时任务缺少前置检查（没活时会白烧 token）。复制下面的话发给 Cindy，它会补上。"
+    :sch.hooked==null?"定时任务挂了前置检查，等它跑第一轮（最多 5 分钟）就能确认有没有接上心响。"
+    :!c.same_project?`定时任务的工作目录是 ${esc(sch.folder)}，和上面选的项目不一样。复制下面的话发给 Cindy，它会改过来。`
+    :`每 5 分钟看一次心响有没有活；没活不叫 AI，不花 token。`;
+  return proj+setRow("Cindy 定时领活",why,`${state}<button class="btn" onclick="checkCindy()">检查</button><button class="btn ${c.ready&&c.same_project?"":"pri"}" onclick="copyCindySetup()">复制给 Cindy 的话</button>`);
+}
+function talkSection(st){
+  const f=st.apps||{};
+  return setSec("talk","AI 对话","在哪打开 AI 的对话、在哪接着做一件事。每个人装的软件不一样，按自己的选。",
+    setRow("接着做用哪个","事项里点「接着做」：在这里选的软件里新开对话，落在这件事的文件夹里，带上来龙去脉，并自动绑到这件事。",
+      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]]]))
+    +setRow("本机 GPT 的对话在哪看","心响里能实时看它在做什么。ChatGPT：只把你点开的那一段放进它的 Codex。Cindy 打不开本机 GPT 的对话，要在 Cindy 里接着做，用上面的「接着做」。",
+      choice("gpt_open",st.gpt_open||"here",[["here","心响里",true],["chatgpt","ChatGPT 桌面版",f.chatgpt],["terminal","终端",f["terminal-codex"]]])));
+}
+function sourceSection(s){
+  const r=s.record||{}, every=r.review_every??5, me=s.slack, t=S.slackTry;
+  const slackCtl=me?`<button class="btn" onclick="slackTry()">试跑最近 24 小时</button><button class="btn ghost" onclick="slackOff()">断开</button>`
+    :`<input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" style="width:200px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button>`;
+  const slackDesc=me?`已连接 ${esc(me.team||"")}，@${esc(me.user||"")}。每分钟搜一次你能看到的新消息，只留跟你有关的话。`
+    :`在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头）粘到右边。`;
+  const tried=!t?"":t.busy?`<div class="hint" style="margin:0">正在读 Slack，最多要一分钟</div>`:t.error?`<div class="hint" style="margin:0;color:var(--red)">${esc(t.error)}</div>`
+    :`<div class="hint" style="margin:0 0 6px">最近 24 小时：看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑，不建事项）</div>${(t.lines||[]).map(m=>`<div class="d">· ${esc(m.text)}（${esc(m.chat_name)} ${esc(m.sender_name)}）</div>`).join("")}`;
+  return setSec("src","消息来源","从哪里收进新的事，多久整理一次。",
+    setRow("飞书",`推送：${esc(s.subs||"未知")}。飞书只发 08:30 早报和 21:00 晚报，其余都在心响里。`,"")
+    +setRow("Slack",slackDesc,slackCtl,tried)
+    +setRow("聊天多久整理一次",every?`@你、带时间或催办的话马上整理；其余有新的、且离上一轮满 ${every} 分钟就整理。22:00 以后只处理紧急的。`:`@你、带时间或催办的话马上整理；其余每天 ${esc((r.review_times||[]).join("、"))} 各整理一次。`,
+      `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`));
+}
+function dataSection(s){
+  const r=s.record||{}, mode=r.mode||"feishu";
+  const say={feishu:"事项存在本机，点了立刻生效；飞书多维表格在后台备份，手机上也能看。",notion:"事项存在本机；Notion 的「心响事项」数据库在后台同步。在 Notion 里改的会被下一次同步覆盖。",device:"事项只存在这台电脑上，不同步到别处。"}[mode];
+  const form=(S.pickNotion||(mode==="notion"&&!r.notion))?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><input id="notiontok" type="password" autocomplete="off" placeholder="Integration Secret（ntn_…）" style="height:28px;padding:3px 8px"><input id="notionpage" autocomplete="off" placeholder="共享给它的页面链接" style="height:28px;padding:3px 8px;flex:1;min-width:200px" onkeydown="if(event.key==='Enter')notionOn()"><button class="btn pri" onclick="notionOn()">连接 Notion</button></div>
+    <div class="hint" style="margin:6px 0 0">在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> 新建 Internal integration，复制 Secret；再打开一个页面，··· → Connections 加上它，Share → Copy link 粘过来。</div>`:"";
+  return setSec("data","数据","事项存在哪、备份到哪。",
+    setRow("事项记在哪",`${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}`,
+      `<div class="chips">${[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]].map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>`,form)
+    +setRow("备份状态",storeLine(s.store||{},mode),""));
+}
+function generalSection(s){
+  const t=savedTheme();
+  return setSec("general","通用","",
+    setRow("外观","",`<div class="chips">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)
+    +setRow("本机常驻程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`));
+}
+function copyCindySetup(){
+  const text=((D.settings||{}).cindy||{}).setup_text;
+  if(!text) return toast("还读不到 Cindy，稍后再试");
+  const done=()=>toast("已复制。在 Cindy 任意一个任务里粘贴发送，它会自己建好定时任务");
+  const fallback=()=>{ const t=document.createElement("textarea"); t.value=text; document.body.appendChild(t); t.select();
+    try{ document.execCommand("copy"); done(); }catch(e){ toast("没能复制，请手动复制"); } t.remove(); };
+  if(navigator.clipboard) navigator.clipboard.writeText(text).then(done,fallback); else fallback();
+}
+async function checkCindy(){ await load(); const c=(D.settings||{}).cindy||{}; toast(c.ready&&c.same_project?"Cindy 已连通":"Cindy 还没准备好，看这一行的说明"); }
+async function testEngine(name){
+  if(!LIVE) return toast("原型里不能测试");
+  S.testing={...(S.testing||{}),[name]:true}; render();
+  try{ const r=await api("/api/engine/test",{engine:name},180000); (D.settings.engine_tests ||= {})[name]=r;
+    toast(r.ok?`${ENG[name][0]} 已连通，${r.seconds} 秒`:`${ENG[name][0]} 连不上：${r.error||"没有回复"}`); }
+  catch(e){ toast(e.name==="AbortError"?"测试超时了":e.message||"测试没完成"); }
+  S.testing[name]=false; render();
+}
+async function saveModel(key,value){
+  value=String(value||"").trim(); const name=key==="worker_model"?"codex":"claude";
+  if(((D.settings||{}).models||{})[name]===value) return;
+  if(key==="worker_model"&&!value) return toast("GPT 需要填模型名");
+  try{ await api("/api/settings",{[key]:value}); (D.settings.models ||= {})[name]=value; toast("模型已保存，下一件活开始用"); }
+  catch(e){ toast(e.message||"没保存成功"); }
 }
 async function pickStore(mode){
   const r=(D.system||{}).record||{};
@@ -752,21 +871,6 @@ async function notionOn(){
   catch(e){ toast(e.name==="AbortError"?"连 Notion 超时了，再试一次":e.message); }
 }
 const SLACK_SCOPES="search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
-function sourcesBlock(me){
-  const r=(D.system||{}).record||{}, every=r.review_every??5, t=S.slackTry;
-  const pace=`<div class="kv"><div>聊天多久整理一次</div><div><div class="chips" style="margin:0">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"只在固定时间"]].map(([m,l])=>
-    `<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>
-    <div class="hint" style="margin:6px 0 0">${every?`@你、带时间或催办的话马上整理；其余有新的、且离上一轮满 ${every} 分钟就整理。22:00 以后只处理紧急的。`:`@你、带时间或催办的话马上整理；其余每天 ${esc((r.review_times||[]).join("、"))} 各整理一次。`}每轮用一次本机 AI。</div></div></div>`;
-  const lines=t&&t.lines?t.lines.map(m=>`<div class="row flat ev"><span class="ud"></span><span class="pill" style="justify-self:start">${esc(m.kind)}</span><div style="min-width:0"><div class="t wrap">${esc(m.text)}</div><div class="s">${esc(m.chat_name)}　${esc(m.sent_at)}　${esc(m.sender_name)}</div></div><div></div><div class="acts"><a class="btn link" href="${esc(m.message_id)}" target="_blank" rel="noopener">原消息</a></div></div>`).join(""):"";
-  const result=!t?"":t.busy?`<div class="list" style="margin-top:8px"><div class="empty">正在读 Slack，最多要一分钟</div></div>`:t.error?`<div class="list" style="margin-top:8px"><div class="empty">${esc(t.error)}</div></div>`:
-    `<div class="sec-h">最近 24 小时<span class="aside">看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑，不建事项）</span></div><div class="list">${lines||'<div class="empty">没有筛中的话</div>'}</div>`;
-  const slack=me?`<div class="kv" style="border-top:1px solid var(--line2)"><div>Slack</div><div>已连接 ${esc(me.team||"")}，@${esc(me.user||"")}，令牌 …${esc(me.tail||"")}
-      <div class="hint" style="margin:4px 0 8px">每分钟搜一次你能看到的新消息，和飞书聊天一样只留跟你有关的话。</div><div class="acts"><button class="btn pri" onclick="slackTry()">试跑最近 24 小时</button><button class="btn" onclick="slackOff()">断开</button></div></div></div>`
-    :`<div class="kv" style="border-top:1px solid var(--line2)"><div>Slack</div><div>未连接
-      <div class="hint" style="margin:4px 0 8px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</div>
-      <div class="inline" style="padding:0;background:none;border:0"><input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button></div></div></div>`;
-  return `<div class="sec-h">接入来源</div><div class="list">${pace}${slack}</div>${result}`;
-}
 async function slackOn(){
   const box=$("#slacktok"), tok=box&&box.value.trim(); if(!tok) return box&&box.focus();
   if(!LIVE) return toast("原型里不能连接");
@@ -783,12 +887,7 @@ async function slackTry(){
   catch(e){ S.slackTry={error:e.name==="AbortError"?"读 Slack 超时了，稍后再试":e.message}; }
   render();
 }
-function engineChoice(cur, found){
-  const opts=[["codex","GPT","codex 命令行"],["claude","Claude","claude 命令行"]];
-  return `<div class="list"><div class="kv"><div>本机 AI 用哪个</div><div><div class="chips" style="margin:0">${opts.map(([k,l,cmd])=>
-    `<button class="chip ${cur===k?"on":""}" onclick="setSetting('engine','${k}')">${l}${found[k]===false?"（没找到 "+cmd+"）":""}</button>`).join("")}</div>
-    <div class="hint" style="margin:6px 0 0">切换后，下一件活开始用新的 AI。做到一半的事会带着之前的对话交给它，接着往下做。两个都不加载你自己的插件和配置，只能写自己的工作文件夹，可以联网。</div></div></div></div>`;
-}
+/* where conversations open and items are picked up: each person's computer has different apps */
 function storeLine(t, mode){
   if(!t.local) return "事项：飞书多维表格；对话、交付版本、时间线：本机";
   if(mode==="device") return "全部在本机，不同步到别处";
@@ -890,11 +989,12 @@ function replyState(i){
 function sessionControl(s, css, label){
   if(!s.can_open) return "";
   if(s.link && /^https?:\/\//i.test(s.link)) return `<a class="${css}" href="${esc(s.link)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${label}</a>`;
-  return `<button class="${css}" data-job="${esc(s.job)}" onclick="event.stopPropagation();openSession(this.dataset.job,${s.status==="open"})">${label}</button>`;
+  const own=!s.local&&s.engine==="gpt"&&(D.settings||{}).gpt_open!=="chatgpt"&&(D.settings||{}).gpt_open!=="terminal";   // read here
+  return `<button class="${css}" data-job="${esc(s.job)}" onclick="event.stopPropagation();${own?"openTranscript(this.dataset.job)":"openSession(this.dataset.job)"}">${label}</button>`;
 }
 function sessionsTab(i){
   const list=i.sessions||[];
-  const start=`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 聊这件事？在 Claude 里新开一段对话，自动带上这件事的来龙去脉和之前的对话，并绑定在这里。</div><div class="acts"><button class="btn pri" onclick="startClaude(${i.n})">用 Claude 接着做这件事</button></div></div>`;
+  const start=`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`;
   if(!list.length) return start+`<div class="hint" style="margin:0">还没有 AI 会话绑定这件事。左侧「AI 会话」里正在进行的对话，也可以点「关联到事项…」绑过来。</div>`;
   return start+`<div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
     <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':""}</div>
@@ -1006,18 +1106,57 @@ async function unbind(key){
   try{ await api("/api/session/unbind",{key}); await load(); toast("已解除，这段对话不会再自动绑到这件事"); }
   catch(e){ toast(e.message||"没有解除成功"); }
 }
+const PICKUP_NAME={"cindy":"Cindy","claude":"Claude","terminal-claude":"终端（Claude 命令行）","terminal-codex":"终端（Codex 命令行）"};
+const pickupName = () => PICKUP_NAME[(D.settings||{}).pickup_app]||"Cindy";
+async function pickUp(n){
+  if(!LIVE) return toast("原型里不能打开");
+  const where=pickupName();
+  try{ await api("/api/session/pickup",{n},30000);
+    toast((D.settings||{}).pickup_app==="cindy"?"已在 Cindy 里新建任务，就在这件事的文件夹里。发第一句话（比如「继续」），它会先读这件事的来龙去脉":`已在 ${where} 里接手这件事，它会先读这件事的来龙去脉`); setTimeout(load,5000); }
+  catch(e){ toast(e.message||`没能打开 ${where}`); }
+}
 async function startClaude(n){
   if(!LIVE) return toast("原型里不能打开");
   try{ await api("/api/session/start",{n},30000); toast("已在 Claude 里新开对话，带上了这件事的来龙去脉，会自动绑定到这件事"); setTimeout(load,4000); }
   catch(e){ toast(e.message||"没能打开 Claude"); }
 }
-async function openSession(job, running){
+async function openSession(job){
   if(!LIVE) return toast("原型里不能打开");
-  if(running&&!String(job).startsWith("local:")&&!confirm("这段对话 AI 正在用。现在打开接着聊，可能打断它这一轮。仍要打开吗？")) return;
   try{ const r=await api("/api/session/open",{job},20000);
     if(r.link) window.open(r.link,"_blank","noopener");
-    else toast(r.opened==="claude"?"已在 Claude 里打开这段对话":r.opened==="cindy"?"已在 Cindy 里打开这段对话":"已在终端里打开这段对话，接着原来的上下文说");
+    else if(r.transcript) openTranscript(job);
+    else toast(r.opened==="claude"?"已在 Claude 里打开这段对话":r.opened==="cindy"?"已在 Cindy 里打开这段对话":"已打开这段对话");
   }catch(e){ toast(e.message||"打不开这段对话"); }
+}
+/* the built-in GPT's conversation, read in 心响: the task it got, what it said and ran; live while it works */
+const TV={job:null,data:null,timer:null};
+async function openTranscript(job){
+  if(!LIVE) return toast("原型里不能打开");
+  TV.job=job; TV.data=null; drawTranscript();
+  await refreshTranscript();
+}
+async function refreshTranscript(){
+  clearTimeout(TV.timer); if(!TV.job) return;
+  try{ TV.data=await api("/api/session/transcript",{job:TV.job},15000); }
+  catch(e){ TV.data={error:e.message||"读不到这段对话"}; }
+  drawTranscript(true);
+  if(TV.data&&TV.data.running) TV.timer=setTimeout(refreshTranscript,4000);
+}
+function closeTranscript(){ clearTimeout(TV.timer); TV.job=null; TV.data=null; $("#viewer").innerHTML=""; }
+function drawTranscript(scroll){
+  const d=TV.data, box=$("#viewer");
+  const body=!d?`<div class="hint">读取中…</div>`:d.error?`<div class="hint">${esc(d.error)}</div>`:(d.entries||[]).map(e=>
+    e.who==="task"?`<div><div class="tr-at">${esc(e.at)}　心响交给它</div><div class="tr-task short" onclick="this.classList.toggle('short')" title="点一下展开或收起">${esc(e.text)}</div></div>`
+    :e.who==="run"?`<div><div class="tr-at">${esc(e.at)}　它运行</div><div class="tr-run">${esc(e.text)}</div></div>`
+    :e.who==="sys"?`<div class="tr-sys">✓ ${esc(e.at)}　${esc(e.text)}</div>`
+    :`<div><div class="tr-at">${esc(e.at)}　${esc(d.driver||"本机 GPT")}</div><div class="tr-ai">${linkify(e.text)}</div></div>`).join("")||`<div class="hint">还没有内容</div>`;
+  const foot=!d||d.error?"":d.running?`<span>它正在做这一轮，这里每 4 秒刷新。想补充要求，关掉后在事项下面的输入框里说，它下一轮会看到。</span>`
+    :`<span>这一轮做完了。想自己接着做，换到 ${esc(pickupName())} 里接手：它会读到这件事的来龙去脉和上面这些内容。</span>${d.n?`<button class="btn pri" onclick="closeTranscript();pickUp(${d.n})">在 ${esc(pickupName())} 里接着做</button>`:""}`;
+  const old=box.querySelector(".mb"), atEnd=!old||old.scrollTop+old.clientHeight>=old.scrollHeight-40;
+  box.innerHTML=`<div class="modal" onclick="if(event.target===this)closeTranscript()"><div class="box" role="dialog" aria-modal="true" aria-label="AI 对话">
+    <div class="mh"><span class="eng gpt">本机 GPT</span><b>${d&&d.n?`#${d.n} `:""}${esc(d&&d.title||"这段对话")}</b>${d&&d.running?'<span class="pill blue"><span class="live"></span>回复中</span>':""}<button class="btn ghost x" onclick="closeTranscript()">关闭</button></div>
+    <div class="mb">${body}</div><div class="mf">${foot}</div></div></div>`;
+  const mb=box.querySelector(".mb"); if(mb&&(scroll&&atEnd||!old)) mb.scrollTop=mb.scrollHeight;
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
 const TITLES={inbox:"收件箱",todo:"等我处理",doing:"进行中",done:"已完成",all:"全部事项",mem:"记忆",sys:"设置"};
@@ -1080,6 +1219,7 @@ window.addEventListener("hashchange",()=>{ if(D) openFromHash(); });
 let resizeTimer; window.addEventListener("resize",()=>{ clearTimeout(resizeTimer); resizeTimer=setTimeout(render,120); });
 document.addEventListener("keydown",e=>{
   const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
+  if(e.key==="Escape"&&TV.job){ closeTranscript(); return; }
   if(e.key==="Escape"&&S.item&&!typing) closeItem();
   if(e.key==="/"&&!typing){ e.preventDefault(); $("#q").focus(); }
 });

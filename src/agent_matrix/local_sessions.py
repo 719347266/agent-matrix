@@ -328,20 +328,62 @@ def open_local(root,config,key):
         return {"opened":"cindy"}
     if src=="claude":
         return open_claude(sid, rec.get("host"))
-    binary=(worker.claude_binary if src=="claude" else worker.codex_binary)(config)
-    if not binary: raise MatrixError("没有找到 "+NAMES[src]+" 命令行。")
-    cwd=Path(rec.get("cwd") or Path.home())
-    if not cwd.is_dir(): raise MatrixError("原会话的工作目录已不存在。")
-    args=[binary,"--resume" if src=="claude" else "resume",sid]
-    if src=="codex": args=["env","CODEX_HOME="+str(Path.home()/".codex"),*args]
-    sessions.open_terminal("cd "+shlex.quote(str(cwd))+" && "+shlex.join(args))
-    return {"opened":"terminal"}
+    try: subprocess.run(["open","codex://threads/"+sid],capture_output=True,check=True,timeout=10)
+    except (OSError,subprocess.SubprocessError) as exc: raise MatrixError("无法打开这段 Codex 对话。") from exc
+    return {"opened":"codex"}
 
 
-def start_for_item(root, config, item, history=""):
-    """Open a new conversation for one item in the Claude app, in the item's own folder: the item's facts and its
-    conversation so far are in a note there, so the owner does not paste the context again, and the folder binds
-    the new conversation to the item (see view)."""
+CINDY_APP = Path("/Applications/Cindy.app")
+CLAUDE_APP = Path("/Applications/Claude.app")
+CHATGPT_APP = Path("/Applications/ChatGPT.app")
+PICKUP = ("cindy", "claude", "terminal-claude", "terminal-codex")   # where the owner picks an item up
+GPT_OPEN = ("here", "chatgpt", "terminal")                         # where a built-in GPT conversation opens
+
+
+def apps(config=None):
+    """What this computer can use: the apps that are installed and the command-line tools on PATH."""
+    from . import worker
+    return {"cindy": CINDY_APP.is_dir(), "claude": CLAUDE_APP.is_dir(), "chatgpt": CHATGPT_APP.is_dir(),
+            "terminal-claude": bool(worker.claude_binary(config)) if config else bool(__import__("shutil").which("claude")),
+            "terminal-codex": bool(worker.codex_binary(config)) if config else bool(__import__("shutil").which("codex"))}
+
+
+def pickup_choice(root, found=None):
+    """The owner's choice for picking items up, or the first installed (Cindy, Claude, then the command line)."""
+    from .thread import setting
+    found = found or apps()
+    chosen = setting(Path(root), "pickup_app", None)
+    if chosen in PICKUP and found.get(chosen):
+        return chosen
+    return next((k for k in PICKUP if found.get(k)), "terminal-claude")
+
+
+def gpt_open_choice(root, found=None):
+    from .thread import setting
+    found = found or apps()
+    chosen = setting(Path(root), "gpt_open", "here")
+    if chosen == "chatgpt" and not found.get("chatgpt"):
+        return "here"
+    return chosen if chosen in GPT_OPEN else "here"
+
+
+def _gpt_said(root, record_id, limit=12):
+    """What the built-in GPT said and handed in on this item (its own conversation files), newest last."""
+    from . import sessions
+    from .worker import worker_codex_home
+    home = worker_codex_home() or Path.home() / ".codex"
+    said = []
+    for s in reversed(sessions.by_item(root).get(record_id, [])):
+        if s.get("engine") != "gpt" or not s.get("session") or not ID.fullmatch(str(s["session"])):
+            continue
+        for path in sorted(home.glob(f"sessions/*/*/*/rollout-*{s['session']}.jsonl")):
+            said += [f"[{e['at']}] {e['text']}" for e in sessions.read_rollout(path) if e["who"] == "ai"]
+    return said[-limit:]
+
+
+def write_context(root, item, history=""):
+    """The item's folder becomes the place to pick it up: 心响事项.md with the facts, the conversation so far and what
+    the built-in GPT already did, plus AGENTS.md / CLAUDE.md so whichever AI opens the folder reads it first."""
     from . import worker
     folder = worker.workdir_for(root, item["record_id"])
     lines = [f"# 心响事项 #{item['n']}：{item.get('title') or ''}", "",
@@ -353,16 +395,209 @@ def start_for_item(root, config, item, history=""):
     if item.get("quote"):
         lines += ["", "## 原话", str(item["quote"])[:1500]]
     if item.get("url"):
-        lines += ["", f"## 已有交付", item["url"]]
+        lines += ["", "## 已有交付", item["url"]]
+    files = [name for name in ("交付.md", "任务单.md", "背景.md", "结果.json") if (folder / name).is_file()]
+    if files:
+        lines += ["", "## 这个文件夹里已有的材料", *[f"- {name}" for name in files]]
     if history:
         lines += ["", "## 这件事之前的对话（心响记录）", history]
+    said = _gpt_said(root, item["record_id"])
+    if said:
+        lines += ["", "## 本机 GPT 之前做这件事时说的话", *said]
     (folder / "心响事项.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    prompt = ("读当前文件夹的 心响事项.md，这是本人在心响里的一件事和它之前的对话。"
-              "先用两三句话说清现在到哪一步了、还差什么，然后问本人接下来要你做什么。")
+    guide = (f"这个文件夹是心响事项 #{item['n']}「{item.get('title') or ''}」的工作文件夹。\n"
+             "接手时先读 心响事项.md：里面有来龙去脉、之前的对话和已经做出的东西。接着往下做，不要从头来；"
+             "先用两三句话说清现在到哪一步、还差什么，再问本人接下来要做什么。\n")
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        (folder / name).write_text(guide, encoding="utf-8")
+    return folder
+
+
+def start_in_cindy(root, config, item, history=""):
+    """Pick an item up in Cindy (the owner's GPT subscription lives there): a new Cindy task in the item's own folder,
+    which holds the whole context. The task binds itself to the item by that folder (see view), so later
+    「打开对话」 goes straight back to it."""
+    if not CINDY_APP.is_dir():
+        raise MatrixError("这台电脑上没有找到 Cindy。")
+    folder = write_context(root, item, history)
+    try:
+        subprocess.run(["open", "-a", str(CINDY_APP), "--", str(folder)], capture_output=True, check=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise MatrixError("无法打开 Cindy。") from exc
+    return {"opened": "cindy", "folder": str(folder)}
+
+
+def pick_up(root, config, item, history=""):
+    """Pick an item up in the app the owner chose (设置 → AI 对话), with the whole context in the item's folder."""
+    where = pickup_choice(root, apps(config))
+    if where == "cindy":
+        return start_in_cindy(root, config, item, history)
+    if where == "claude":
+        return start_for_item(root, config, item, history)
+    return start_in_terminal(root, config, item, history, cli=where.split("-", 1)[1])
+
+
+def start_in_terminal(root, config, item, history="", cli="claude"):
+    """For people without a desktop app: the command-line AI in Terminal, in the item's folder."""
+    from . import sessions, worker
+    import shlex
+    folder = write_context(root, item, history)
+    binary = (worker.claude_binary if cli == "claude" else worker.codex_binary)(config)
+    if not binary:
+        raise MatrixError(f"没有找到 {cli} 命令行。")
+    prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
+    sessions.open_terminal(f"cd {shlex.quote(str(folder))} && {shlex.join([binary, prompt])}")
+    return {"opened": "terminal", "folder": str(folder)}
+
+
+def open_gpt_in_chatgpt(thread_id):
+    """A built-in GPT conversation in the ChatGPT app: only this one is linked into the owner's Codex folder
+    (a hard link, so both sides share one file and the AI's next round sees what the owner said there)."""
+    from .worker import owner_codex_home, worker_codex_home
+    home = worker_codex_home()
+    if not home or not ID.fullmatch(thread_id):
+        raise MatrixError("这段对话打不开。")
+    found = sorted(home.glob(f"sessions/*/*/*/rollout-*{thread_id}.jsonl"))
+    if not found:
+        raise MatrixError("找不到这段对话的记录。")
+    for path in found:
+        target = owner_codex_home() / path.relative_to(home)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            try:
+                os.link(path, target)
+            except OSError as exc:
+                raise MatrixError("没能把这段对话放进 ChatGPT 的 Codex。") from exc
+    try:
+        subprocess.run(["open", "codex://threads/" + thread_id], capture_output=True, check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise MatrixError("无法打开 ChatGPT。") from exc
+    return {"opened": "chatgpt"}
+
+
+def start_for_item(root, config, item, history=""):
+    """The same, in the Claude app."""
+    folder = write_context(root, item, history)
+    prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
     from urllib.parse import urlencode
     url = "claude://code/new?" + urlencode({"folder": str(folder), "q": prompt})
     try:
         subprocess.run(["open", url], capture_output=True, check=True, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
         raise MatrixError("无法打开 Claude。") from exc
-    return {"opened": "claude", "folder": str(folder)}  # the conversation binds itself to the item by this folder
+    return {"opened": "claude", "folder": str(folder)}
+
+
+# ---- Cindy as the one doing items: its projects, its pickup schedule, the message that sets it up -------------
+
+SCHEDULE_NAME = "心响｜领活来做"
+
+
+def _cindy_db(home=None):
+    base = Path(home or Path.home()) / "Library/Application Support/Cindy"
+    found = sorted(base.glob("cindy-*.db"))
+    return found[0] if found else None
+
+
+def cindy_projects(home=None, limit=8):
+    """The owner's Cindy projects (folders), most used first; bots, temporary and download folders left out."""
+    db_path = _cindy_db(home)
+    if not db_path:
+        return []
+    with closing(_ro(db_path)) as db:
+        rows = db.execute("""SELECT coalesce(project_dir, working_dir) AS d, count(*) FROM sessions
+            WHERE hidden_at IS NULL AND coalesce(project_dir, working_dir) IS NOT NULL GROUP BY d ORDER BY 2 DESC LIMIT 40""").fetchall()
+    out = []
+    for folder, count in rows:
+        if not folder or any(x in folder for x in ("/bots/", "/tmp", "/Codex/", "/var/folders/", "/.agent-matrix/")):
+            continue
+        out.append({"folder": folder, "name": Path(folder).name, "tasks": count})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def cindy_schedule(home=None):
+    """Cindy's pickup schedule for 心响, read from Cindy's own records: set up or not, active, last run."""
+    db_path = _cindy_db(home)
+    if not db_path:
+        return None
+    with closing(_ro(db_path)) as db:
+        cols = {c[1] for c in db.execute("PRAGMA table_info(schedules)")}
+        pick = lambda c: c if c in cols else "NULL"
+        row = db.execute(f"""SELECT id, status, cron_expr, working_dir, {pick("pre_run_hook_command")}, last_fired_at,
+            {pick("last_finished_at")}, agent_kind FROM schedules WHERE name=? ORDER BY updated_at DESC LIMIT 1""", (SCHEDULE_NAME,)).fetchone()
+        if not row:
+            return None
+        last = _cindy_last_run(db, row[0])
+    sid, status, cron, folder, hook, fired, finished, kind = row
+    when = lambda ms: datetime.fromtimestamp(int(ms) / 1000, TZ).strftime("%m-%d %H:%M") if ms else ""
+    # the hook may run `xinxiang gate` itself or through the project's own check script: either way the gate's
+    # answer ({"ok": .., "work": ..}) shows up in the hook output Cindy keeps for each run
+    gate_seen = bool(last and '"work"' in (last.get("hook") or ""))
+    return {"id": sid, "status": status, "cron": cron, "folder": folder or "", "engine": kind,
+            # True: the gate answers; False: no hook at all; None: a hook that has not run yet, so not known
+            "hooked": True if hook and ("gate" in hook or gate_seen) else (None if hook and not last else False),
+            "last_run": when(fired), "last_done": when(finished),
+            "last_check": ({"at": when(last["at"]), "result": last["result"]} if last else None)}
+
+
+def _cindy_last_run(db, schedule_id):
+    """Cindy's own log of the latest round: when, what the pre-run check said, whether the AI ran."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedule_runs'").fetchone():
+        return None
+    cols = {c[1] for c in db.execute("PRAGMA table_info(schedule_runs)")}
+    if not {"schedule_id", "fired_at", "status"} <= cols:
+        return None
+    hook = "pre_run_hook_result" if "pre_run_hook_result" in cols else "NULL"
+    row = db.execute(f"SELECT fired_at, status, {hook} FROM schedule_runs WHERE schedule_id=? ORDER BY fired_at DESC LIMIT 1",
+                     (schedule_id,)).fetchone()
+    if not row:
+        return None
+    fired, status, out = row
+    result = {"skipped": "没活，跳过", "running": "正在做", "failed": "出错了", "error": "出错了"}.get(status, "领了活" if status else "")
+    try:
+        said = json.loads(out).get("stdout") or "" if out else ""   # Cindy keeps the hook result as JSON
+    except (ValueError, AttributeError):
+        said = out or ""
+    return {"at": fired, "result": result, "hook": str(said)}
+
+
+def cindy_status(root):
+    """For the settings page: installed, projects to choose from, and whether the pickup schedule is in place."""
+    if not CINDY_APP.is_dir():
+        return {"installed": False}
+    from .thread import setting
+    try:
+        projects, schedule = cindy_projects(), cindy_schedule()
+    except ISSUES:
+        projects, schedule = [], None
+    chosen = setting(Path(root), "cindy_project", "") or (projects[0]["folder"] if projects else "")
+    ok = bool(schedule and schedule["status"] == "active" and schedule["hooked"] is True)
+    return {"installed": True, "projects": projects, "project": chosen, "schedule": schedule, "ready": ok,
+            "same_project": bool(schedule and chosen and schedule["folder"] == chosen)}
+
+
+def cindy_setup_text(root):
+    """The one message the owner sends to Cindy: its own AI creates (or updates) the pickup schedule."""
+    from .drive import shim_path
+    status = cindy_status(root)
+    project = status.get("project") or "（你的项目文件夹）"
+    cmd = str(shim_path())
+    return f"""请用你的定时任务工具帮我建（已有同名的就改成下面这样）一个定时任务，替心响做事：
+
+- 名称：{SCHEDULE_NAME}
+- 频率：每 5 分钟（cronExpr="*/5 * * * *"，timezone="Asia/Shanghai"，recurring=true）
+- 引擎：codex（用我在 Cindy 里绑定的 GPT 订阅），effort=high
+- 工作目录（workingDir）：{project}
+- silentWhenIdle=true；不发桌面和飞书通知
+- 前置检查：用 schedule_set_pre_run_hook 挂一个前置检查，执行 `{cmd} gate`，原样沿用它的退出码：0 = 有活放行，2 = 没活跳过本轮（不烧 token）
+- prompt 用下面这段：
+
+你是本人在 Cindy 里的 AI 员工，替心响做事。一次只做一件，做完就结束。
+1. 运行 `{cmd} next --driver Cindy --kinds item`，拿到这件事（folder、instructions、job）。返回 {{"idle": true}} 就直接结束。
+2. 回复第一行写「心响 #编号 标题」。
+3. 这件事属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。
+4. 按 instructions 做，交付文件写到 folder 里；按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
+
+建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查都对就行。"""

@@ -418,13 +418,28 @@ def _prepare_item(root, config, driver, skip=()):
             "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
 
 
-def next_job(root, config, driver, *, skip=()):
-    """The next piece of work for this driver, already prepared; None when there is nothing to do."""
+SORTING = ("triage", "meeting", "chat", "learn")   # 整理: judging new items, meetings, chats, learning rules
+
+
+def item_runner(root):
+    """Who does the items (设置 → AI 执行 → 做事用哪个): "cindy" (Cindy's own schedule takes them) or "local"."""
+    from .thread import setting
+    return "cindy" if setting(Path(root), "engine", "codex") == "cindy" else "local"
+
+
+def next_job(root, config, driver, *, skip=(), kinds=None):
+    """The next piece of work for this driver, already prepared; None when there is nothing to do.
+    kinds limits what it takes: e.g. Cindy takes only items, the built-in driver then only sorting work."""
     root = Path(root)
-    for prepare in (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn):
+    wanted = set(kinds or (*SORTING, "item"))
+    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
+        if kind not in wanted:
+            continue
         job = prepare(root, config, driver)
         if job:
             return _open(root, job, driver)
+    if "item" not in wanted:
+        return None
     tried = set(skip)
     for _ in range(5):
         job = _prepare_item(root, config, driver, skip=tried)
@@ -459,9 +474,35 @@ def _open(root, job, driver):
             job["builtin_prompt"] = head + job["builtin_prompt"]
     except Exception:
         pass
+    if job["kind"] == "item" and "cindy" in str(driver).lower():
+        job["instructions"] = cindy_header(root, job) + job["instructions"]
     job.update(driver=driver, status="open", rounds=0, step="领到了")
     _save(root, job)
     return job
+
+
+def cindy_header(root, job):
+    """Cindy works inside the owner's own project: say so, so it follows that project's rules and memory and does not
+    mistake 心响 (which only hands out work and takes deliverables) for the product it is working on."""
+    from .thread import setting
+    project = setting(Path(root), "cindy_project", "") or ""
+    name = Path(project).name if project else "当前"
+    return (f"## 先说清楚：你在哪、在做什么\n"
+            f"- 你在本人的「{name}」项目里（Cindy 的当前工作目录）。这件事是这个项目的工作：按这个项目自己的规范、模板和记忆来做。\n"
+            f"- 心响只是给你派活、收交付的系统，不是你要做需求的产品；不要把心响的东西写进交付。\n"
+            f"- 回复第一行写「心响 #{job.get('n') or ''} {job.get('title') or ''}」，方便本人在心响里找到这段对话。\n"
+            f"- 交付文件写到下面说的工作文件夹（folder）里，做完按末尾的命令交给心响。\n\n")
+
+
+def has_items_for(root, config):
+    """Is there an item waiting that nobody is working on? Cheap enough for a schedule's pre-run check."""
+    from .worker import _check
+    code, checked = _check(root, "agent_matrix.prework")
+    if code != 0:
+        return False
+    taken = {j["ref"].get("record_id") for j in open_jobs(root) if j["kind"] == "item"}
+    return any(r.get("status") in {"queued", "running", "prepared"} and r["record_id"] not in taken
+               for r in checked.get("ready") or [])
 
 
 def public(job):
@@ -692,7 +733,8 @@ GUIDE = """# 接入心响：任何 AI 都可以驱动
 def main(argv=None):
     from .config import load
     p = argparse.ArgumentParser(prog="xinxiang", description="心响驱动协议：任何 AI 都能领活、交活")
-    p.add_argument("command", choices=["next", "step", "say", "submit", "ask", "release", "guide", "status"])
+    p.add_argument("command", choices=["next", "step", "say", "submit", "ask", "release", "guide", "status", "gate"])
+    p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn")
     p.add_argument("--driver", default=os.environ.get("XINXIANG_DRIVER") or "外部 AI")
     p.add_argument("--job"); p.add_argument("--text"); p.add_argument("--question"); p.add_argument("--tried")
     p.add_argument("--session", default=os.environ.get("XINXIANG_SESSION"), help="你这段对话的编号或能打开它的链接")
@@ -711,8 +753,16 @@ def main(argv=None):
                               "drivers": drivers(root)}, ensure_ascii=False))
             return 0
         config = load(path)
+        if args.command == "gate":
+            # a schedule's pre-run check: exit 0 = there is an item to do, 2 = nothing (skip this round, no tokens)
+            if item_runner(root) == "cindy" and has_items_for(root, config):
+                print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))
+                return 0
+            print(json.dumps({"ok": True, "work": None}, ensure_ascii=False))
+            return 2
         if args.command == "next":
-            job = next_job(root, config, args.driver)
+            kinds = [k.strip() for k in (args.kinds or "").split(",") if k.strip()] or None
+            job = next_job(root, config, args.driver, kinds=kinds)
             if job and args.session:
                 from .sessions import bind
                 bind(root, job["id"], args.session)

@@ -118,3 +118,75 @@ class LocalSessions(unittest.TestCase):
         self.assertTrue(url.startswith("claude://code/new?"))
         self.assertIn("folder=" + str(work).replace("/", "%2F"), url)
         self.assertIn("先画一级页面", (work / "心响事项.md").read_text(encoding="utf-8"))
+
+
+class PickUpInCindy(unittest.TestCase):
+    def test_an_item_is_picked_up_in_cindy_from_its_own_folder_with_the_whole_context(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root, work, app = Path(temp) / "project", Path(temp) / "work", Path(temp) / "Cindy.app"
+            (root / "state").mkdir(parents=True); work.mkdir(); app.mkdir()
+            (work / "交付.md").write_text("v1", encoding="utf-8")
+            item = {"record_id": "r61", "n": 61, "title": "更新考核方案", "status": "完成", "who": "AI", "next": "交方案"}
+            with patch("agent_matrix.worker.workdir_for", return_value=work), patch.object(ls, "CINDY_APP", app), \
+                 patch.object(ls, "_gpt_said", return_value=["[11-18 11:44] 已完成材料，方案见 交付.md"]), \
+                 patch.object(ls.subprocess, "run") as run:
+                out = ls.start_in_cindy(root, None, item, history="你：注册权重再高一点")
+            self.assertEqual(run.call_args.args[0], ["open", "-a", str(app), "--", str(work)])
+            note = (work / "心响事项.md").read_text(encoding="utf-8")
+            for words in ("注册权重再高一点", "已完成材料", "- 交付.md"):
+                self.assertIn(words, note)
+            self.assertIn("先读 心响事项.md", (work / "AGENTS.md").read_text(encoding="utf-8"))
+            self.assertEqual(out["opened"], "cindy")
+
+    def test_without_cindy_it_says_so(self):
+        with patch.object(ls, "CINDY_APP", Path("/nonexistent/Cindy.app")):
+            with self.assertRaises(MatrixError):
+                ls.start_in_cindy(Path("/tmp"), None, {"record_id": "r1", "n": 1})
+
+
+class AppChoice(unittest.TestCase):
+    """Open source: everyone has different apps, so where things open is a setting with a sensible default."""
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        (self.root / "state").mkdir()
+
+    def test_the_default_is_the_first_installed_app_and_a_choice_wins_only_if_installed(self):
+        from agent_matrix.thread import set_setting
+        only_claude = {"cindy": False, "claude": True, "chatgpt": False, "terminal-claude": True, "terminal-codex": False}
+        self.assertEqual(ls.pickup_choice(self.root, only_claude), "claude")
+        set_setting(self.root, "pickup_app", "terminal-claude")
+        self.assertEqual(ls.pickup_choice(self.root, only_claude), "terminal-claude")
+        set_setting(self.root, "pickup_app", "cindy")                       # chosen, but not on this computer
+        self.assertEqual(ls.pickup_choice(self.root, only_claude), "claude")
+        set_setting(self.root, "gpt_open", "chatgpt")
+        self.assertEqual(ls.gpt_open_choice(self.root, only_claude), "here")
+
+    def test_picking_up_goes_to_the_chosen_app(self):
+        item = {"record_id": "r1", "n": 1}
+        with patch.object(ls, "apps", return_value={"cindy": True, "claude": True, "chatgpt": True, "terminal-claude": True, "terminal-codex": True}):
+            for choice, target in [("cindy", "start_in_cindy"), ("claude", "start_for_item"), ("terminal-codex", "start_in_terminal")]:
+                from agent_matrix.thread import set_setting
+                set_setting(self.root, "pickup_app", choice)
+                with patch.object(ls, target, return_value={"opened": choice}) as start:
+                    self.assertEqual(ls.pick_up(self.root, None, item)["opened"], choice)
+                start.assert_called_once()
+
+
+class BuiltinTranscript(unittest.TestCase):
+    def test_a_builtin_gpt_conversation_reads_as_task_words_commands_and_rounds(self):
+        rows = [
+            {"timestamp": "2026-11-19T02:28:27Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>cwd</environment_context>"}]}},
+            {"timestamp": "2026-11-19T02:28:28Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "做 #65：更新标签方案"}]}},
+            {"timestamp": "2026-11-19T02:28:30Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "我先读任务单。"}]}},
+            {"timestamp": "2026-11-19T02:28:31Z", "type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "input": 'text(await tools.exec_command({cmd:"wc -m \\"交付.md\\""}))'}},
+            {"timestamp": "2026-11-19T02:29:00Z", "type": "response_item", "payload": {"type": "function_call", "name": "shell", "arguments": json.dumps({"command": ["ls", "-la"]})}},
+            {"timestamp": "2026-11-19T02:37:00Z", "type": "event_msg", "payload": {"type": "task_complete"}},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "rollout-x.jsonl"
+            path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\nnot json\n", encoding="utf-8")
+            got = [(e["who"], e["text"]) for e in sessions.read_rollout(path)]
+        self.assertEqual(got, [("task", "做 #65：更新标签方案"), ("ai", "我先读任务单。"), ("run", 'wc -m "交付.md"'),
+                               ("run", "ls -la"), ("sys", "这一轮做完了")])
