@@ -350,3 +350,31 @@ class EnvironmentTests(unittest.TestCase):
             fancy = Path(tmp) / "01 项目"
             fancy.mkdir()
             self.assertTrue(str(work_base(fancy)).isascii())
+
+
+class PublishOnAsciiPathTests(unittest.TestCase):
+    """On a plain-ASCII project path the AI's folder is the project's own copy; publishing must not
+    try to copy each file onto itself (it raised SameFileError and nothing could ever be delivered)."""
+
+    def test_delivery_publishes_when_work_folder_is_the_kept_copy(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+        from agent_matrix import itemwork, thread
+        with tempfile.TemporaryDirectory(prefix="ascii") as tmp:
+            root = Path(tmp)
+            item = itemwork.Item(root, Config(), {"record_id": "recA1", "input_version": "v" * 64, "title": "周报"})
+            self.assertEqual(item.workdir.resolve(), itemwork.record_copy(root, "recA1").resolve())
+            (item.workdir / "交付.md").write_text("# 周报\n\n## 我做的假设\n- 按本周口径\n", encoding="utf-8")
+            (item.workdir / "结果.json").write_text("{}", encoding="utf-8")
+
+            @contextmanager
+            def project(*a, **k):
+                yield None, None
+
+            with patch.object(itemwork, "project", project), \
+                    patch("agent_matrix.prework.publish_markdown", return_value={"url": "https://x/docx/a"}), \
+                    patch("agent_matrix.prework.notify"), patch("agent_matrix.prework.add_note"):
+                out = item.publish({"summary": "本周完成三件", "confirmation": ""}, 0)
+            self.assertEqual(out["result"], "published")
+            self.assertEqual((item.workdir / "交付.md").read_text(encoding="utf-8").splitlines()[0], "# 周报")
+            self.assertEqual(thread.history(root, ["recA1"])["recA1"]["deliverables"][0]["url"], "https://x/docx/a")

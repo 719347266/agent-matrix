@@ -301,7 +301,8 @@ class Item:
         self.show("交付中", "建飞书文档")
         keep = record_copy(self.root, self.rid)
         for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".claude-session", ".seen.json"):
-            if (self.workdir / name).is_file():
+            # On a plain-ASCII project path the AI works in the project's own copy: nothing to copy then.
+            if (self.workdir / name).is_file() and (self.workdir / name).resolve() != (keep / name).resolve():
                 shutil.copyfile(self.workdir / name, keep / name)
         with project(self.root, self.config) as (client, state):
             self.require_active()
