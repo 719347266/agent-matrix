@@ -390,8 +390,11 @@ def claude_binary(config):
 
 
 MCP_CACHE_SECONDS = 6 * 3600
-# Whatever MCP is loaded, the AI never sends, publishes, merges or deletes on its own (same rule as the rest of 心响).
-MCP_DENY = " ".join(f"mcp__*{w}*" for w in ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply"))
+# Whatever MCP is loaded, the AI only reads: it never sends, publishes, merges, deletes or edits shared workspaces
+# (Notion pages, comments, calendars…) on its own. Deliverables go in its own folder, as before.
+MCP_DENY = " ".join(f"mcp__*{w}*" for w in ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply",
+                                              "create", "update", "move", "restore", "resolve", "comment", "duplicate",
+                                              "spawn", "cancel", "upload"))
 
 
 def mcp_servers(binary, *, run=subprocess.run, cache=None):
