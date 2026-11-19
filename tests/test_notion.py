@@ -99,6 +99,19 @@ class NotionTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual([c["record_id"] for c in out["candidates"]], ["recL1"])  # only the AI's own item
 
+    def test_a_reply_reaches_the_ai_without_feishu(self):
+        """Local-only items are read in their full shape, so 补充材料 changes the AI's input and unblocks it."""
+        from agent_matrix import itemstore
+        from agent_matrix.feishu import Feishu
+        config = Config(item_store="device")
+        save(self.root / "config.yaml", config)
+        state = State(self.root / "state/state.db")
+        try:
+            itemstore.ensure(Feishu(config, self.root, runner=no_lark), state)
+            self.assertEqual(state.get("brief-v1:migration-stage"), "v1_active")
+        finally:
+            state.close()
+
     def test_linked_items_and_people_read_as_text(self):
         kinds = notion.schema(["标题", "父事项", "负责人", "排除本人提醒", "方向"])
         props = notion.properties({"标题": "子事项", "父事项": [{"id": "recA"}], "负责人": [{"id": "ou_1", "name": "小王"}],
