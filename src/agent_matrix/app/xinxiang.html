@@ -711,7 +711,7 @@ function memPage(){
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
 function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }
 function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
-  const builtin=st.builtin_driver!==false, t=savedTheme();
+  const builtin=st.builtin_driver!==false, pre=!!st.prework_enabled, t=savedTheme();
   const seen=(w.drivers||[]).map(d=>`<div class="row flat"><span class="ud"></span><span class="who ai">AI</span><div style="min-width:0"><div class="t">${esc(d.driver)}</div><div class="s">最近 ${esc(d.last)}，做完 ${d.done||0} 件${d.open?`，正在做 ${d.open} 件`:""}</div></div><div></div><div></div></div>`).join("");
   return `<div class="sec-h">通用</div><div class="list"><div class="kv">
     <div>外观</div><div class="chips" style="margin:0">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>
@@ -722,6 +722,7 @@ function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
   ${recordBlock(s.record||{})}
   ${sourcesBlock(s.slack)}
   <div class="sec-h">谁来驱动</div><p class="hint">任何 AI 都能接入：本机 GPT、Claude、Cindy、Cursor……能运行命令的都行。每件事的对话存在心响里，换谁来做都接得上。</p>
+  <div class="switch ${pre?"on":""}" role="switch" aria-checked="${pre}" tabindex="0" onclick="setSetting('prework_enabled',${!pre})"><div class="tr"></div><div><b>AI 接手要它做的事</b><br><span>${pre?"开着：执行方是 AI 的事按截止日先后自动开做，做完交给你验收。对外发送、审批、付款不会碰。":"关着：标成 AI 做的事只排队，不会开工。"}</span></div></div>
   <div class="switch ${builtin?"on":""}" role="switch" aria-checked="${builtin}" tabindex="0" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div><div><b>本机 AI 也来干活</b><br><span>${builtin?"开着：有活就自动做，最多同时 10 件。":"关着：只等外部 AI 来领活。"}</span></div></div>
   ${engineChoice(st.engine||"codex", s.engines||{})}
   <div class="sec-h">最近接入过的 AI</div><div class="list">${seen||'<div class="empty">还没有记录</div>'}</div>
@@ -882,6 +883,7 @@ function replyState(i){
   else if(isWorking(i)){ const c=jobOf(i); text=esc(c.driver||"AI")+" 已接手："+esc(String(c.step||"处理中").replace(/^\d\/4\s*/,""))+"。完成本轮后回复。"; tone="blue"; }
   else if(blockedAI(i)) {text="AI 遇到阻碍："+esc(i.blocker||"等待补充材料");tone="amber";}
   else if(i.status==="待确认") text="执行方或任务信息还待确认，尚未开工。";
+  else if(D.settings && D.settings.prework_enabled===false) { text="AI 接手开关关着，在「系统」页打开后才会开工。"; tone="amber"; }
   else if(D.settings?.builtin_driver===false) { text="本机 AI 已关闭，等待外部 AI 领取。"; tone="amber"; }
   else { const q=(D.worker&&D.worker.queue)||[], pos=q.indexOf(i.n); text=pos>=0?"已排队，前面有 "+pos+" 件。":"已记录，尚未收到 AI 接手回执。"; tone="amber"; }
   const expects=i.who==="AI" && i.status!=="待确认";

@@ -153,6 +153,22 @@ class ServerTests(unittest.TestCase):
         r = conn.getresponse()
         return r.status, r.read().decode()
 
+    def test_the_ai_work_switch_is_saved_to_config_and_shown(self):
+        from unittest.mock import patch
+        from agent_matrix.config import load
+        token = self.server.token
+        def post(body):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+            conn.request("POST", "/api/settings", json.dumps(body), {"Host": f"127.0.0.1:{self.port}", "X-Xinxiang-Token": token,
+                                                                     "Content-Type": "application/json"})
+            return conn.getresponse().status
+        with patch("agent_matrix.worker.kick") as kick:
+            self.assertEqual(post({"prework_enabled": True}), 200)
+        self.assertTrue(load(self.root / "config.yaml").prework_enabled)
+        self.assertTrue(json.loads(self.get("/api/state", {"X-Xinxiang-Token": token})[1])["settings"]["prework_enabled"])
+        self.assertEqual(post({"prework_enabled": False}), 200)
+        self.assertFalse(load(self.root / "config.yaml").prework_enabled)
+
     def test_only_the_page_it_serves_gets_the_token(self):
         status, page = self.get("/")
         self.assertEqual(status, 200)

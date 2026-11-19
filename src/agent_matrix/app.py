@@ -152,7 +152,8 @@ def build_state(root):
     judged = {n_of[rid]: j for rid, j in thread.judgments(root).items() if n_of.get(rid)}
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
-                "engine": thread.setting(root, "engine", "codex")}
+                "engine": thread.setting(root, "engine", "codex"),
+                "prework_enabled": _config_flag(root, "prework_enabled")}
     return {"demo": False, "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
@@ -244,6 +245,14 @@ def run_command(root, text):
     # Re-read the table in the background; the page reloads a few seconds later.
     threading.Thread(target=_python, args=(root, "agent_matrix.monitor", "--refresh"), kwargs={"timeout": 120}, daemon=True).start()
     return {"ok": "✓" in reply, "reply": reply}
+
+
+def _config_flag(root, name):
+    from .config import load
+    try:
+        return bool(getattr(load(root / "config.yaml"), name))
+    except Exception:
+        return False
 
 
 def say(root, n, text):
@@ -345,11 +354,17 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "engine", body["engine"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
-                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):  # config.yaml: the listener reads it there
-                    from .config import load, save
+                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body:
+                    from .config import load, save  # config.yaml: the listener and worker read these there
                     config = load(root / "config.yaml")
-                    config.chat_review_every_minutes = body["chat_review_every_minutes"]
+                    if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):
+                        config.chat_review_every_minutes = body["chat_review_every_minutes"]
+                    if "prework_enabled" in body:
+                        config.prework_enabled = bool(body["prework_enabled"])
                     save(root / "config.yaml", config)
+                    if config.prework_enabled and body.get("prework_enabled"):
+                        from .worker import kick  # start on the waiting AI items now, not at the next 2-minute tick
+                        threading.Thread(target=kick, args=(root, config), kwargs={"force": True}, daemon=True).start()
                 if "auto_assign" in body:
                     thread.set_setting(root, "auto_assign", bool(body["auto_assign"]))
                     if body["auto_assign"]:  # judge the waiting items right away
