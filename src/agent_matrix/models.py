@@ -28,6 +28,8 @@ class Config(BaseModel):
     prework_lead_days: int = Field(default=2, ge=1, le=2)
     # Real-time sources (see listen.py): chats are read as the owner and pre-filtered by code.
     chat_watch_enabled: bool = True
+    chat_skip_chats: list[str] = Field(default_factory=list)  # chats whose name contains any of these are not read
+    chat_skip_words: list[str] = Field(default_factory=list)  # messages containing any of these are skipped
     # Chat todos: @you or urgent lines are extracted at once; the rest whenever there are new lines and this many
     # minutes passed since the last round (0 = only at chat_review_times). Outside from/until only urgent ones run.
     chat_review_every_minutes: int = Field(default=5, ge=0, le=240)
@@ -58,6 +60,10 @@ class Config(BaseModel):
     worker_timeout_minutes: int = Field(default=30, ge=5, le=120)
     worker_claude: str = ""          # path to the claude command; empty = find it on PATH (used when 系统 → 本机 AI is Claude)
     worker_claude_model: str = ""    # e.g. opus / sonnet; empty = the claude account's default
+    # MCP tools the local Claude may use while working, e.g. ["mcp__claude_ai_Notion__notion-fetch"]. Empty = none
+    # (safe mode). Non-empty: the owner's own hooks/plugins stay off, only these MCP tools are allowed.
+    worker_mcp_tools: list[str] = Field(default_factory=list)
+    worker_claudeai_mcp: bool = False  # also the claude.ai connectors (they shadow same-server plugins until signed in)
     worker_concurrency: int = Field(default=10, ge=1, le=20)  # jobs the built-in GPT works on at the same time
 
     @model_validator(mode="after")

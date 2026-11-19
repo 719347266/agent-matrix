@@ -289,6 +289,9 @@ class CodexRun:
         if proc.poll() is None:
             proc.kill()
 
+    def env(self):
+        return _env(self.config)
+
     def run(self, prompt, on_event=None, on_tick=None, should_stop=None):
         if should_stop and should_stop():
             self.stopped = True
@@ -296,7 +299,7 @@ class CodexRun:
         flags = 0x08000000 if os.name == "nt" else 0  # no console window on Windows
         proc = subprocess.Popen(self.argv(), cwd=self.workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                env=_env(self.config), creationflags=flags, start_new_session=os.name != "nt")
+                                env=self.env(), creationflags=flags, start_new_session=os.name != "nt")
         lines = queue_mod.Queue()
         done = threading.Event()
 
@@ -389,9 +392,42 @@ def claude_binary(config):
     return getattr(config, "worker_claude", "") or shutil.which("claude")
 
 
+MCP_CACHE_SECONDS = 6 * 3600
+# Whatever MCP is loaded, the AI only reads: it never sends, publishes, merges, deletes or edits shared workspaces
+# (Notion pages, comments, calendars…) on its own. Deliverables go in its own folder, as before.
+MCP_DENY = " ".join(f"mcp__*{w}*" for w in ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply",
+                                              "create", "update", "move", "restore", "resolve", "comment", "duplicate",
+                                              "spawn", "cancel", "upload"))
+
+
+def mcp_servers(binary, *, run=subprocess.run, cache=None):
+    """Tool-name prefixes of the MCP servers the owner's Claude has connected ("claude.ai Notion" → claude_ai_Notion).
+    `claude mcp list` health-checks every server (~10 s), so the answer is cached for a few hours."""
+    cache = Path(cache or Path.home() / ".cache/agent-matrix-mcp.json")
+    try:
+        saved = json.loads(cache.read_text())
+        if time.time() - saved["at"] < MCP_CACHE_SECONDS:
+            return saved["servers"]
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        out = run([binary, "mcp", "list"], capture_output=True, text=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    servers = sorted({re.sub(r"[^A-Za-z0-9_-]", "_", line.split(": ", 1)[0].replace("claude.ai ", "claude_ai_"))
+                      for line in out.splitlines() if ": " in line and "✔" in line})
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"at": time.time(), "servers": servers}))
+    except OSError:
+        pass
+    return servers
+
+
 class ClaudeRun(CodexRun):
     """One `claude -p` turn, same contract as CodexRun. Like GPT: without the owner's CLAUDE.md, plugins,
-    hooks and MCP (--safe-mode); writes only inside the folder, network allowed (OS sandbox)."""
+    hooks and MCP (--safe-mode), except the MCP tools listed in worker_mcp_tools; writes only inside the folder,
+    network allowed (OS sandbox)."""
     THREAD_FILE = ".claude-session"
     NAME = "本机 Claude"
     SANDBOX = json.dumps({"sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False,
@@ -401,9 +437,17 @@ class ClaudeRun(CodexRun):
         binary = claude_binary(self.config)
         if not binary:
             raise MatrixError("找不到 Claude 命令行（claude）。在 config.yaml 的 worker_claude 写上它的路径。")
-        argv = [binary, "-p", "--safe-mode", "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "dontAsk", "--allowedTools", "Bash Read Write Edit Glob Grep WebFetch WebSearch",
-                "--settings", self.SANDBOX]
+        wanted = self.config.worker_mcp_tools
+        mcp = ([f"mcp__{p}__*" for p in mcp_servers(binary) if self.config.worker_claudeai_mcp or not p.startswith("claude_ai_")]
+               if "*" in wanted else [t for t in wanted if t.startswith("mcp__")])
+        # --safe-mode turns every MCP server off. With MCP wanted: load the owner's user settings (that is where the
+        # MCP servers live) but switch all hooks off, and allow only MCP tools (dontAsk denies everything unlisted).
+        settings = json.dumps({**json.loads(self.SANDBOX), "disableAllHooks": True}) if mcp else self.SANDBOX
+        argv = [binary, "-p", *(["--setting-sources", "user,project"] if mcp else ["--safe-mode"]),
+                "--output-format", "stream-json", "--verbose",
+                "--permission-mode", "dontAsk", "--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch", *mcp]),
+                "--settings", settings,
+                *(["--disallowedTools", MCP_DENY] if mcp else [])]
         if self.config.worker_claude_model:
             argv += ["--model", self.config.worker_claude_model]
         if self.effort in {"low", "medium", "high", "xhigh", "max"}:
@@ -413,6 +457,14 @@ class ClaudeRun(CodexRun):
         if self.ephemeral:
             argv.append("--no-session-persistence")
         return argv
+
+    def env(self):
+        env = _env(self.config)
+        if self.config.worker_mcp_tools and not self.config.worker_claudeai_mcp:
+            # A claude.ai connector and a plugin pointing at the same server (Notion, Atlassian…) collapse into one,
+            # and the claude.ai one wins even when only the plugin is signed in: leave the claude.ai ones out.
+            env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
+        return env
 
     def _event(self, line, on_event):
         try:

@@ -167,6 +167,9 @@ def import_rows(root, rows, fields):
 def ensure(client, state=None):
     """Import the Feishu table the first time the local store is used."""
     root = Path(client.root)
+    if state is not None and feishu_free(client.config) and state.get("brief-v1:migration-stage") != "v1_active":
+        # Items kept only here are always in the current shape (执行方, 补充材料…); there is no Feishu table to migrate.
+        state.set("brief-v1:migration-stage", "v1_active")
     if imported(root):
         return
     from .workflow import FIELDS

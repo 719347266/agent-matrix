@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..models import MatrixError
-from .chats import MAX_CHATS, SKIP_CHAT, classify, owner_words, table
+from .chats import MAX_CHATS, classify, owner_words, skipped_chat, skipped_text, table
 
 API = "https://slack.com/api/"
 
@@ -187,11 +187,11 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
         newest_all = max(newest_all, newest, key=float)
         if c.get("cursor"):
             state.set("slack:cursor:" + cid, newest)
-        if cid in exclude or SKIP_CHAT.search(cname):
+        if cid in exclude or skipped_chat(config, c["name"]):
             continue
         history = []
         for m in msgs:
-            if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text"):
+            if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
                 continue
             from_owner = m["user"] == my_id
             # Owner mentions become the owner's name so the "被点名" rule in chat_review sees them.
@@ -199,7 +199,8 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
             text = re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), text)
             scanned += 1
             sender = "我" if from_owner else who(m["user"])
-            kind = classify(text, from_owner=from_owner, chat_mode=mode, names=names)
+            kind = classify(text, from_owner=from_owner, chat_mode=mode, names=names,
+                            mentioned=f"<@{my_id}>" in m["text"])  # a real @, however it is worded
             if kind:
                 sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
                 # ponytail: the permalink is the message id, so chat_review can link back without a schema change.

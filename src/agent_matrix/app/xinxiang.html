@@ -774,6 +774,10 @@ function runSection(st,s,w){
     +setRow("整理用哪个","会议和聊天里提取待办、判断新进来的事、从反馈里学规矩。在本机跑，快、省。",choice("engine_sort",st.engine_sort||"codex",local))
     +setRow("本机 AI 自动干活", builtin?`开着：本机 AI 有活就做${useCindy?"（做事交给了 Cindy，本机只做整理）":"，最多同时 10 件"}。`:"关着：本机不干活，只等外部 AI 来领活。",
       `<div class="switch ${builtin?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${builtin}" tabindex="0" onclick="setSetting('builtin_driver',${!builtin})"><div class="tr"></div></div>`)
+    +setRow("AI 接手要它做的事", st.prework_enabled?"开着：执行方是 AI 的事按截止日先后自动开做，做完交给你验收。对外发送、审批、付款不会碰。":"关着：标成 AI 做的事只排队，不会开工。",
+      `<div class="switch ${st.prework_enabled?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!st.prework_enabled}" tabindex="0" onclick="setSetting('prework_enabled',${!st.prework_enabled})"><div class="tr"></div></div>`)
+    +setRow("本机 Claude 用你的 MCP", st.worker_mcp?"开着：可用你在 Claude 里装好的插件和本机 MCP（Notion、Slack、云效……）查资料；发送、发布、合并、删除、修改类工具一律禁止。":"关着：AI 只用本机文件、命令和网页。",
+      `<div class="switch ${st.worker_mcp?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!st.worker_mcp}" tabindex="0" onclick="setSetting('worker_mcp',${!st.worker_mcp})"><div class="tr"></div></div>`)
     +engineRow("codex",st,found.codex)+engineRow("claude",st,found.claude)
     +setRow("外部 AI 接入","Claude Code、Cursor 等任何能运行命令的 AI，都能领心响的活来做。",`<button class="btn" onclick="copyGuide()">复制接入说明</button>`,
       `<details><summary>查看接入说明${seen?"和最近接入过的 AI":""}</summary><div class="guide" style="padding:10px 0 0"><pre id="guide">${esc(D.guide||"")}</pre>${seen?`<div class="hint" style="margin:0">${seen}</div>`:""}</div></details>`));
@@ -813,8 +817,16 @@ function sourceSection(s){
   return setSec("src","消息来源","从哪里收进新的事，多久整理一次。",
     setRow("飞书",`推送：${esc(s.subs||"未知")}。飞书只发 08:30 早报和 21:00 晚报，其余都在心响里。`,"")
     +setRow("Slack",slackDesc,slackCtl,tried)
+    +filterRow(r)
     +setRow("聊天多久整理一次",every?`@你、带时间或催办的话马上整理；其余有新的、且离上一轮满 ${every} 分钟就整理。22:00 以后只处理紧急的。`:`@你、带时间或催办的话马上整理；其余每天 ${esc((r.review_times||[]).join("、"))} 各整理一次。`,
       `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`));
+}
+function filterRow(r){
+  const skipC=r.skip_chats||[], skipW=r.skip_words||[], pick=(r.recent_chats||[]).filter(n=>!skipC.some(w=>n.includes(w))).slice(0,12);
+  return setRow("过滤","名字里含这些字的群不读、消息里含这些字就跳过（飞书和 Slack 都管用，一行一个）。",`<button class="btn pri" onclick="saveFilters()">保存过滤</button>`,
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="hint" style="margin:0 0 4px">屏蔽的群</div><textarea id="skipchats" rows="3" data-draft="skip-chats" placeholder="例：bot-loyalty&#10;all-member" style="width:100%">${esc(skipC.join("\n"))}</textarea></div>
+     <div><div class="hint" style="margin:0 0 4px">跳过的消息</div><textarea id="skipwords" rows="3" data-draft="skip-words" placeholder="例：Issue created&#10;部署通知" style="width:100%">${esc(skipW.join("\n"))}</textarea></div></div>
+     ${pick.length?`<div class="chips" style="margin:6px 0 0">${pick.map(n=>`<button class="chip" onclick="addSkipChat(${esc(JSON.stringify(n.replace(/^Slack · /,"")))})">+ ${esc(n)}</button>`).join("")}</div>`:""}`);
 }
 function dataSection(s){
   const r=s.record||{}, mode=r.mode||"feishu";
@@ -871,6 +883,15 @@ async function notionOn(){
   catch(e){ toast(e.name==="AbortError"?"连 Notion 超时了，再试一次":e.message); }
 }
 const SLACK_SCOPES="search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read";
+function addSkipChat(name){ const box=$("#skipchats"); if(!box) return; const have=box.value.split("\n").map(s=>s.trim()).filter(Boolean);
+  if(!have.includes(name)) box.value=[...have,name].join("\n"); box.focus(); }
+async function saveFilters(){
+  const lines=id=>($("#"+id)?.value||"").split("\n").map(s=>s.trim()).filter(Boolean);
+  const body={chat_skip_chats:lines("skipchats"), chat_skip_words:lines("skipwords")};
+  if(!LIVE) return toast("原型里不能保存");
+  try{ await api("/api/settings",body); drafts.delete("skip-chats"); drafts.delete("skip-words"); toast("过滤已保存，下一轮拉消息就生效"); load(); }
+  catch(e){ toast("没保存成功"); }
+}
 async function slackOn(){
   const box=$("#slacktok"), tok=box&&box.value.trim(); if(!tok) return box&&box.focus();
   if(!LIVE) return toast("原型里不能连接");
@@ -981,6 +1002,7 @@ function replyState(i){
   else if(isWorking(i)){ const c=jobOf(i); text=esc(c.driver||"AI")+" 已接手："+esc(String(c.step||"处理中").replace(/^\d\/4\s*/,""))+"。完成本轮后回复。"; tone="blue"; }
   else if(blockedAI(i)) {text="AI 遇到阻碍："+esc(i.blocker||"等待补充材料");tone="amber";}
   else if(i.status==="待确认") text="执行方或任务信息还待确认，尚未开工。";
+  else if(D.settings && D.settings.prework_enabled===false) { text="AI 接手开关关着，在「设置 → AI 执行」里打开后才会开工。"; tone="amber"; }
   else if(D.settings?.builtin_driver===false) { text="本机 AI 已关闭，等待外部 AI 领取。"; tone="amber"; }
   else { const q=(D.worker&&D.worker.queue)||[], pos=q.indexOf(i.n); text=pos>=0?"已排队，前面有 "+pos+" 件。":"已记录，尚未收到 AI 接手回执。"; tone="amber"; }
   const expects=i.who==="AI" && i.status!=="待确认";

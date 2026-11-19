@@ -219,6 +219,27 @@ class ConversationTests(unittest.TestCase):
                 ClaudeRun(config, work, thread="sess-1").run("本人补充：加上竞品")
                 self.assertEqual((work / "seen_prompt.txt").read_text(), "本人补充：加上竞品")
                 self.assertIn("--resume", json.loads((work / "seen_args.txt").read_text()))
+            with_mcp = ClaudeRun(Config(worker_claude=str(fake), worker_mcp_tools=["mcp__claude_ai_Notion__notion-fetch", "rm -rf"]), work).argv()
+            self.assertNotIn("--safe-mode", with_mcp)               # safe mode would switch every MCP server off
+            self.assertEqual(with_mcp[with_mcp.index("--setting-sources") + 1], "user,project")  # where MCP servers live
+            self.assertTrue(json.loads(with_mcp[with_mcp.index("--settings") + 1])["disableAllHooks"])  # the owner's hooks stay off
+            allowed = with_mcp[with_mcp.index("--allowedTools") + 1]
+            self.assertIn("mcp__claude_ai_Notion__notion-fetch", allowed)
+            self.assertNotIn("rm -rf", allowed)                      # only mcp__ names get through
+            from agent_matrix import worker
+            listed = ("claude.ai Notion: https://mcp.notion.com/mcp - ✔ Connected\n"
+                      "claude.ai Apollo.io: https://mcp.apollo.io/mcp - ! Needs authentication\n"
+                      "plugin:chrome-devtools-mcp:chrome-devtools: npx chrome-devtools-mcp@latest - ✔ Connected\n"
+                      "pencil: /x/mcp-server --app cursor - ✔ Connected\n")
+            fake_run = lambda *a, **k: type("R", (), {"stdout": listed})()
+            servers = worker.mcp_servers("claude", run=fake_run, cache=Path(tmp) / "mcp.json")
+            self.assertEqual(servers, ["claude_ai_Notion", "pencil", "plugin_chrome-devtools-mcp_chrome-devtools"])  # connected only
+            with patch.object(worker, "mcp_servers", lambda binary: servers):
+                every = ClaudeRun(Config(worker_claude=str(fake), worker_mcp_tools=["*"]), work).argv()
+            self.assertIn("mcp__pencil__* mcp__plugin_chrome-devtools-mcp_chrome-devtools__*", every[every.index("--allowedTools") + 1])
+            self.assertIn("mcp__*send*", every[every.index("--disallowedTools") + 1])  # never sends on its own
+            self.assertNotIn("claude_ai_Notion", every[every.index("--allowedTools") + 1])  # plugins + local MCP only
+            self.assertEqual(ClaudeRun(Config(worker_mcp_tools=["*"]), work).env()["ENABLE_CLAUDEAI_MCP_SERVERS"], "false")
             root = Path(tmp) / "root"
             self.assertEqual(engine(root).NAME, "本机 GPT")           # default stays GPT
             conversation.set_setting(root, "engine", "claude")
