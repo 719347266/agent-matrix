@@ -28,6 +28,8 @@ class Config(BaseModel):
     prework_lead_days: int = Field(default=2, ge=1, le=2)
     # Real-time sources (see listen.py): chats are read as the owner and pre-filtered by code.
     chat_watch_enabled: bool = True
+    chat_skip_chats: list[str] = Field(default_factory=list)  # chats whose name contains any of these are not read
+    chat_skip_words: list[str] = Field(default_factory=list)  # messages containing any of these are skipped
     # Chat todos: @you or urgent lines are extracted at once; the rest whenever there are new lines and this many
     # minutes passed since the last round (0 = only at chat_review_times). Outside from/until only urgent ones run.
     chat_review_every_minutes: int = Field(default=5, ge=0, le=240)

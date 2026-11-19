@@ -366,6 +366,30 @@ class SlackSourceTests(unittest.TestCase):
         finally:
             state.close()
 
+    def test_skipped_chats_and_words_are_not_read(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "大山"}}}
+            return {"messages": {"matches": [
+                {"ts": "1795000000.000100", "user": "UX", "text": "<@UME> 帮忙看下", "channel": {"id": "C1", "name": "bot-loyalty-alerts"}},
+                {"ts": "1795000001.000100", "user": "UX", "text": "<@UME> Issue created 帮忙看下", "channel": {"id": "C2", "name": "team-dev"}},
+                {"ts": "1795000002.000100", "user": "UX", "text": "<@UME> 帮忙看下这个需求", "channel": {"id": "C2", "name": "team-dev"}}],
+                "paging": {"pages": 1}}}
+        state = State(root / "state.db")
+        try:
+            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["Loyalty"], chat_skip_words=["issue created"])
+            out = slack.poll(config, root, state, datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
+            self.assertEqual(out["candidates"], 1)   # the muted channel and the muted words are skipped, case-insensitive
+            text, = state.db.execute("SELECT text FROM chat_candidates").fetchone()
+            self.assertIn("这个需求", text)
+        finally:
+            state.close()
+
     def test_connect_saves_token_and_shows_identity_without_the_token(self):
         from agent_matrix import app
         from agent_matrix.config import load

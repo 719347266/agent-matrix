@@ -28,6 +28,15 @@ def table(state):
     state.db.commit()
 
 
+def skipped_chat(config, name):
+    """Built-in noise (bots, notices) or a chat the owner chose to ignore on the 系统 page."""
+    return bool(SKIP_CHAT.search(name)) or any(w and w.lower() in name.lower() for w in config.chat_skip_chats)
+
+
+def skipped_text(config, text):
+    return any(w and w.lower() in text.lower() for w in config.chat_skip_words)
+
+
 def owner_words(config):
     name = config.owner_name or ""
     words = {name, *config.owner_aliases}
@@ -75,7 +84,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
     kept = scanned = 0
     for chat in chats[:MAX_CHATS]:
         cid, cname = chat.get("chat_id"), str(chat.get("name") or "")
-        if not cid or cid in exclude or SKIP_CHAT.search(cname):
+        if not cid or cid in exclude or skipped_chat(config, cname):
             continue
         cursor_key = "chats:cursor:" + cid
         since = state.get(cursor_key) or (now - timedelta(hours=2)).isoformat()
@@ -86,7 +95,8 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         for m in messages:
             sender = m.get("sender") or {}
             text = _text(m)
-            if sender.get("sender_type") != "user" or m.get("msg_type") not in {"text", "post"} or not text:
+            if (sender.get("sender_type") != "user" or m.get("msg_type") not in {"text", "post"} or not text
+                    or skipped_text(config, text)):
                 continue
             scanned += 1
             from_owner = sender.get("id") == config.owner_open_id

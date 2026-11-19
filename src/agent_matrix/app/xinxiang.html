@@ -767,7 +767,24 @@ function sourcesBlock(me){
     :`<div class="kv" style="border-top:1px solid var(--line2)"><div>Slack</div><div>未连接
       <div class="hint" style="margin:4px 0 8px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头），粘到下面。</div>
       <div class="inline" style="padding:0;background:none;border:0"><input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button></div></div></div>`;
-  return `<div class="sec-h">接入来源</div><div class="list">${pace}${slack}</div>${result}`;
+  const skipC=r.skip_chats||[], skipW=r.skip_words||[], pick=(r.recent_chats||[]).filter(n=>!skipC.some(w=>n.includes(w))).slice(0,12);
+  const filter=`<div class="kv" style="border-top:1px solid var(--line2)"><div>过滤</div><div>
+      <div class="hint" style="margin:0 0 6px">名字里含这些字的群不读（飞书和 Slack 都管用），一行一个：</div>
+      <textarea id="skipchats" rows="3" data-draft="skip-chats" placeholder="例：bot-loyalty&#10;all-member">${esc(skipC.join("\n"))}</textarea>
+      ${pick.length?`<div class="chips" style="margin:6px 0 0">${pick.map(n=>`<button class="chip" onclick="addSkipChat(${esc(JSON.stringify(n.replace(/^Slack · /,"")))})">+ ${esc(n)}</button>`).join("")}</div>`:""}
+      <div class="hint" style="margin:10px 0 6px">消息里含这些字就跳过，一行一个：</div>
+      <textarea id="skipwords" rows="3" data-draft="skip-words" placeholder="例：Issue created&#10;部署通知">${esc(skipW.join("\n"))}</textarea>
+      <div class="acts" style="margin-top:8px"><button class="btn pri" onclick="saveFilters()">保存过滤</button></div></div></div>`;
+  return `<div class="sec-h">接入来源</div><div class="list">${pace}${filter}${slack}</div>${result}`;
+}
+function addSkipChat(name){ const box=$("#skipchats"); if(!box) return; const have=box.value.split("\n").map(s=>s.trim()).filter(Boolean);
+  if(!have.includes(name)) box.value=[...have,name].join("\n"); box.focus(); }
+async function saveFilters(){
+  const lines=id=>($("#"+id)?.value||"").split("\n").map(s=>s.trim()).filter(Boolean);
+  const body={chat_skip_chats:lines("skipchats"), chat_skip_words:lines("skipwords")};
+  if(!LIVE) return toast("原型里不能保存");
+  try{ await api("/api/settings",body); drafts.delete("skip-chats"); drafts.delete("skip-words"); toast("过滤已保存，下一轮拉消息就生效"); load(); }
+  catch(e){ toast("没保存成功"); }
 }
 async function slackOn(){
   const box=$("#slacktok"), tok=box&&box.value.trim(); if(!tok) return box&&box.focus();

@@ -221,7 +221,8 @@ def system_info(root):
         found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
         mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
         record = {"review_every": config.chat_review_every_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
-                  "notion": bool(config.notion_database_id), "notion_url": notion_url}
+                  "notion": bool(config.notion_database_id), "notion_url": notion_url,
+                  "skip_chats": config.chat_skip_chats, "skip_words": config.chat_skip_words, "recent_chats": _recent_chats(root)}
     except Exception:
         found, record = {}, {}
     return {"engines": found, "slack": slack, "record": record, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
@@ -246,6 +247,16 @@ def run_command(root, text):
     # Re-read the table in the background; the page reloads a few seconds later.
     threading.Thread(target=_python, args=(root, "agent_matrix.monitor", "--refresh"), kwargs={"timeout": 120}, daemon=True).start()
     return {"ok": "✓" in reply, "reply": reply}
+
+
+def _recent_chats(root, limit=30):
+    """Chat names seen lately, so the filter can be picked instead of typed."""
+    import sqlite3
+    try:
+        with sqlite3.connect(Path(root) / "state/state.db") as db:
+            return [r[0] for r in db.execute("SELECT chat_name, MAX(sent_at) m FROM chat_candidates GROUP BY chat_name ORDER BY m DESC LIMIT ?", (limit,))]
+    except sqlite3.Error:
+        return []
 
 
 def _config_flag(root, name):
@@ -355,7 +366,8 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "engine", body["engine"])
                 if "builtin_driver" in body:
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
-                if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body or "worker_mcp" in body:
+                if (body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body or "worker_mcp" in body
+                        or "chat_skip_chats" in body or "chat_skip_words" in body):
                     from .config import load, save  # config.yaml: the listener and worker read these there
                     config = load(root / "config.yaml")
                     if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):
@@ -364,6 +376,9 @@ class Handler(BaseHTTPRequestHandler):
                         config.prework_enabled = bool(body["prework_enabled"])
                     if "worker_mcp" in body:
                         config.worker_mcp_tools = ["*"] if body["worker_mcp"] else []
+                    for key in ("chat_skip_chats", "chat_skip_words"):
+                        if isinstance(body.get(key), list):
+                            setattr(config, key, list(dict.fromkeys(str(w).strip()[:40] for w in body[key] if str(w).strip()))[:100])
                     save(root / "config.yaml", config)
                     if config.prework_enabled and body.get("prework_enabled"):
                         from .worker import kick  # start on the waiting AI items now, not at the next 2-minute tick

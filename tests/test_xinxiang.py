@@ -168,6 +168,9 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(json.loads(self.get("/api/state", {"X-Xinxiang-Token": token})[1])["settings"]["prework_enabled"])
         self.assertEqual(post({"prework_enabled": False}), 200)
         self.assertFalse(load(self.root / "config.yaml").prework_enabled)
+        self.assertEqual(post({"chat_skip_chats": [" bot-alerts ", "bot-alerts", ""], "chat_skip_words": ["部署通知"]}), 200)
+        saved = load(self.root / "config.yaml")
+        self.assertEqual((saved.chat_skip_chats, saved.chat_skip_words), (["bot-alerts"], ["部署通知"]))
 
     def test_only_the_page_it_serves_gets_the_token(self):
         status, page = self.get("/")

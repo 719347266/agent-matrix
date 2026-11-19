@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..models import MatrixError
-from .chats import MAX_CHATS, SKIP_CHAT, classify, owner_words, table
+from .chats import MAX_CHATS, classify, owner_words, skipped_chat, skipped_text, table
 
 API = "https://slack.com/api/"
 
@@ -187,11 +187,11 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
         newest_all = max(newest_all, newest, key=float)
         if c.get("cursor"):
             state.set("slack:cursor:" + cid, newest)
-        if cid in exclude or SKIP_CHAT.search(cname):
+        if cid in exclude or skipped_chat(config, c["name"]):
             continue
         history = []
         for m in msgs:
-            if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text"):
+            if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
                 continue
             from_owner = m["user"] == my_id
             # Owner mentions become the owner's name so the "被点名" rule in chat_review sees them.
