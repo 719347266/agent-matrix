@@ -276,7 +276,7 @@ class SlackSourceTests(unittest.TestCase):
         self.assertEqual((out["candidates"], out["via"]), (2, "search"))
         self.assertNotIn("conversations.history", calls)
         kinds = {r["chat_name"]: r["kind"] for r in pending(state)}
-        self.assertEqual(kinds, {"Slack · 王小明": "我的承诺", "Slack · sales": "找你的"})
+        self.assertEqual(kinds, {"Slack · 王小明": "我的承诺", "Slack · sales": "@你"})
         self.assertEqual(state.get("slack:search-cursor"), found[0]["ts"])
         self.assertEqual(slack.poll(config, root, state, now, api=api)["candidates"], 0)  # nothing new since the cursor
 
@@ -338,6 +338,29 @@ class SlackSourceTests(unittest.TestCase):
             self.assertEqual([x.split("] ")[1] for x in later], ["麻烦确认合同", "已确认"])
         finally:
             slack.history = orig
+
+    def test_a_slack_at_mention_in_a_group_is_kept_even_without_ask_words(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "大山"}}}
+            return {"messages": {"matches": [
+                {"ts": "1795000000.000100", "user": "UX", "text": "<@UME> 业务是否有偏移", "channel": {"id": "C1", "name": "team-dev"}},
+                {"ts": "1795000001.000100", "user": "UX", "text": "业务是否有偏移，大家看看", "channel": {"id": "C1", "name": "team-dev"}}],
+                "paging": {"pages": 1}}}
+        state = State(root / "state.db")
+        try:
+            out = slack.poll(Config(slack_token="xoxp-1", owner_name="YuHao Lin"), root, state,
+                             datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
+            self.assertEqual(out["candidates"], 1)
+            kind, = state.db.execute("SELECT kind FROM chat_candidates").fetchone()
+            self.assertEqual(kind, "@你")
+        finally:
+            state.close()
 
     def test_connect_saves_token_and_shows_identity_without_the_token(self):
         from agent_matrix import app

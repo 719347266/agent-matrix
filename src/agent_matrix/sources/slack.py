@@ -199,7 +199,8 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
             text = re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), text)
             scanned += 1
             sender = "我" if from_owner else who(m["user"])
-            kind = classify(text, from_owner=from_owner, chat_mode=mode, names=names)
+            kind = classify(text, from_owner=from_owner, chat_mode=mode, names=names,
+                            mentioned=f"<@{my_id}>" in m["text"])  # a real @, however it is worded
             if kind:
                 sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
                 # ponytail: the permalink is the message id, so chat_review can link back without a schema change.
