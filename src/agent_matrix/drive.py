@@ -62,6 +62,8 @@ STOPPED = {"ok": False, "status": "cancelled", "note": "本人已经把这件事
 
 def _closed(job):
     if job["status"] == "cancelled":
+        if str(job.get("step") or "").startswith("本人把这件事交给了"):
+            return {**STOPPED, "note": f"{job['step']}：停下，不用再做、也不用交了。"}
         return dict(STOPPED)
     if job["status"] != "open":
         return {"ok": True, "status": job["status"], "note": "这件活已经结束了。"}
@@ -106,9 +108,14 @@ def protocol_tail(job):
     lines = ["", "## 交活（心响驱动协议）",
              f"- 进度：`{c} step --job {j} --text \"2/4 查文档\"`（15 字内，心响里实时显示）",
              f"- 做完：`{c} submit --job {j}`。返回 `\"status\": \"fix\"` 就按 problem 改好再交；返回 done 就结束。"]
+    if job["kind"] == "setup":
+        lines += [f"- 要本人亲手做的事（登录、点同意、扫码、输电脑密码）：`{c} say --job {j} --text \"一句话说清要他做什么\"`，"
+                  "心响里会显示给他看；在你自己的对话里也告诉他，等他做完再继续。"]
     if job["kind"] == "item":
         lines += [f"- 想对本人说的话：`{c} say --job {j} --text \"……\"`（会记进这件事的对话）",
-                  f"- 卡住：`{c} ask --job {j} --question \"问本人的一个具体问题\" --tried \"已经试过什么\"`"]
+                  f"- 卡住：`{c} ask --job {j} --question \"问本人的一个具体问题\" --tried \"已经试过什么\"`",
+                  f"- 这件事更适合另一个 AI 做：`{c} handoff --job {j} --to \"它的名字\" --why \"为什么\"`。只交这一件，别的事还是你做；"
+                  "返回里有 message 就把它原样发给那个 AI（你发不了就告诉本人去发），它会接着你的进度做。"]
     lines += [f"- 做不了：`{c} release --job {j}`，放回队列。",
               "- 任何调用返回 cancelled：本人已叫停，立即结束本轮和已启动的命令，不再写入或提交这件事。",
               "然后再运行一次 next 领下一件，直到返回 idle。"]
@@ -144,6 +151,41 @@ def _prepare_triage(root, config, driver):
 
 
 LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
+
+
+def _prepare_setup(root, config, driver):
+    """The owner clicked 接入飞书 / Slack / 微信 (or asked for the rest to be set up): the AI that drives 心响 does it."""
+    from . import setupasks
+    from .setupshim import TALK, _cmd as setup_cmd
+    from .workenv import scratch
+    if _busy(root, "setup"):
+        return None
+    asks = setupasks.pending(root)
+    if not asks:
+        return None
+    what = next(iter(asks))
+    name = setupasks.WHAT[what]
+    only = "" if what == "fix" else f" --only {what}"
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    title = "把心响剩下的配好" if what == "fix" else f"接入 {name}" if name.isascii() else f"接入{name}"
+    doctor = f"{setup_cmd(root)} doctor{only}"
+    return {"id": f"setup-{what}-{stamp}", "kind": "setup", "title": title, "folder": str(scratch(root, "setup", stamp)),
+            "ref": {"what": what}, "output": [], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": f"""# {title}
+
+本人在心响里点了「{title}」，要你来把它配好。你就是驱动心响的 AI，命令都由你来运行。
+
+1. 运行 `{doctor}`。它会列出还缺什么、每一步怎么做；照着逐项做，每做完一步再运行一次，直到这一项就绪。
+2. 只有人能做的事（在浏览器里登录、点同意、扫码、输电脑密码）才找本人：用下面的 say 命令说清要他做什么，然后等他做完再继续。
+3. 每到一个阶段报一下进度（step，15 字内），本人在心响设置里能看到。
+4. 做完运行 submit。心响会自己再查一遍：真接好了才算完成；没好会告诉你还差什么，照着继续。
+
+{TALK}
+
+请遵守：
+- 不要在对话里问本人要密码、验证码、Token 或密钥。要填 Token 的（比如 Slack），请本人自己粘贴到心响的设置里。
+- 改系统设置、重新签名应用这类会影响别的软件的事，先说清楚影响，本人同意了再做。
+- 只做配置这一件事，不要改别的东西。"""}
 
 
 def _prepare_learn(root, config, driver):
@@ -329,20 +371,21 @@ def _history_text(root, record_id, limit=30):
                      for m in msgs)
 
 
-def _prepare_item(root, config, driver, skip=()):
+def _prepare_item(root, config, driver, skip=(), allow=None, name_for=None):
     from .itemwork import Item
-    from .itemwork import _changes, first_prompt, pick_next, resume_prompt
-    from .workenv import project
-    pick = pick_next(root, config, skip=skip)
+    from .itemwork import pick_next
+    pick = pick_next(root, config, skip=skip, allow=allow)
     if not pick:
         return None
+    if name_for:
+        driver = name_for(pick["record_id"])
     item = Item(root, config, pick)
     got = item.claim(lease_minutes=ITEM_LEASE_MINUTES)
     if not got:
         return {"skip": pick["record_id"]}
     client, rows, row, notes = got
     try:
-        return _item_job(root, config, driver, item, client, rows, row, notes)
+        return {**_item_job(root, config, driver, item, client, rows, row, notes), "driver_name": driver}
     except BaseException:
         item.release()   # claimed but not handed out: back to the queue now, not when the lease runs out
         raise
@@ -397,16 +440,26 @@ def cindy_kinds(root):
 
 
 def local_kinds(root):
-    """What the built-in driver takes: whatever was not handed to Cindy or to an AI that said hello."""
-    return [*(SORTING if sort_runner(root) == "local" else ()), *(("item",) if item_runner(root) == "local" else ())]
+    """What the built-in driver takes: the sorting unless it was handed to someone else, and the items that are its own
+    (all of them when a local AI is chosen in settings, else only those handed to a local AI one by one)."""
+    return [*(SORTING if sort_runner(root) == "local" else ()), "item"]
 
 
 def kinds_for(root, driver):
-    """What this AI takes: the work handed to it by name (an AI that said hello), or to Cindy's schedule."""
+    """What this AI takes: the sorting if it was handed to it, and items (only its own: see item_filter)."""
+    from .aidrivers import is_mine
     from .thread import setting
     work, sort = setting(Path(root), "engine", "codex"), setting(Path(root), "engine_sort", "")
-    mine = lambda chosen: chosen == "driver:" + str(driver) or (chosen == "cindy" and "cindy" in str(driver).lower())
-    return [*(SORTING if mine(sort) else ()), *(("item",) if mine(work) else ())]
+    return [*(("setup",) if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
+
+
+def item_filter(root, driver, *, builtin=False):
+    """Which items this AI may take: those handed to it, and, unless handed to someone else, those of the AI chosen
+    in settings when that is this one."""
+    from . import aidrivers
+    from .thread import setting
+    table, usual = aidrivers.assignments(root), setting(Path(root), "engine", "codex")
+    return lambda rid: aidrivers.is_mine(table.get(rid) or usual, driver, builtin=builtin)
 
 
 def has_sorting_for(root, config):
@@ -432,17 +485,32 @@ def has_sorting_for(root, config):
     return None
 
 
-def next_job(root, config, driver, *, skip=(), kinds=None):
+def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=None):
     """The next piece of work for this driver, already prepared; None when there is nothing to do.
-    kinds limits what it takes: e.g. Cindy takes only items, the built-in driver then only sorting work."""
+    kinds limits what it takes: e.g. Cindy takes only items, the built-in driver then only sorting work.
+    builtin: the built-in driver asks (it takes the items of the local AIs, each run with its own AI).
+    only: one item by its record id, that the owner or another AI handed to whoever got the message."""
     root = Path(root)
     from . import aidrivers
-    if "cindy" in str(driver).lower() or aidrivers.is_known(root, driver):
+    allow, name_for = None, None
+    if only:
+        owner = aidrivers.assigned(root, only)
+        if owner and owner != aidrivers.HANDOFF and not aidrivers.is_mine(owner, driver):
+            raise MatrixError(f"这件事交给了 {aidrivers.label(owner)}，不是你。")
+        if any(j["kind"] == "item" and j["ref"].get("record_id") == only for j in open_jobs(root)):
+            raise MatrixError("这件事正在被别的 AI 做。")
+        kinds, allow = ["item"], (lambda rid: rid == only)
+    elif builtin:
+        allow = item_filter(root, driver, builtin=True)
+        name_for = lambda rid: aidrivers.LOCAL.get(aidrivers.owner_of(root, rid), driver)
+    elif "cindy" in str(driver).lower() or aidrivers.is_known(root, driver):
         # Cindy's schedule and every AI that said hello take what was handed to them, whatever their prompt asks for
-        kinds = kinds_for(root, driver)
-        if not kinds:
-            return None
+        kinds, allow = kinds_for(root, driver), item_filter(root, driver)
     wanted = set(kinds or (*SORTING, "item"))
+    if "setup" in wanted:   # the owner is waiting on this one: it goes before anything else
+        job = _prepare_setup(root, config, driver)
+        if job:
+            return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
             continue
@@ -453,19 +521,21 @@ def next_job(root, config, driver, *, skip=(), kinds=None):
         return None
     tried = set(skip)
     for _ in range(5):
-        job = _prepare_item(root, config, driver, skip=tried)
+        job = _prepare_item(root, config, driver, skip=tried, allow=allow, name_for=name_for)
         if not job:
             return None
         if "skip" in job:
             tried.add(job["skip"])
             continue
+        if only and aidrivers.assigned(root, only) == aidrivers.HANDOFF:
+            aidrivers.assign(root, only, aidrivers.setting_of(aidrivers.clean(driver)))   # whoever got the message, has it now
         # Preparing background may take time; the owner may have cancelled meanwhile.
         # Publish the lease under the same lock used by owner commands.
         from .prework import current
         from .workenv import project
         with project(root, config) as (client, state):
             current(config, client, state, job["ref"]["record_id"], job["ref"]["version"])
-            return _open(root, job, driver)
+            return _open(root, job, job.pop("driver_name", None) or driver)
     return None
 
 
@@ -505,14 +575,15 @@ def cindy_header(root, job):
             f"- 交付文件写到下面说的工作文件夹（folder）里，做完按末尾的命令交给心响。\n\n")
 
 
-def has_items_for(root, config):
-    """Is there an item waiting that nobody is working on? Cheap enough for a schedule's pre-run check."""
+def has_items_for(root, config, driver="Cindy"):
+    """Is there an item for this AI waiting that nobody is working on? Cheap enough for a schedule's pre-run check."""
     from .workenv import _check
     code, checked = _check(root, "agent_matrix.prework")
     if code != 0:
         return False
     taken = {j["ref"].get("record_id") for j in open_jobs(root) if j["kind"] == "item"}
-    return any(r.get("status") in {"queued", "running", "prepared"} and r["record_id"] not in taken
+    mine = item_filter(root, driver)
+    return any(r.get("status") in {"queued", "running", "prepared"} and r["record_id"] not in taken and mine(r["record_id"])
                for r in checked.get("ready") or [])
 
 
@@ -555,6 +626,10 @@ def say(root, job_id, text, driver=None):
     job = get(root, job_id)
     if closed := _closed(job):
         return closed
+    if job["kind"] == "setup":   # shown where the owner clicked 接入, until the next thing is said
+        from . import setupasks
+        setupasks.note(root, job["ref"]["what"], said=str(text or "").strip()[:300], said_at=now().isoformat(timespec="seconds"))
+        return {"ok": True}
     if job["kind"] != "item":
         return {"ok": False, "error": "只有事项有对话。"}
     from . import thread as conversation
@@ -594,7 +669,7 @@ def submit(root, config, job_id, driver=None):
     """Check the output; publish it, or say exactly what to fix (the job stays open for the fix)."""
     job = get(root, job_id)
     if job["status"] == "cancelled":
-        return STOPPED
+        return _closed(job)
     if job["status"] != "open":
         return {"ok": True, "status": job["status"], "note": "这件活已经结束了。"}
     os.environ.setdefault("XINXIANG_DRIVER", job.get("driver") or driver or "AI")
@@ -605,6 +680,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_triage(root, job)
     if kind == "learn":
         return _submit_learn(root, job)
+    if kind == "setup":
+        return _submit_setup(root, job)
     from . import activity
     from .workenv import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
@@ -652,9 +729,38 @@ def _submit_item(root, config, job):
     return {"ok": True, "status": "done", "url": published.get("url")}
 
 
+def _record_of(root, n):
+    from .snapshot import _snapshot
+    return next((r["record_id"] for r in _snapshot(root).get("rows") or [] if str(r.get("编号")) == str(n)), None)
+
+
 def _row_of(root, record_id):
     from .snapshot import _snapshot
     return next((r for r in _snapshot(root).get("rows") or [] if r.get("record_id") == record_id), {})
+
+
+def _submit_setup(root, job):
+    """心响 checks for itself whether it is really set up; the ask goes away only then."""
+    from . import inbox, setupasks
+    from .workenv import _cli
+    what = job["ref"]["what"]
+    code, out = _cli(root, "agent_matrix.setupcheck", "status", *([] if what == "fix" else ["--only", what]), timeout=120)
+    if not out:
+        return {"ok": False, "status": "fix", "problem": "心响没查到配置情况，过一会儿再交一次。"}
+    if not out.get("ready"):
+        job["rounds"] += 1
+        if job["rounds"] > 40:
+            return fail(root, job, "改了很多轮还是没配好：" + "、".join(out.get("left") or []))
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "还没好：" + "、".join(out.get("left") or []) + "\n" + str(out.get("text") or "")[-1500:]}
+    setupasks.done(root, what)
+    _close(root, job, "done")
+    activity.log(root, "setup", f"{job['title']}：好了", detail=job.get("driver") or "")
+    try:
+        inbox.add(root, f"setup-done:{job['id']}", f"✓ {job['title']}，{job.get('driver') or 'AI'} 配好了。", kind="system")
+    except Exception as exc:
+        activity.swallowed(root, "drive._submit_setup", exc)
+    return {"ok": True, "status": "done"}
 
 
 def _submit_triage(root, job):
@@ -719,8 +825,90 @@ def release(root, config, job_id, reason="驱动方放回"):
         return {"ok": True, "status": job["status"]}
     if job["kind"] == "item":
         _item(root, config, job).release()
+    if job["kind"] == "setup":   # the AI could not do it: the owner sees why, and can ask again
+        from . import setupasks, thread as conversation
+        what = job["ref"]["what"]
+        said = (setupasks.pending(root).get(what) or {}).get("said") or ""
+        setupasks.done(root, what)
+        conversation.set_setting(Path(root), "setup:gave_up:" + what,
+                                 {"by": job.get("driver"), "why": said, "at": now().isoformat(timespec="seconds")})
     _close(root, job, "released")
     return {"ok": True, "status": "released"}
+
+
+# ---- one item to another AI -------------------------------------------------------------------------------
+
+def handoff_message(n, title, value):
+    """What is sent to the AI that takes over one item: it says who it is (without taking everything else over),
+    takes that one item, and carries on from where the last one stopped."""
+    from .aidrivers import name_in
+    from .setupshim import work_cmd
+    xin, name = work_cmd(), name_in(value) or "<你的名字>"
+    return f"""请你来做我电脑上「心响」里的一件事：#{n} {title}。心响是本机的待办工具；这件事之前可能有别的 AI 做过，任务单、背景、之前的对话和上一版都在它给你的工作台里，接着做，不要从头来。
+
+1. 告诉心响你是谁：
+{xin} hello --name "{name}" --app "<你所在的客户端>" --model "<你现在用的模型>" --helper
+2. 领这件事：
+{xin} next --driver "{name}" --n {n}
+3. 进入返回的 folder，按 instructions 做，用里面写的命令报进度、交活。
+4. 交完再运行一次 {xin} next --driver "{name}"：还有交给你的事就接着做，返回 idle 就结束。
+
+请遵守：命令都由你来运行，不要让我自己去敲；不要在对话里问我要密码、验证码或密钥；对外发送、审批、付款、删除只准备材料，不要执行。"""
+
+
+def hand_over(root, config, record_id, value, *, by, why="", n=None, title="", job=None):
+    """Give one item to one AI (value as in aidrivers; empty = back to the AI chosen in settings).
+
+    A run in progress stops: the AI that handed it over closes its own job; when the owner does it, whoever is
+    working on it is told to stop. The item goes straight back to the queue for the new AI."""
+    from . import aidrivers
+    from .prework import add_note
+    from .thread import setting as conversation_setting
+    root = Path(root)
+    usual = conversation_setting(root, "engine", "codex")
+    to = aidrivers.label(value or usual)
+    if value == usual:
+        value = ""   # handed to the one chosen in settings anyway: it follows the settings again
+    if job is not None:
+        _close(root, job, "handed")
+        _item(root, config, job).release()
+    else:
+        for jid in stop_record(root, record_id, why=f"本人把这件事交给了 {to}"):
+            _item(root, config, get(root, jid)).release()
+    aidrivers.assign(root, record_id, value)
+    add_note(root, record_id, f"{by} 把这件事交给了 {to}" + (f"：{why}" if why else ""))
+    out, target = {"ok": True, "status": "handed", "to": to}, value or usual
+    if target in aidrivers.LOCAL:
+        from .workenv import kick
+        kick(root, config, force=True)
+        out["note"] = f"{to} 会自己接手，不用发消息。"
+    elif target == "cindy":
+        out["note"] = "Cindy 下次来领活时会接手。"
+    else:
+        out["message"] = handoff_message(n, title, target)
+        known = {d["name"]: d for d in aidrivers.known(root)}
+        if (known.get(aidrivers.name_in(target) or "") or {}).get("online"):
+            out["note"] = f"{to} 正在守着领活，会自己接手；它不在时再把 message 发给它。"
+    return out
+
+
+def handoff(root, config, job_id, to, why, driver):
+    """The AI working on an item gives that one item to another AI."""
+    from . import aidrivers
+    job = get(root, job_id)
+    if closed := _closed(job):
+        return closed
+    if job["kind"] != "item":
+        return {"ok": False, "error": "只有事项能交给别的 AI；整理类的活做不了就 release。"}
+    if not str(to or "").strip():
+        return {"ok": False, "error": "要写交给谁：--to \"它的名字\"（比如 Claude Code、本机 Gemini、Cindy）。"}
+    value = aidrivers.resolve(root, to)
+    me = job.get("driver") or driver
+    os.environ["XINXIANG_DRIVER"] = me   # the note says who handed it on
+    if aidrivers.is_mine(value, me) or aidrivers.label(value) == me:
+        return {"ok": False, "error": "这就是你自己。"}
+    return hand_over(root, config, job["ref"]["record_id"], value, by=me, why=str(why or "").strip()[:200],
+                     n=job.get("n"), title=job.get("title") or "", job=job)
 
 
 # ---- command line ----------------------------------------------------------------------------------------
@@ -747,11 +935,15 @@ GUIDE = """# 接入心响：任何 AI 都可以驱动
 def main(argv=None):
     from .config import load
     p = argparse.ArgumentParser(prog="xinxiang", description="心响驱动协议：任何 AI 都能领活、交活")
-    p.add_argument("command", choices=["hello", "next", "step", "say", "submit", "ask", "release", "guide", "status", "gate"])
+    p.add_argument("command", choices=["hello", "next", "step", "say", "submit", "ask", "release", "handoff", "guide", "status", "gate"])
     p.add_argument("--name", help="hello：你是谁（Antigravity、Gemini、Claude Code、Cursor …）")
     p.add_argument("--app", default="", help="hello：你所在的客户端")
     p.add_argument("--model", default="", help="hello：你现在用的模型")
     p.add_argument("--wait", type=int, default=0, help="next：没活时最多等这么多秒再回来（期间有活立刻给你）")
+    p.add_argument("--helper", action="store_true", help="hello：只来做交给你的事，不接手其余的")
+    p.add_argument("--part", choices=["all", "work", "sort"], default="all", help="hello：接手全部，或只接「做事」/「整理」")
+    p.add_argument("--n", type=int, help="next：领交给你的这一件（编号）")
+    p.add_argument("--to", help="handoff：交给哪个 AI"); p.add_argument("--why", default="", help="handoff：为什么")
     p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn")
     p.add_argument("--driver", default=os.environ.get("XINXIANG_DRIVER") or "外部 AI")
     p.add_argument("--job"); p.add_argument("--text"); p.add_argument("--question"); p.add_argument("--tried")
@@ -774,17 +966,26 @@ def main(argv=None):
         if args.command == "hello":
             # an AI says who it is: from now on it does the items and the sorting, until another one says hello
             try:
-                me = aidrivers.hello(root, args.name or args.driver, app=args.app, model=args.model)
+                take = False if args.helper else True if args.part == "all" else args.part
+                me = aidrivers.hello(root, args.name or args.driver, app=args.app, model=args.model, take=take)
             except ValueError as exc:
                 raise MatrixError(str(exc)) from None
-            print(json.dumps({"ok": True, "you": me["name"], "now": "心响的事和整理都交给你了",
-                              "next": f'{_cmd()} next --driver "{me["name"]}" --wait 600'}, ensure_ascii=False))
+            print(json.dumps({"ok": True, "you": me["name"],
+                              "now": "记下了，交给你的事你来做" if args.helper else {"all": "心响的事和整理都交给你了", "work": "心响的「做事」交给你了",
+                                                                                   "sort": "心响的「整理」交给你了"}[args.part],
+                              "next": f'{_cmd()} next --driver "{me["name"]}"' + ("" if args.helper else " --wait 600")}, ensure_ascii=False))
             return 0
         aidrivers.seen(root, args.driver)
         config = load(path)
         if args.command == "gate":
             # a schedule's pre-run check: exit 0 = there is an item to do, 2 = nothing (skip this round, no tokens)
-            if item_runner(root) == "cindy" and has_items_for(root, config):
+            from . import setupasks
+            from .aidrivers import is_mine
+            from .thread import setting
+            if setupasks.pending(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "setup"):
+                print(json.dumps({"ok": True, "work": "setup"}, ensure_ascii=False))
+                return 0
+            if has_items_for(root, config, "Cindy"):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))
                 return 0
             sorting = sort_runner(root) == "cindy" and has_sorting_for(root, config)
@@ -795,7 +996,12 @@ def main(argv=None):
             return 2
         if args.command == "next":
             kinds = [k.strip() for k in (args.kinds or "").split(",") if k.strip()] or None
-            job = next_job(root, config, args.driver, kinds=kinds)
+            only = _record_of(root, args.n) if args.n else None
+            if args.n and not only:
+                raise MatrixError(f"找不到 #{args.n}。")
+            job = next_job(root, config, args.driver, kinds=kinds, only=only)
+            if args.n and not job:
+                raise MatrixError(f"#{args.n} 现在不在 AI 的待做里：可能已经交付、在等本人，或刚被叫停。")
             until = time.monotonic() + max(0, min(args.wait, 3600))
             while not job and time.monotonic() < until:   # nothing yet: stay on the line, so the AI need not poll
                 time.sleep(5)
@@ -818,6 +1024,8 @@ def main(argv=None):
             out = submit(root, config, args.job, args.driver)
         elif args.command == "ask":
             out = ask(root, config, args.job, args.question, args.tried)
+        elif args.command == "handoff":
+            out = handoff(root, config, args.job, args.to, args.why, args.driver)
         else:
             out = release(root, config, args.job)
         print(json.dumps(out, ensure_ascii=False))

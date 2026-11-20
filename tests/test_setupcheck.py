@@ -93,6 +93,31 @@ class SetupCheckTests(unittest.TestCase):
         self.assertIn("lark-cli auth login", "\n".join(item["steps"]))
         self.assertIn("【要处理】飞书", setupcheck.text(rep))
 
+    def test_what_keeps_failing_on_windows_becomes_steps_the_ai_can_follow(self):
+        from agent_matrix import activity
+        from agent_matrix.feishu import FeishuError
+        (self.root / "config.yaml").write_text("intake_mode: all\nowner_name: 王小明\n", encoding="utf-8")
+        thread.set_setting(self.root, "engine_test:codex", {"ok": True})
+        scope = FeishuError("missing_scope", detail="required scopes: vc:meeting:readonly minutes:minutes:readonly")
+        proxy = FeishuError("network", detail='Post "https://accounts.feishu.cn": proxyconnect tcp: dial tcp 127.0.0.1:7890: connectex')
+        for _ in range(5):   # every minute the same: one line in the log
+            activity.log(self.root, "error", "会议 check 出错", detail=str(scope), status="failed")
+        activity.log(self.root, "error", "后台定时任务出错：snapshot", detail=f"FeishuError {proxy}", status="failed")
+        activity.log(self.root, "error", "代做 check 出错", detail="事项表缺少必要字段：预做凭据、预做指令", status="failed")
+        import sqlite3
+        db = sqlite3.connect(next((self.root / "state").glob("activity*.db")))
+        self.assertEqual(db.execute("SELECT count(*) FROM events WHERE kind='error'").fetchone()[0], 3)
+        db.close()
+        found = activity.problems(self.root)
+        self.assertEqual(found, {"proxy": "127.0.0.1:7890", "scopes": ["minutes:minutes:readonly", "vc:meeting:readonly"], "fields": "预做凭据、预做指令"})
+        rep = self.report({**READY, "record": {"feishu_ready": True}, "problems": found})
+        items = {x["key"]: x for x in rep["items"]}
+        self.assertFalse(rep["ready"])
+        self.assertIn("127.0.0.1:7890", items["proxy"]["say"]); self.assertIn("不要替他改系统网络设置", "\n".join(items["proxy"]["steps"]))
+        self.assertIn('lark-cli auth login --scope "minutes:minutes:readonly vc:meeting:readonly"', "\n".join(items["feishu_scope"]["steps"]))
+        self.assertIn("setup-fields", "\n".join(items["feishu_fields"]["steps"]))
+        self.assertNotIn("feishu_scope", {x["key"] for x in self.report({**READY, "record": {"feishu_ready": False}, "problems": found})["items"]})
+
     def test_any_ai_that_says_hello_does_the_work_and_is_missed_when_it_stops_asking(self):
         from datetime import datetime, timedelta
         from agent_matrix import aidrivers

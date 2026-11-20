@@ -163,8 +163,11 @@ def build_state(root):
     external = local_sessions.view(root, sessions_of, running_sessions, items)
     from . import cindy_pickup
     pickups = cindy_pickup.latest(root)
+    from . import aidrivers
+    handed = aidrivers.assignments(root)
     for item in items:
         item["cindy_pickup"] = pickups.get(item["rid"])
+        item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
     from . import drive
     ws, running = read_status(root), is_running(root)
@@ -225,6 +228,8 @@ def build_state(root):
         settings["want_wechat"] = bool(thread.setting(root, "want_wechat", False))
         from . import setupshim
         settings["setup_prompt"] = setupshim.prompt(root)   # the one message the owner pastes to their own AI
+        settings["part_prompts"] = {part: setupshim.part_prompt(part) for part in setupshim.PARTS}   # one part to a second AI
+        settings["setup"] = setup_view(root)   # what the owner asked the driving AI to set up, and how far it got
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
@@ -359,7 +364,13 @@ def system_info(root):
     # connected on paper is not enough: a few failed sign-in checks in a row mean nothing is being read
     broken = bool(feishu_health and feishu_health.get("ok") is False and feishu_health.get("count", 0) >= 3)
     record["feishu_broken"] = {"why": feishu_health.get("why") or "", "since": feishu_health.get("since") or ""} if broken and record.get("feishu_ready") else None
-    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    try:   # what keeps failing right now (a proxy that is off, permissions Feishu refuses, columns missing)
+        problems = activity.problems(root)
+    except Exception:
+        problems = {}
+    if not problems.get("proxy") and (down := local_proxy_down()):
+        problems["proxy"] = down
+    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "problems": problems, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -532,6 +543,38 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, update.start(root))
                 update.check(root, force=True)
                 return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/setup":  # 接入飞书 / Slack / 微信, or 剩下没配好的: the AI that drives 心响 does it
+                from . import setupasks, thread
+                what = str(body.get("what") or "")
+                if what not in setupasks.WHAT:
+                    return self._send(400, {"ok": False, "reply": "不知道要接什么。"})
+                if body.get("cancel"):
+                    setupasks.done(root, what)
+                    return self._send(200, {"ok": True})
+                if what != "fix":
+                    thread.set_setting(root, "want_" + what, True)
+                thread.set_setting(root, "setup:gave_up:" + what, None)
+                setupasks.ask(root, what)
+                return self._send(200, {"ok": True, **setup_view(root)["driver"]})
+            if path == "/api/item/ai":  # hand this one item to another AI (or back to the one chosen in settings)
+                from . import aidrivers, drive
+                from .config import load
+                from .models import MatrixBusy, MatrixError
+                from .snapshot import _snapshot
+                row = next((r for r in _snapshot(root).get("rows") or [] if str(r.get("编号")) == str(body.get("n"))), None)
+                to = str(body.get("to") or "")
+                names = {"driver:" + d["name"] for d in aidrivers.known(root)}
+                if not row:
+                    return self._send(400, {"ok": False, "reply": "找不到这件事。"})
+                if to not in {"", aidrivers.HANDOFF, "cindy", *aidrivers.LOCAL} | names:
+                    return self._send(400, {"ok": False, "reply": "没有这个 AI。"})
+                try:
+                    return self._send(200, drive.hand_over(root, load(root / "config.yaml"), row["record_id"], to, by="本人",
+                                                           n=row.get("编号"), title=str(row.get("标题") or "")))
+                except MatrixBusy:
+                    return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/item/deliverable":  # the owner adds, corrects or removes a deliverable version
                 from . import deliverables
                 from .models import MatrixBusy, MatrixError
@@ -806,6 +849,42 @@ def make_server(root, port):
     info = Path(root) / "state/app.json"
     info.write_text(json.dumps({"port": port, "pid": os.getpid(), "url": f"http://127.0.0.1:{port}/"}))
     return server
+
+
+def local_proxy_down():
+    """The computer is told to send web traffic through a proxy on this machine (Clash and the like) that is not
+    running: lark-cli, npm and the rest then cannot reach the internet. Returns that address, or None."""
+    import socket
+    from urllib.parse import urlparse
+    for key in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"):
+        value = os.environ.get(key)
+        if not value:
+            continue
+        url = urlparse(value if "://" in value else "http://" + value)
+        if url.hostname in ("127.0.0.1", "localhost") and url.port:
+            try:
+                socket.create_connection((url.hostname, url.port), timeout=0.5).close()
+                return None
+            except OSError:
+                return f"{url.hostname}:{url.port}"
+        return None
+    return None
+
+
+def setup_view(root):
+    """For the settings page: who will do the setting up, what waits for it, what it is doing and what it asked for."""
+    from . import aidrivers, drive, setupasks, thread
+    engine = thread.setting(root, "engine", "codex")
+    name = aidrivers.name_in(engine)
+    known = {d["name"]: d for d in aidrivers.known(root)}
+    driver = {"name": name or ("Cindy" if engine == "cindy" else ""),
+              "online": bool(known.get(name, {}).get("online")) if name else engine == "cindy"}
+    asks = setupasks.pending(root)
+    jobs = {j["ref"].get("what"): {"by": j.get("driver"), "step": j.get("step") or "", "title": j.get("title"),
+                                   "said": (asks.get(j["ref"].get("what")) or {}).get("said") or ""}
+            for j in drive.open_jobs(root) if j["kind"] == "setup"}
+    gave_up = {w: thread.setting(root, "setup:gave_up:" + w, None) for w in setupasks.WHAT}
+    return {"driver": driver, "asks": asks, "doing": jobs, "gave_up": {w: g for w, g in gave_up.items() if g}}
 
 
 def start_background(root, config):

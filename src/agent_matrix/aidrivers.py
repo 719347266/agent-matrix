@@ -40,7 +40,8 @@ def name_in(value):
 
 
 def hello(root, name, *, app="", model="", take=True):
-    """An AI says who it is. With `take` (the usual case) it becomes the one that does the items and the sorting."""
+    """An AI says who it is. With `take` (the usual case) it becomes the one that does the items and the sorting;
+    take="work" or "sort" hands it only that part; take=False: it only comes for what is handed to it one by one."""
     name = clean(name)
     if not name:
         raise ValueError("要说你叫什么：--name")
@@ -49,8 +50,9 @@ def hello(root, name, *, app="", model="", take=True):
     known[name] = {"name": name, "app": clean(app) or was.get("app", ""), "model": clean(model) or was.get("model", ""),
                    "hello": was.get("hello") or now, "seen": now}
     conversation.set_setting(root, KEY, known)
-    if take:
+    if take in (True, "work"):
         conversation.set_setting(root, "engine", setting_of(name))
+    if take in (True, "sort"):
         conversation.set_setting(root, "engine_sort", setting_of(name))
     return known[name]
 
@@ -91,3 +93,74 @@ def forget(root, name):
     known = _all(root)
     if known.pop(clean(name), None) is not None:
         conversation.set_setting(Path(root), KEY, known)
+
+
+# ---- one item handed to one AI ---------------------------------------------------------------------------
+# The AI chosen in settings does everything by default. One item can be handed to another AI instead: by the owner
+# (in the item), or by the AI working on it (`xinxiang handoff`). Then only that AI takes the item, the others skip it.
+
+FOR = "ai:for"
+HANDOFF = "handoff"   # waiting for whichever AI the message is sent to: nobody else takes it meanwhile
+LOCAL = {"codex": "本机 GPT", "claude": "本机 Claude", "gemini": "本机 Gemini"}
+
+
+def _for(root):
+    return dict(conversation.setting(Path(root), FOR, None) or {})
+
+
+def assigned(root, record_id):
+    """Who this one item was handed to ("driver:<name>", "cindy", "codex" …, or HANDOFF); None = the usual one."""
+    return _for(root).get(record_id)
+
+
+def assignments(root):
+    return _for(root)
+
+
+def assign(root, record_id, value):
+    """Hand one item to one AI; an empty value gives it back to the AI chosen in settings."""
+    table = _for(root)
+    if value:
+        table[record_id] = value
+    else:
+        table.pop(record_id, None)
+    conversation.set_setting(Path(root), FOR, table)
+
+
+def owner_of(root, record_id):
+    """The AI that does this item: the one it was handed to, else the one chosen in settings."""
+    return assigned(root, record_id) or conversation.setting(Path(root), "engine", "codex")
+
+
+def label(value):
+    value = str(value or "")
+    if value == HANDOFF:
+        return "等另一个 AI 来接"
+    if value == "cindy":
+        return "Cindy"
+    return name_in(value) or LOCAL.get(value) or value
+
+
+def resolve(root, text):
+    """What an AI or the owner typed as "give it to …" → a setting value. A name not seen yet is a new AI's."""
+    raw = clean(text)
+    low = raw.lower().replace(" ", "")
+    if not raw:
+        return HANDOFF
+    for entry in _all(root):
+        if entry.lower().replace(" ", "") == low:
+            return setting_of(entry)
+    if low == "cindy":
+        return "cindy"
+    for key, name in LOCAL.items():   # the built-in ones by their 心响 name ("本机 Claude"); a bare "Claude" is an outside AI
+        if low == name.lower().replace(" ", "") or (key == "codex" and low == "codex"):
+            return key
+    return setting_of(raw)
+
+
+def is_mine(value, driver, *, builtin=False):
+    """Does the AI asking for work take an item whose owner is `value`?"""
+    value = str(value or "")
+    if builtin:
+        return value in LOCAL
+    return value == setting_of(clean(driver)) or (value == "cindy" and "cindy" in str(driver).lower())

@@ -133,7 +133,7 @@ class FeishuTaskTests(unittest.TestCase):
         empty = SimpleNamespace(_exec=lambda a: {"has_more": False, "items": None, "page_token": ""})
         self.assertEqual(feishu_tasks._list(empty, complete=False, since=datetime(2026, 11, 6)), [])
         with self.assertRaises(MatrixError):
-            feishu_tasks._list(SimpleNamespace(_exec=lambda a: {"weird": 1}), complete=False, since=datetime(2026, 11, 6))
+            feishu_tasks._list(SimpleNamespace(_exec=lambda a: {"weird": [1]}), complete=False, since=datetime(2026, 11, 6))
 
     def test_task_becomes_owner_item_with_link(self):
         task = {"guid": "g1", "summary": "投放方案撰写", "url": "https://applink.feishu.cn/client/todo/detail?guid=g1",
