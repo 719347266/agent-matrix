@@ -546,7 +546,8 @@ def cindy_schedule(home=None):
     when = lambda ms: datetime.fromtimestamp(int(ms) / 1000, TZ).strftime("%m-%d %H:%M") if ms else ""
     # the hook may run `xinxiang gate` itself or through the project's own check script: either way the gate's
     # answer ({"ok": .., "work": ..}) shows up in the hook output Cindy keeps for each run
-    gate_seen = bool(last and '"work"' in (last.get("hook") or ""))
+    # (looked for in the last few rounds: the round going on right now has no answer written down yet)
+    gate_seen = bool(last and last.get("answered"))
     return {"id": sid, "status": status, "cron": cron, "folder": folder or "", "engine": kind,
             # True: the gate answers; False: no hook at all; None: a hook that has not run yet, so not known
             "hooked": True if hook and ("gate" in hook or gate_seen) else (None if hook and not last else False),
@@ -562,17 +563,22 @@ def _cindy_last_run(db, schedule_id):
     if not {"schedule_id", "fired_at", "status"} <= cols:
         return None
     hook = "pre_run_hook_result" if "pre_run_hook_result" in cols else "NULL"
-    row = db.execute(f"SELECT fired_at, status, {hook} FROM schedule_runs WHERE schedule_id=? ORDER BY fired_at DESC LIMIT 1",
-                     (schedule_id,)).fetchone()
-    if not row:
+    rows = db.execute(f"SELECT fired_at, status, {hook} FROM schedule_runs WHERE schedule_id=? ORDER BY fired_at DESC LIMIT 6",
+                      (schedule_id,)).fetchall()
+    if not rows:
         return None
-    fired, status, out = row
+
+    def said(out):
+        try:
+            return str(json.loads(out).get("stdout") or "") if out else ""   # Cindy keeps the hook result as JSON
+        except (ValueError, AttributeError):
+            return str(out or "")
+    fired, status, out = rows[0]
     result = {"skipped": "没活，跳过", "running": "正在做", "failed": "出错了", "error": "出错了"}.get(status, "领了活" if status else "")
-    try:
-        said = json.loads(out).get("stdout") or "" if out else ""   # Cindy keeps the hook result as JSON
-    except (ValueError, AttributeError):
-        said = out or ""
-    return {"at": fired, "result": result, "hook": str(said)}
+    return {"at": fired, "result": result, "hook": said(out), "answered": any('"work"' in said(o) for _, _, o in rows)}
+
+
+_CINDY_SEEN = [0, [], None]   # when, projects, schedule: the last time Cindy's records could be read
 
 
 def cindy_status(root):
@@ -582,8 +588,10 @@ def cindy_status(root):
     from .thread import setting
     try:
         projects, schedule = cindy_projects(), cindy_schedule()
+        _CINDY_SEEN[:] = [time.time(), projects, schedule]
     except ISSUES:
-        projects, schedule = [], None
+        # Cindy was writing its records at that moment: what was read a moment ago still holds
+        projects, schedule = (_CINDY_SEEN[1], _CINDY_SEEN[2]) if time.time() - _CINDY_SEEN[0] < 900 else ([], None)
     chosen = setting(Path(root), "cindy_project", "") or (projects[0]["folder"] if projects else "")
     ok = bool(schedule and schedule["status"] == "active" and schedule["hooked"] is True)
     return {"installed": True, "projects": projects, "project": chosen, "schedule": schedule, "ready": ok,

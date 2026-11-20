@@ -84,6 +84,10 @@ class CindyRunner(unittest.TestCase):
             db.execute("INSERT INTO schedule_runs VALUES (?,?,?,?,?)", ("r1", "s1", int(time.time() * 1000), "skipped", out))
         sch = ls.cindy_schedule(home)
         self.assertEqual((sch["hooked"], sch["last_check"]["result"]), (True, "没活，跳过"))
+        with closing(sqlite3.connect(base / "cindy-test.db")) as db, db:   # a new round has just begun: its check has not answered yet
+            db.execute("INSERT INTO schedule_runs VALUES (?,?,?,?,?)", ("r2", "s1", int(time.time() * 1000) + 5, "running", None))
+        sch = ls.cindy_schedule(home)
+        self.assertEqual((sch["hooked"], sch["last_check"]["result"]), (True, "正在做"))   # still set up; not "missing its check"
         with closing(sqlite3.connect(base / "cindy-test.db")) as db, db:
             db.execute("UPDATE schedules SET pre_run_hook_command=NULL")
         self.assertFalse(ls.cindy_schedule(home)["hooked"])
