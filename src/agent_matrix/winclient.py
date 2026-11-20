@@ -73,7 +73,8 @@ def open_window(url):
         edge = Path(base or "") / "Microsoft/Edge/Application/msedge.exe"
         if base and edge.is_file():
             try:
-                subprocess.Popen([str(edge), f"--app={url}", "--window-size=1320,880"], creationflags=NO_WINDOW)
+                # "#win": the page sizes its own window once (Edge keeps whatever size its last app window had)
+                subprocess.Popen([str(edge), f"--app={url}#win", "--window-size=1320,880"], creationflags=NO_WINDOW)
                 return "edge"
             except OSError:
                 break

@@ -130,6 +130,21 @@ function reset(item) {
   for (const label of ["只这件事换，默认不变","pickUp(9,'claude')","pickUp(9,'terminal-codex')"]) assert.ok(apps.includes(label), label);
   assert.doesNotMatch(apps,/pickUp\(9,'cindy'\)|terminal-claude/); assert.equal(evaluate("D.settings.pickup_app"),"cindy");
   evaluate(`[D.items,D.deliverables,D.threads]=${keepD}; D.settings={}; S.pickApp=null`);
+  // a problem can be written down from anywhere, and they are handed in together
+  evaluate('D.bugs=[]; S.bugging=null');
+  assert.match(evaluate("sideHTML()"),/onclick="bugOpen\(\)">反馈问题</);
+  evaluate('S.bugging={}'); assert.match(evaluate("bugView()"),/id="bug-text"/);
+  evaluate('S.bugging=null; D.bugs=[{id:2,at:"11-20 15:20",text:"更新一直转圈",status:"open"},{id:1,at:"11-20 15:14",text:"窗口太窄",status:"sent"}]');
+  assert.match(evaluate("sideHTML()"),/反馈问题　已记 1 条/);
+  let bugs = pane("bugs");
+  for (const label of ["1 条待提交","更新一直转圈","窗口太窄","已提交","bugHandIn('copy')","bugHandIn('github')","bugOp({remove:2})"]) assert.ok(bugs.includes(label), label);
+  assert.match(evaluate('S.setTab="bugs"; sysPage()').split('class="set-pane"')[0],/问题反馈<\/span><span class="val">1 条待提交/);
+  await evaluate("bugOp({remove:2})"); assert.doesNotMatch(pane("bugs"),/bugHandIn/);
+  evaluate('D.bugs=null');
+  // an update that never landed says so instead of spinning for ever
+  evaluate('D.system.update={current:"0.4.2",latest:"0.4.6",newer:true,can:true,failed:"更新没有完成。再点一次试试"}');
+  assert.match(pane("update"),/更新没有完成/); assert.match(pane("update"),/onclick="updateNow\(\)">更新到 0\.4\.6/);
+  evaluate('D.system.update=null');
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");

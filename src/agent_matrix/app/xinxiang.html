@@ -374,7 +374,7 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .cell .chev{color:var(--ink3);font-size:17px;line-height:1;flex:none}
 .set-title{font-size:20px;font-weight:750;margin:0 2px 2px}.set-lead{color:var(--ink3);font-size:12.5px;margin:0 2px 14px;min-height:1px}
 .set-pane .modes{margin-bottom:6px}
-@container (max-width:720px){.set-grid{grid-template-columns:1fr}.set-menu{position:static}}
+
 .row.flat.mem{grid-template-columns:8px 68px minmax(0,1fr) auto}
 /* items by project: the projects on the left (a row can be dropped on one), the items on the right */
 .proj-grid{display:grid;grid-template-columns:224px minmax(0,1fr);gap:22px;align-items:start}
@@ -409,6 +409,15 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .dv-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border-top:1px solid var(--line2)}
 .dv-row:first-child,.dv-form:first-child{border-top:0}.dv-row b.cur{color:var(--brand)}.dv-row .acts{flex-wrap:nowrap}
 .dv-form{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line2)}.dv-form input{width:100%}
+/* a narrow window: the options sit under the menu, and a row's control drops under its text instead of squeezing it */
+.set-pane{container-type:inline-size;min-width:0}
+.set-row>div:first-child{min-width:0}.set-row .k{overflow-wrap:anywhere}
+@container (max-width:560px){.set-row{grid-template-columns:1fr}.set-row .ctl{justify-content:flex-start}}
+@container (max-width:900px){.set-grid{grid-template-columns:1fr}.set-menu{position:static}.set-pane{order:-1}}
+.main{overflow-x:hidden}
+.bug-link{display:block;width:100%;border:0;background:none;text-align:left;font-size:12.5px;color:var(--ink3);padding:6px 11px;margin:auto 0 6px;border-radius:9px}
+.bug-link:hover{color:var(--ink);background:var(--hover)}
+.side .aicard{margin-top:0}
 .mem-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}.mem-bar .seg{margin:0}
 
 @media (max-width:820px){
@@ -473,7 +482,7 @@ async function api(path, body, ms=12000){
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
-function midEdit(){ return !!S.ob||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||!!S.dvEdit||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
+function midEdit(){ return !!S.ob||!!S.bugging||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||!!S.dvEdit||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
@@ -1064,17 +1073,17 @@ function obView(){
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
 const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?`<div class="sec-h">${title}</div>`:""}${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
 const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
-const SET_IC={update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
+const SET_IC={bug:'<path d="M9 8a3 3 0 0 1 6 0M7 11h10v4a5 5 0 0 1-10 0zM4 13h3M17 13h3M5 19l2.5-2M19 19l-2.5-2M5 8l2.5 2M19 8l-2.5 2"/>',update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
   bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
 /* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
 function setMenu(st,s){ const r=s.record||{};
-  const left=setupProblems().length, upd=s.update||{};
+  const left=setupProblems().length, upd=s.update||{}, waiting=(D.bugs||[]).filter(b=>b.status==="open").length;
   return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、")||"都没接"],
       ["mode","inbox","#ff9500","收到消息怎么处理",(MODES.find(m=>m[0]===(st.intake_mode||"all"))||MODES[0])[1]]]],
     ["AI",[["ai","ai","#5856d6","谁来做事",ENGINE_NAME[st.engine||"codex"]||""],["talk","chat","#34c759","打开对话",pickupName()]]],
     ["数据与通知",[["store","db","#00c7be","事项存在哪",STORE_NAME[r.mode||"feishu"]||""],["notify","bell","#ff3b30","通知",r.feishu_ready&&st.brief_channel!=="local"?"心响 + 飞书简报":"只在心响里"]]],
-    ["通用",[["update","update",upd.newer&&upd.can?"#ff3b30":"#007aff","版本与更新",upd.newer?`有新版 ${upd.latest}`:(upd.current||"")],["look","eye","#8e8e93","外观",THEME_NAME[savedTheme()]||""],["guide","guide","#ffcc00","新手引导",""],["adv","adv","#636366","高级",""]]]];
+    ["通用",[["bugs","bug","#ff9500","问题反馈",waiting?`${waiting} 条待提交`:""],["update","update",upd.newer&&upd.can?"#ff3b30":"#007aff","版本与更新",upd.newer?`有新版 ${upd.latest}`:(upd.current||"")],["look","eye","#8e8e93","外观",THEME_NAME[savedTheme()]||""],["guide","guide","#ffcc00","新手引导",""],["adv","adv","#636366","高级",""]]]];
 }
 /* ---------- 配置检查：每一项现在通没通，没通的下一步做什么 ---------- */
 function copyText(text,said){
@@ -1131,6 +1140,39 @@ function checkList(){
   return sum+`<div class="list">${list.map(x=>`<div class="chk ${x.state}"><span class="mark">${MARK[x.state]}</span><div><div class="k">${esc(x.title)}${x.need||x.state==="ok"?"":`<span class="hint" style="margin:0 0 0 8px;font-weight:400">可选</span>`}</div><div class="d">${x.text}</div></div><div class="ctl">${x.ctl||""}</div></div>`).join("")}</div>`;
 }
 async function recheck(){ if(!LIVE) return toast("原型里不能检查"); await load(); const n=setupProblems().length; toast(n?`还差 ${n} 步`:"都配好了"); }
+/* ---------- 问题反馈：随手记一条，攒起来一起交 ---------- */
+function bugOpen(){ S.bugging={}; render(); setTimeout(()=>$("#bug-text")?.focus(),30); }
+function bugClose(){ drafts.delete("bug-text"); S.bugging=null; render(); }
+function bugView(){
+  const n=(D.bugs||[]).filter(b=>b.status==="open").length;
+  return `<div class="ob-mask" onclick="if(event.target===this)bugClose()"><div class="ob" role="dialog" aria-modal="true" aria-label="反馈问题" style="width:min(520px,100%)">
+    <h2 style="margin-top:0">反馈问题</h2><p class="ob-sub">哪里不对？当时在做什么？一两句话就行。</p>
+    <textarea id="bug-text" data-draft="bug-text" rows="4" style="width:100%" maxlength="2000" placeholder="比如：点「更新」后一直显示正在更新，等了十分钟没变" onkeydown="if(event.key==='Escape')bugClose();if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))bugSave()"></textarea>
+    <p class="hint" style="margin:8px 2px 0">会自动带上版本、系统和心响自己记下的出错，不带事项和消息内容。先存在这台电脑上${n?`，已记 ${n} 条`:""}。</p>
+    <div class="ob-foot">${n?`<button class="btn ghost" onclick="bugClose();S.setTab='bugs';go('sys')">看已记的 ${n} 条</button>`:""}<span style="flex:1"></span><button class="btn" onclick="bugClose()">取消</button><button class="btn pri" onclick="bugSave()">记下</button></div></div></div>`;
+}
+async function bugSave(){
+  const el=$("#bug-text"), text=String(el&&el.value||"").trim(); if(!text) return el&&el.focus();
+  if(LIVE){ try{ D.bugs=(await api("/api/bugs",{add:text},20000)).bugs; }catch(e){ return toast("没记下，连不上本机服务"); } }
+  else (D.bugs ||= []).unshift({id:Date.now(),at:TODAY.slice(5)+" "+clock(),text,status:"open"});
+  bugClose(); toast("记下了。攒够了到 设置 → 问题反馈 里一起交","去看看",()=>{ S.setTab="bugs"; go("sys"); });
+}
+function bugsPage(){
+  const list=D.bugs||[], open=list.filter(b=>b.status==="open");
+  const row=b=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${b.status==="open"?"amber":"green"}" style="justify-self:start">${b.status==="open"?"待提交":"已提交"}</span><div style="min-width:0"><div class="t wrap">${esc(b.text)}</div><div class="s">${esc(b.at)}</div></div>
+    <div class="acts"><button class="btn ghost" onclick="bugOp({remove:${b.id}})">删掉</button></div></div>`;
+  return `<div class="list">${setRow(open.length?`${open.length} 条待提交`:"还没有待提交的",open.length?"提交到 GitHub 会打开一个填好内容的页面，看一眼再点提交（需要 GitHub 账号）。没有账号就点复制，发给开发的人。":"用着哪里不对，点左下角「反馈问题」记一条。",
+      `<button class="btn pri" onclick="bugOpen()">记一条</button>${open.length?`<button class="btn" onclick="bugHandIn('copy')">复制全部</button><button class="btn" onclick="bugHandIn('github')">提交到 GitHub</button>`:""}`)}</div>
+    ${list.length?`<div class="sec-h" style="margin-top:18px">记下的<span class="n">${list.length}</span></div><div class="list">${list.map(row).join("")}</div>`:""}`;
+}
+async function bugOp(body){ if(LIVE){ try{ D.bugs=(await api("/api/bugs",body,20000)).bugs; }catch(e){ return toast("没成功，连不上本机服务"); } } else if(body.remove) D.bugs=D.bugs.filter(b=>b.id!==body.remove); render(); }
+async function bugHandIn(how){
+  if(!LIVE) return toast("原型里不能提交");
+  let r; try{ r=await api("/api/bugs",{report:true},30000); }catch(e){ return toast("没取到内容，连不上本机服务"); }
+  copyText(r.report, how==="github"?"内容已复制；正在打开 GitHub":"已复制，发给开发的人就行");
+  if(how==="github") window.open(r.issue_url,"_blank","noopener");
+  toast(how==="github"?"提交好了吗？":"发出去了吗？","标为已提交",()=>bugOp({sent:true}));
+}
 /* ---------- 版本与更新：有新版时点一下就更新 ---------- */
 function updatePage(u){
   const busy=S.updating||!!u.doing;
@@ -1164,6 +1206,7 @@ const SET_PAGES={
   talk:(st,s,w)=>["打开对话","",talkSection(st)],
   store:(st,s,w)=>["事项存在哪","事项一直存在这台电脑上，点了立刻生效。下面选的是另外同步到哪。",dataSection(s)],
   notify:(st,s,w)=>["通知","AI 做完了、卡住了、有新的事，都会提醒你。",`<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`],
+  bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条；攒几条一起交上去。每条会自动带上版本和心响自己记下的出错，不带事项和消息内容。",bugsPage()],
   update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
   look:(st,s,w)=>["外观","",`<div class="list">${setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)}</div>`],
   guide:(st,s,w)=>["新手引导","重新走一遍首次设置：称呼、办公工具、接收模式、谁来做事、通知。",`<button class="btn pri" onclick="obOpen()">打开引导</button>`],
@@ -1665,6 +1708,7 @@ function sideHTML(){
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
   const upd=(D.system||{}).update||{};
   return `<div class="brand"><i></i><span>心响</span>${upd.newer&&upd.can?`<button class="pill red" style="margin-left:auto;border:0;cursor:pointer" onclick="S.setTab='update';go('sys')" title="有新版本 ${esc(upd.latest)}">更新</button>`:""}</div>`+nav.map(x=>x?`<button class="nav ${(NAV_OF[S.view]||S.view)===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
+    `<button class="bug-link" onclick="bugOpen()">反馈问题${(D.bugs||[]).filter(b=>b.status==="open").length?`　已记 ${(D.bugs||[]).filter(b=>b.status==="open").length} 条`:""}</button>`+
     `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${replying?`AI 正在回复 ${replying}`:"AI 空闲"}</div>${replying?now.map(sessCard).join(""):idle}</div>`;
 }
 function localBindControl(s){
@@ -1775,7 +1819,7 @@ function render(){
   let changed=putHTML("#main",solo?`<div class="solo">${itemView(item)}</div>`:page());
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
-  changed=putHTML("#adder",S.adding?addView():S.moving?moveView():"")||changed;
+  changed=putHTML("#adder",S.adding?addView():S.moving?moveView():S.bugging?bugView():"")||changed;
   if(changed){
     for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft], #adder [data-draft]")){
       if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);
@@ -1805,6 +1849,19 @@ document.addEventListener("keydown",e=>{
   if(e.key==="Escape"&&S.item&&!typing) closeItem();
   if(e.key==="/"&&!typing){ e.preventDefault(); $("#q").focus(); }
 });
+// Opened by the Windows client ("#win"): Edge reuses the size of its last app window, which may be a sliver.
+function fitWindow(){
+  if(location.hash!=="#win") return;
+  history.replaceState(null,"",location.pathname+location.search);
+  try{
+    if(sessionStorage.getItem("xinxiang-fitted")) return;
+    sessionStorage.setItem("xinxiang-fitted","1");
+    if(window.outerWidth>=1180&&window.outerHeight>=720) return;
+    const w=Math.min(screen.availWidth,1320), h=Math.min(screen.availHeight,880);
+    window.resizeTo(w,h); window.moveTo(Math.max(0,(screen.availWidth-w)/2),Math.max(0,(screen.availHeight-h)/2));
+  }catch(e){}
+}
+fitWindow();
 if(LIVE){ load(); } else render();
 </script>
 </body>

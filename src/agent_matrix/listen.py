@@ -301,6 +301,18 @@ class Listener:
             return True
         return False
 
+    def trouble(self, name, what):
+        """A timer went wrong: always in the log; told to the owner once per half hour for the same trouble, not
+        every minute."""
+        log("timer failed", name, what[:300])
+        key, seen = f"{name}|{what[:80]}", getattr(self, "troubles", {})
+        if time.time() - seen.get(key, 0) < 1800:
+            return
+        seen[key] = time.time()
+        self.troubles = seen
+        from . import activity
+        activity.log(self.root, "error", f"后台定时任务出错：{name}", detail=what, status="failed")
+
     def wake_worker(self, config, force=False):
         """The AI employee runs in its own process; this only starts it when it is idle."""
         try:
@@ -363,14 +375,24 @@ class Listener:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
-                now = datetime.now(TZ)
-                out = {"prep": meeting_prep.run(config, client, state, now, horizon=31, lead=20)}
-                if state.get("brief-v1:migration-stage") == "v1_active":
-                    out["catch_up"] = catch_up_briefs(config, client, state, now)
-                    out["weekly"] = weekly_review.run(config, client, state, now)
                 from . import monitor
-                out["cindy_alert"] = monitor.alert_if_cindy_stalled(self.root, client, state, now)
-                out["meetings"] = self.meeting_check(config, client, state, now)
+                now = datetime.now(TZ)
+                parts = [("prep", lambda: meeting_prep.run(config, client, state, now, horizon=31, lead=20))]
+                if state.get("brief-v1:migration-stage") == "v1_active":
+                    parts += [("catch_up", lambda: catch_up_briefs(config, client, state, now)),
+                              ("weekly", lambda: weekly_review.run(config, client, state, now))]
+                parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now)),
+                          ("meetings", lambda: self.meeting_check(config, client, state, now))]
+                out, wrong = {}, []
+                for name, part in parts:   # each on its own: one that fails must not stop the others
+                    try:
+                        out[name] = part()
+                    except MatrixBusy:
+                        raise
+                    except Exception as exc:
+                        wrong.append(f"{name}: {type(exc).__name__} {str(exc)[:120]}")
+                if wrong:
+                    self.trouble("minute", "；".join(wrong))
                 return out
             jobs.append(("minute", minute))
         if self.every("snapshot", 120):
@@ -424,9 +446,7 @@ class Listener:
             except MatrixBusy:
                 self.last[name] = 0  # try again on the next loop
             except Exception as exc:
-                log("timer failed", name, type(exc).__name__, str(exc)[:200])
-                from . import activity
-                activity.log(self.root, "error", f"监听定时任务出错：{name}", detail=str(exc), status="failed")
+                self.trouble(name, f"{type(exc).__name__} {str(exc)[:300]}")
 
     def run(self):
         config = load(self.path)

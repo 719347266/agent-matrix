@@ -229,7 +229,16 @@ def build_state(root):
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external,
-            "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}}
+            "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}, "bugs": _bugs(root)}
+
+
+def _bugs(root):
+    try:
+        from . import bugs
+        return bugs.all(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.bugs", exc)
+        return []
 
 
 def _update_status(root):
@@ -475,6 +484,18 @@ class Handler(BaseHTTPRequestHandler):
                 from .config import load
                 from .sources import wechat
                 return self._send(200, wechat.check(load(root / "config.yaml")))
+            if path == "/api/bugs":  # write a problem down, take one away, or get them all as one text to hand in
+                from . import bugs
+                if body.get("add"):
+                    bugs.add(root, body["add"])
+                if body.get("remove"):
+                    bugs.remove(root, body["remove"])
+                if body.get("sent"):
+                    bugs.mark_sent(root)
+                out = {"ok": True, "bugs": bugs.all(root)}
+                if body.get("report"):
+                    out.update(report=bugs.report(root), issue_url=bugs.issue_url(root))
+                return self._send(200, out)
             if path == "/api/update":  # look for a newer version, or get it
                 from . import update
                 if body.get("install"):

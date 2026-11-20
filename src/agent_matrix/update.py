@@ -132,6 +132,12 @@ def status(root):
     mine, seen = current(), conversation.setting(root, "update:latest", None) or {}
     kind, can, why = how(root)
     doing = conversation.setting(root, "update:doing", None) or {}
+    try:
+        stuck = bool(doing.get("step")) and datetime.now(TZ) - datetime.fromisoformat(doing.get("at", "")) > timedelta(minutes=6)
+    except (TypeError, ValueError):
+        stuck = False
+    if stuck:   # the installer never brought the new version up
+        doing = {"step": "", "error": "更新没有完成。再点一次试试；还是不行，就到发布页下载安装包覆盖安装（数据不会动）。"}
     return {"current": mine, "latest": seen.get("version") or "", "newer": newer(seen.get("version"), mine), "kind": kind,
             "can": can and (kind != "client" or bool(seen.get("setup"))), "why": why, "page": seen.get("page") or "",
             "checked": str(seen.get("at") or "")[5:16].replace("T", " "), "error": seen.get("error") or "",

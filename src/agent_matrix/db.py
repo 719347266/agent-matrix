@@ -101,6 +101,10 @@ SCHEMAS = {
         """CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT,
             created TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1)""",
         "CREATE TABLE IF NOT EXISTS item_projects (record_id TEXT PRIMARY KEY, project_id INTEGER NOT NULL, created TEXT NOT NULL)",
+    ], [
+        # what went wrong while using 心响, written down until it is handed in (bugs.py)
+        """CREATE TABLE IF NOT EXISTS bugs (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, text TEXT NOT NULL,
+            diag TEXT, status TEXT NOT NULL DEFAULT 'open')""",
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
