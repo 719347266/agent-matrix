@@ -903,7 +903,11 @@ function runSection(st,s,w){
       choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...local]))
     +(useCindy?cindyRows(cindy):"")
     +setRow("整理","从会议和聊天里找待办、判断新进来的事。",choice("engine_sort",st.engine_sort||"codex",local))
-    +setRow("自动开工", st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。对外发送、审批、付款不会碰。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled)))
+    +setRow("自动开工", st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。对外发送、审批、付款不会碰。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled))
+    +setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
+        every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
+      +(st.dev_mode&&st.dev_mode!=="off"&&st.engine!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
+      choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])))
    +setSec("conn","连接状态","",engineRow("codex",st,found.codex)+engineRow("claude",st,found.claude));
 }
 function advancedSection(st,s,w){
@@ -912,10 +916,6 @@ function advancedSection(st,s,w){
   return `<details class="set-adv" ${S.adv?"open":""} ontoggle="S.adv=this.open"><summary>高级</summary><div class="list">`
     +setRow("本机 AI 干活", builtin?`本机 AI 有活就做${useCindy?"（做事已交给 Cindy，本机只做整理）":"，最多同时 10 件"}。`:"已关：本机不干活，只等外部 AI 来领。",toggle("builtin_driver",builtin))
     +setRow("本机 Claude 用你的 MCP", st.worker_mcp?"可以用你在 Claude 里装好的插件查资料；发送、发布、删除、修改类工具一律禁止。":"已关：AI 只用本机文件、命令和网页。",toggle("worker_mcp",st.worker_mcp))
-    +setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
-        every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
-      +(st.dev_mode&&st.dev_mode!=="off"&&st.engine!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
-      choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]]))
     +setRow("接入别的 AI","Claude Code、Cursor 等能运行命令的 AI，都可以来领心响的活。",`<button class="btn" onclick="copyGuide()">复制接入说明</button>`,
       `<details><summary>查看接入说明${seen?"和最近接入过的 AI":""}</summary><div class="guide" style="padding:10px 0 0"><pre id="guide">${esc(D.guide||"")}</pre>${seen?`<div class="hint" style="margin:0">${seen}</div>`:""}</div></details>`)
     +`</div></details>`;
