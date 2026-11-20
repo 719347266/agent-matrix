@@ -25,11 +25,15 @@ class ChatFilterTests(unittest.TestCase):
         self.assertIsNone(keep("今天天气不错，大家辛苦了", from_owner=True))
         self.assertEqual(keep("小王，周五前帮忙看下这个需求"), "找你的")
         self.assertIsNone(keep("周五前帮忙看下这个需求"))            # group line not addressed to the owner
+        self.assertEqual(keep("小王 这个页面样式错位了"), "找你的")   # named, no ask word: the model decides
         self.assertEqual(keep("能不能明天把数据发我", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("哈哈哈哈哈好", chat_mode="p2p"))
         self.assertEqual(keep("哥们，你们超管后台借我登一下", chat_mode="p2p"), "找你的")  # casual private asks
         self.assertEqual(keep("兄弟，加好了和我说一下", chat_mode="p2p"), "找你的")
-        self.assertIsNone(keep("你的头像哈哈哈哈哈哈", chat_mode="p2p"))
+        self.assertEqual(keep("网页比例100%时弹窗只展示一点", chat_mode="p2p"), "找你的")  # a report, no ask word
+        self.assertEqual(keep("在吗", chat_mode="p2p"), "找你的")
+        for chat in ("好的👍", "收到！", "哈哈哈", ":thumbsup:", "ok", "。。。"):
+            self.assertIsNone(keep(chat, chat_mode="p2p"), chat)
         self.assertEqual(keep("<http://dreame-netherlands.myshopify.com|dreame-netherlands.myshopify.com>", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("嗯嗯"))
 

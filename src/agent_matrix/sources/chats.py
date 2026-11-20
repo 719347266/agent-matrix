@@ -3,7 +3,9 @@
 Reads the owner's most active chats as the owner (user identity), and keeps only lines
 that can be about the owner's work:
   - the owner commits to something ("我来" "明天给你" "我跟进"),
-  - someone asks the owner (@ / nickname / in a private chat) with a request or a time.
+  - someone talks to the owner: anything in a private chat, or a group line that @-s or names the owner.
+Whether that person actually wants something is the model's call, not a word list: "这个弹窗只展示一点"
+has no ask word and is still a request. Code only drops pure small talk ("好的" "哈哈" "👍").
 Everything else never leaves the machine. The model only reads the kept lines, in batches.
 """
 from datetime import datetime, timedelta
@@ -12,11 +14,8 @@ import re
 
 COMMIT = re.compile(r"我来|我去|我会|我负责|我晚点|我稍后|我待会|我明天|我今天|我这边|回头(我)?(发|给|弄|看|整理)|"
                     r"我跟进|我处理|我整理|我弄|我改|我补|我出|包在我|交给我|收到[，,。！!]?我")
-ASK = re.compile(r"麻烦|帮忙|帮我|帮看|能不能|可不可以|可以.{0,10}吗|需要你|请你|辛苦|尽快|抓紧|跟进|确认一下|"
-                 r"看一下|过一下|反馈|评审|审核|ddl|DDL|deadline|截止|之前(给|发|交|完成|出)|记得|别忘")
-WHEN = re.compile(r"今天|今晚|明天|后天|周[一二三四五六日天]|下周|本周|这周|月底|\d{1,2}[:：点]\d{0,2}|\d{1,2}月\d{1,2}|\d{1,2}[./-]\d{1,2}")
-# In a private chat most asks are casual: "借我登一下" "账号密码有吗" "加好了和我说一下".
-P2P_ASK = re.compile(r"[?？]|https?://|吗|一下|借我|给我|和我说|告诉我|跟我说|好了没|怎么样了|进展")
+# Nothing but an acknowledgement, a laugh, emoji or punctuation: never a request.
+SMALL_TALK = re.compile(r"^(?:好的?|好嘞|好滴|行|收到|嗯+|哦+|噢+|ok(?:ay)?|谢谢|感谢|多谢|thx|thanks|哈+|呵+|嘿+|:[\w+-]+:|[\W_])*$", re.I)
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
 MAX_CHATS = 25
 
@@ -64,15 +63,10 @@ def classify(text, *, from_owner, chat_mode, names, mentioned=False):
         return "我的承诺" if len(text) >= 6 and COMMIT.search(text) else None
     if mentioned:  # @you in a group: always worth a look, however short ("@你 人生模拟器反馈")
         return "@你" if len(re.sub(r"@\S+", "", text).strip()) >= 2 else None
-    if len(text) < 6:
+    if SMALL_TALK.match(text):
         return None
-    to_owner = chat_mode == "p2p" or any(w in text for w in names)
-    # A private message long enough to say something (a bug report, a screenshot's caption) goes to the model:
-    # "这个弹窗只展示一点" carries no ask word but is clearly for the owner. Short chit-chat stays out.
-    private = chat_mode == "p2p" and (len(text) >= 12 or P2P_ASK.search(text))
-    if to_owner and (ASK.search(text) or WHEN.search(text) or private):
-        return "找你的"
-    return None
+    # Talking to the owner is enough; whether they want something is for the model to judge.
+    return "找你的" if chat_mode == "p2p" or any(w in text for w in names) else None
 
 
 def recent_lines(state, key):
