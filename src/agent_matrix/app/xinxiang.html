@@ -1116,7 +1116,7 @@ const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemin
 function setMenu(st,s){ const r=s.record||{};
   const left=setupProblems().length, upd=s.update||{}, waiting=(D.bugs||[]).filter(b=>b.status==="open").length;
   const tools=[r.feishu_ready&&(r.feishu_broken?"飞书（读不到）":"飞书"),s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、");
-  return [["",[["ai","ai",left?"#ff3b30":"#5856d6","驱动心响的 AI",engName(st.engine||"codex")+(left?` · 还差 ${left} 步`:"")],
+  return [["",[["ai","ai",left?"#ff3b30":"#5856d6","驱动心响的 AI",[...new Set([engName(st.engine||"codex"),engName(st.engine_sort||st.engine||"codex")])].join(" / ")+(left?` · 还差 ${left} 步`:"")],
       ["tool","tool","#007aff","接入",tools||"都没接"],
       ["data","db","#00c7be","数据与通知",STORE_NAME[r.mode||"feishu"]||""]]],
     ["通用",[["bugs","bug","#ff9500","问题反馈",waiting?`${waiting} 条待提交`:""],["update","update",upd.newer&&upd.can?"#ff3b30":"#007aff","版本与更新",upd.newer?`有新版 ${upd.latest}`:(upd.current||"")],
@@ -1301,39 +1301,28 @@ async function saveGeminiKey(clear){
   render();
 }
 function aiPage(st,s){
-  const found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy"||st.engine_sort==="cindy", cindyOk=cindy.installed===false?false:true;
-  const work=st.engine||"codex", sort=st.engine_sort||work, split=work!==sort;
+  const found=s.engines||{}, cindy=st.cindy||{}, cindyOk=cindy.installed===false?false:true;
+  const work=st.engine||"codex", sort=st.engine_sort||work, useCindy=work==="cindy"||sort==="cindy";
   const local=LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]), ais=(st.drivers||[]).map(d=>["driver:"+d.name,d.name+(d.online?"":"（不在）"),true]);
   const used=LOCAL_ENGINES.filter(e=>work===e||sort===e);   // only the local AIs in use need a connection
   const who=v=>{ const d=(st.drivers||[]).find(x=>"driver:"+x.name===v);
-    return d?`${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${d.app||d.model?"　":""}<span class="eng-state ${d.online?"ok":""}">${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</span>`:""; };
-  const pick=`<div class="chips">${[...ais,["cindy","Cindy",cindyOk],...local].map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`
-      :`<button class="chip ${!split&&work===v?"on":""}" onclick="setAll('${v}')">${l}</button>`).join("")}</div>`;
-  const own=v=>v==="cindy"?cindyRows(cindy):LOCAL_ENGINES.includes(v)?engineRow(v,st,found[v]):"";   // what the chosen AI itself needs
-  const main=split
-    ?setRow("做事和整理分给了两个 AI",`做事：${esc(engName(work))}；整理：${esc(engName(sort))}。想一个 AI 全包，点右边。`,`<button class="btn pri" onclick="setAll('${work}')">都交给 ${esc(engName(work))}</button><button class="btn" onclick="copySetupPrompt()">换成别的 AI</button>`,pick)
-    :setRow(esc(engName(work)),"心响里所有要 AI 做的事都交给它：做事项、整理会议和聊天、判断新进来的事。"+(who(work)?`<br>${who(work)}`:""),
-      `<button class="btn" onclick="copySetupPrompt()">换成别的 AI</button>`,pick)+own(work);
+    return d?`<br>${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${d.app||d.model?"　":""}<span class="eng-state ${d.online?"ok":""}">${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</span>`:""; };
+  const opts=[...ais,["cindy","Cindy",cindyOk],...local];
   const probs=setupChecks().filter(x=>x.need&&x.state!=="ok"&&x.key!=="engine"), d=obDriver(st);
   const fix=probs.length?setSec("fix","","",d
       ?connectRow("fix",`还差 ${probs.length} 步`,probs.map(x=>`<div>· <b>${esc(x.title)}</b>　${x.text}</div>`).join(""),`交给 ${esc(d.name)}`)
       :setRow(`还差 ${probs.length} 步`,probs.map(x=>`<div>· <b>${esc(x.title)}</b>　${x.text}</div>`).join(""),`<button class="btn pri" onclick="copySetupPrompt()">复制给 AI 的话</button>`)):"";
-  return fix+setSec("any","驱动心响的 AI","",main
-      +(!(st.drivers||[]).length?`<p class="hint" style="margin:10px 14px">用别的 AI（Claude Code、Cursor、Antigravity…）：点「换成别的 AI」复制一段话发给它，它来报到后就出现在上面，接手全部。</p>`:""))
-   +setSec("split","","",`<details ${split?"open":""}><summary class="set-sum">分给不同的 AI</summary>
-      ${setRow("做事","找背景、写成果、按你的意见改。复制一段话发给另一个 AI，只让它接这一块。",`<button class="btn" onclick="copyPart('work')">复制给 AI 的话</button>`,choice("engine",work,[...ais,["cindy","Cindy",cindyOk],...local]))}
-      ${setRow("整理","从会议和聊天里找出你的事、判断新进来的事。",`<button class="btn" onclick="copyPart('sort')">复制给 AI 的话</button>`,choice("engine_sort",sort,[...ais,["cindy","Cindy",cindyOk],...local]))}
-      ${setRow("单独某一件","在那件事里改「哪个 AI」。","")}
-      ${split?(useCindy?cindyRows(cindy):"")+used.map(e=>engineRow(e,st,found[e])).join(""):""}</details>`)
+  return fix+setSec("any","","",
+      setRow("做事","找背景、写成果、按你的意见改。"+who(work),`<button class="btn" onclick="copyPart('work')">复制给 AI 的话</button>`,choice("engine",work,opts))
+      +setRow("整理","从会议和聊天里找出你的事、判断新进来的事。"+who(sort),`<button class="btn" onclick="copyPart('sort')">复制给 AI 的话</button>`,choice("engine_sort",sort,opts))
+      +setRow("单独某一件","在那件事里改「哪个 AI」。","")
+      +(useCindy?cindyRows(cindy):"")+used.map(e=>engineRow(e,st,found[e])).join(""))
+   +`<p class="hint" style="margin:10px 2px 0">用别的 AI（Claude Code、Cursor、Antigravity…）：点「复制给 AI 的话」发给它，它来报到后就出现在选项里。</p>`
    +setSec("all","","",`<details><summary class="set-sum">每一项现在的状态</summary><div style="padding:12px 14px">${checkList()}</div></details>`)
    +setSec("dev","","",setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
         every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
       +(st.dev_mode&&st.dev_mode!=="off"&&work!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
       choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])));
-}
-async function setAll(v){   // one AI does everything: the items and the sorting
-  D.settings={...(D.settings||{}),engine:v,engine_sort:v}; render();
-  if(LIVE){ try{ await api("/api/settings",{engine:v,engine_sort:v}); toast(`都交给 ${engName(v)} 了`); }catch(e){ toast("没保存成功，连不上本机服务"); } load(); }
 }
 function copyPart(part){
   const t=((D.settings||{}).part_prompts||{})[part]; if(!t) return toast("还读不到，稍后再试");

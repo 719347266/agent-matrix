@@ -56,12 +56,12 @@ function reset(item) {
   assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
   assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
   assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
-  // Cindy chosen but the sorting was left on GPT: say so plainly, one click hands it all to Cindy
-  assert.match(pane("ai"),/做事和整理分给了两个 AI/); assert.match(pane("ai"),/setAll\('cindy'\)">都交给 Cindy/);
+  // the page is just who does what: 做事 and 整理 each with its own choice, and only the AIs in use show their own setup
+  assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/Cindy \/ 本机 GPT/);
   evaluate('D.settings.engine_sort="cindy"');
   let one = pane("ai");
-  assert.doesNotMatch(one,/codex 命令行|分给了两个/, "one AI does it all: no GPT row left over");
-  assert.match(one,/所有要 AI 做的事都交给它/); assert.match(one,/class="chip on" onclick="setAll\('cindy'\)"/);
+  assert.doesNotMatch(one,/codex 命令行|分给了两个|setAll/, "no GPT row once nothing uses it, and no box urging one AI for all");
+  assert.match(one,/class="chip on" onclick="setSetting\('engine','cindy'\)"/); assert.match(one,/class="chip on" onclick="setSetting\('engine_sort','cindy'\)"/);
   evaluate('D.settings.engine_sort="codex"');
   evaluate('D.settings={intake_mode:"all"}; D.system={record:{feishu_ready:true,mode:"feishu"}}');
   assert.match(pane("mode"),/自动开工/); assert.match(pane("store"),/飞书多维表格/);
@@ -165,8 +165,7 @@ function reset(item) {
   evaluate('D.settings={engine:"driver:Antigravity",engine_sort:"driver:Antigravity",intake_mode:"all",me:{name:"王小明"},engine_tests:{},drivers:[{name:"Antigravity",app:"Antigravity",model:"gemini-3",seen:"11-20 16:40",online:true},{name:"Claude Code",app:"终端",model:"opus",seen:"11-20 09:00",online:false}]}; D.system={listener:"运行中",engines:{codex:false,claude:false,gemini:false},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"windows",client:true}}');
   assert.deepEqual(plain("setupProblems()"),[]);
   let any = pane("ai");
-  for (const label of ["所有要 AI 做的事都交给它","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","copyPart('work')","copyPart('sort')"]) assert.ok(any.includes(label), label);
-  assert.match(any,/<details >/, "splitting the work between AIs stays folded away until it is used");
+  for (const label of ["做事","整理","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","copyPart('work')","copyPart('sort')"]) assert.ok(any.includes(label), label);
   let guide = evaluate('S.ob={step:2}; obView()');
   for (const label of ["Antigravity 已经接手","gemini-3","开始使用","copySetupPrompt()"]) assert.ok(guide.includes(label), label);
   assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">Antigravity</);
@@ -178,7 +177,7 @@ function reset(item) {
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");
-  for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活","整理：Cindy","<details open>"]) assert.ok(ai.includes(label), label);
+  for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活"]) assert.ok(ai.includes(label), label);
   assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use");
   assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
   evaluate('D.system.engines.gemini=false'); assert.match(evaluate("checkList()"),/还没有装 本机 Gemini/);
