@@ -84,7 +84,7 @@ def install_shim(root):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
-            body = f'@echo off\r\ncd /d "{Path(root).resolve()}"\r\n"{sys.executable}" -m agent_matrix.drive %*\r\n'
+            body = f'@echo off\r\nset PYTHONUTF8=1\r\ncd /d "{Path(root).resolve()}"\r\n"{sys.executable}" -m agent_matrix.drive %*\r\n'
         else:
             body = f'#!/bin/sh\ncd "{Path(root).resolve()}" || exit 1\nexec "{sys.executable}" -m agent_matrix.drive "$@"\n'
         if not path.is_file() or path.read_text() != body:

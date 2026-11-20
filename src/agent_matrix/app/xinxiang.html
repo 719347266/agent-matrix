@@ -1081,8 +1081,9 @@ function setupChecks(){
   const win=here.platform==="windows", py=here.python?`"${here.python}"`:"python", root=here.root||"心响所在的文件夹";
   const manual=st.intake_mode==="manual", reading=!manual&&(r.feishu_ready||s.slack), busy=S.testing||{};
   const install={codex:["npm install -g @openai/codex","codex login"],claude:["npm install -g @anthropic-ai/claude-code","claude"]};
+  const node=here.npm===false?[[`先装 Node.js（装 AI 命令行要用它）：到 <a href="https://nodejs.org/zh-cn/download" target="_blank" rel="noopener">nodejs.org</a> 下载安装包，一路点下一步。装完把终端关掉重开。`]]:[];
   const local=(name,job)=>{ const label=ENGINE_NAME[name], t=tests[name];
-    if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。`,how:howSteps([[`打开${TERM()}，装上它：`,install[name][0]],
+    if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。`,how:howSteps([...node,[`打开${TERM()}，装上它：`,install[name][0]],
         [name==="codex"?"登录你的 ChatGPT 账号：":"运行一次并按提示登录：",install[name][1]],["回到这里点「再查一遍」，然后点「测试连接」。"]])};
     if(busy[name]) return {state:"todo",text:"正在测试，最多要一两分钟…"};
     if(!t) return {state:"todo",text:`${label} 装好了，还没试过能不能用。`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">测试连接</button>`};
@@ -1091,6 +1092,7 @@ function setupChecks(){
     return {state:"ok",text:`${label} 已连通（${esc(t.at||"")}）。`,ctl:`<button class="btn ghost" onclick="testEngine('${name}')">再测</button>`}; };
   const out=[];
   out.push({key:"listener",need:true,title:"后台程序",...(s.listener==="运行中"?{state:"ok",text:"在运行。收消息、叫 AI 开工、提醒都靠它。"}
+    :here.client?{state:"bad",text:"没在运行，所以现在什么都不会自动发生。",how:howSteps([["在右下角托盘的心响图标上点右键 →「重启监听」；找不到图标就从开始菜单重新打开「心响」。"],["等一分钟，回来点「再查一遍」。"]])}
     :{state:"bad",text:"没在运行，所以现在什么都不会自动发生。",how:howSteps([[`打开${TERM()}，运行下面这行，它会装好并开机自启：`,
         win?`powershell -ExecutionPolicy Bypass -File "${root}\\windows\\install.ps1"`:`"${root}/launchd/install-listen.sh"`],["等一分钟，回来点「再查一遍」。"]])})});
   const eng=st.engine||"codex", c=st.cindy||{};
@@ -1101,10 +1103,10 @@ function setupChecks(){
   if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${ENGINE_NAME[sort]||sort}`,...local(sort,"会议和聊天里的事提不出来")});
   out.push({key:"me",need:!!reading,title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
     :{state:reading?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
-  const run=m=>`cd "${root}"${win?";":" &&"} ${win?"& ":""}${py} -m ${m}`;
+  const run=m=>`${win?"$env:PYTHONUTF8=1; ":""}cd "${root}"${win?";":" &&"} ${win?"& ":""}${py} -m ${m}`;
   out.push({key:"tools",need:false,title:"办公工具",...(r.feishu_ready||s.slack?{state:"ok",text:`已接入${[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean).join("、")}${manual?"；现在是手动模式，不会自动收":""}。`,ctl:`<button class="btn ghost" onclick="S.setTab='tool';render()">管理</button>`}
     :{state:"off",text:"没接，可以不接：要做的事点「＋ 新建事项」自己加。想让它自动收进别人找你的事，再接飞书或 Slack。",ctl:`<button class="btn ghost" onclick="S.setTab='tool';render()">接 Slack</button>`,
-      fold:"怎么接飞书",how:howSteps([...(here.lark_cli?[]:[[`打开${TERM()}，装飞书的命令行工具（要先装好 Node.js）：`,"npm install -g @larksuite/cli"]]),
+      fold:"怎么接飞书",how:howSteps([...(here.lark_cli?[]:[...node,[`打开${TERM()}，装飞书的命令行工具：`,"npm install -g @larksuite/cli"]]),
         ["登录你的飞书账号，按提示在浏览器里点同意：","lark-cli auth login"],["建好存事项的表格（只用做一次）：",run("agent_matrix setup")],
         ["补齐表格里的栏目：",`${run("agent_matrix.brief_migration setup-fields")}${win?";":" &&"} ${win?"& ":""}${py} -m agent_matrix.brief_migration apply`],["回到这里点「再查一遍」。"]])})});
   const store=s.store||{};

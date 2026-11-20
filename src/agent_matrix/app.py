@@ -298,11 +298,12 @@ def system_info(root):
         found, record = {}, {}
     try:  # what the setup check needs to say "do this next" in the owner's own words and paths
         import shutil
-        lark = bool(shutil.which(getattr(config, "lark_binary", "") or "lark-cli"))
+        lark, npm = bool(shutil.which(getattr(config, "lark_binary", "") or "lark-cli")), bool(shutil.which("npm"))
     except Exception:
-        lark = False
+        lark, npm = False, False
     here = {"platform": "windows" if sys.platform.startswith("win") else "mac" if sys.platform == "darwin" else "other",
-            "root": str(Path(root).resolve()), "python": sys.executable, "lark_cli": lark}
+            "root": str(Path(root).resolve()), "python": re.sub(r"(?i)pythonw(\.exe)$", r"python\1", sys.executable), "lark_cli": lark, "npm": npm,
+            "client": bool(os.environ.get("XINXIANG_CLIENT"))}   # started by the desktop client, which keeps the listener alive itself
     return {"engines": found, "slack": slack, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
