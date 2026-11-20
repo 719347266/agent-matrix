@@ -52,6 +52,17 @@ class SetupCheckTests(unittest.TestCase):
         self.assertTrue(by["me"]["need"])
         self.assertIn("set owner_name=", by["me"]["steps"][0])
 
+    def test_wanting_slack_is_a_step_and_the_token_never_goes_through_the_ai(self):
+        thread.set_setting(self.root, "want_slack", True)
+        by = {x["key"]: x for x in self.report(BARE)["items"]}
+        self.assertTrue(by["slack"]["need"] and not by["slack"]["ok"] and by["me"]["need"])
+        steps = "\n".join(by["slack"]["steps"])
+        for words in ("api.slack.com/apps", "search:read", "xoxp-", "不要让他把 Token 发到对话里"):
+            self.assertIn(words, steps)
+        by = {x["key"]: x for x in self.report({**BARE, "slack": {"team": "T"}})["items"]}
+        self.assertTrue(by["slack"]["ok"])
+        self.assertEqual(setupcheck.parse(["want_slack=true"]), {"want_slack": True})
+
     def test_the_desktop_client_and_another_ai(self):
         thread.set_setting(self.root, "engine", "gemini")
         system = {**BARE, "here": {**BARE["here"], "platform": "windows", "client": True}}

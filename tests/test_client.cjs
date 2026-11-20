@@ -71,9 +71,21 @@ function reset(item) {
   evaluate('D.settings.engine_tests={}'); assert.match(pane("check"),/testEngine\('codex'\)">测试连接/);
   evaluate('D.settings.intake_mode="manual"; D.settings.me={name:""}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"x"}}; D.system.record.feishu_ready=false');
   assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
-  for (const label of ["没接，可以不接","我要接飞书","setSetting('want_feishu',true)"]) assert.ok(pane("check").includes(label), label);
+  for (const label of ["没接，可以不接","去接"]) assert.ok(pane("check").includes(label), label);
+  for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)"]) assert.ok(pane("tool").includes(label), label);
+  // the guide's step for office tools: two plain switches when nothing is connected, no technical rows
+  let step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
+  for (const label of ["我要接飞书","我要接 Slack","两个都不开也能用"]) assert.ok(step.includes(label), label);
+  assert.doesNotMatch(step,/Token|后台程序|实时/, "nothing a newcomer cannot read");
+  evaluate('D.settings.want_slack=true');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接Slack/);
+  evaluate('D.settings.want_slack=false; D.system.record.feishu_ready=true; D.settings.sources={meetings:true,chats:true,tasks:false}');
+  step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
+  for (const label of ["已接入","读会议","读聊天","读飞书任务","我要接 Slack"]) assert.ok(step.includes(label), label);
+  assert.doesNotMatch(step,/后台程序|实时|我要接飞书/);
+  evaluate('D.system.record.feishu_ready=false; D.settings.sources={}');
   evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
-  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/带你接/);
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接飞书/);
   evaluate('D.settings.want_feishu=false');
   assert.equal(evaluate("OB.at(-1).key"),"check");
   // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself

@@ -22,7 +22,7 @@ INSTALL = {"codex": ("@openai/codex", "codex login", "会打开浏览器，请�
            "claude": ("@anthropic-ai/claude-code", "claude", "第一次运行会让本人登录 Claude 账号；登录完输入 /exit 退出"),
            "gemini": ("@google/gemini-cli", "gemini", "第一次运行会让本人登录 Google 账号；个人账号登录不了的话，请本人到 心响 → 设置 → 谁来做事 里填一个 Gemini API Key")}
 SETTABLE = {"owner_name", "owner_aliases", "engine", "engine_sort", "intake_mode", "brief_channel", "meeting_watch_enabled",
-            "chat_watch_enabled", "feishu_tasks_enabled", "want_feishu", "cindy_project", "prework_enabled", "onboarded"}
+            "chat_watch_enabled", "feishu_tasks_enabled", "want_feishu", "want_slack", "cindy_project", "prework_enabled", "onboarded"}
 
 
 from .setupshim import _cmd, install_shim, prompt, shim_path  # noqa: F401
@@ -64,6 +64,7 @@ def report(root):
     tests = {k: thread.setting(root, f"engine_test:{k}", None) for k in INSTALL}
     manual = bool(config and config.intake_mode == "manual")
     feishu, want_feishu = bool(record.get("feishu_ready")), bool(thread.setting(root, "want_feishu", False))
+    slack, want_slack = bool(s.get("slack")), bool(thread.setting(root, "want_slack", False))
     reading = not manual and (feishu or bool(s.get("slack")))
     python = here.get("python") or sys.executable
     out = []
@@ -93,7 +94,7 @@ def report(root):
         out.append({"key": "sort", "title": f"整理消息的 AI：{NAMES.get(sort, sort)}", "need": True, **sorting})
 
     name = (config.owner_name if config else "") or ""
-    out.append({"key": "me", "title": "怎么称呼本人", "need": bool(reading or want_feishu), "ok": bool(name),
+    out.append({"key": "me", "title": "怎么称呼本人", "need": bool(reading or want_feishu or want_slack), "ok": bool(name),
                 "say": f"{name}。" if name else "还没填，分不清会议和聊天里哪些事是本人的。",
                 "steps": [] if name else [f"问本人：同事在会议和聊天里怎么叫你（名字，和别的叫法）。然后运行 `{cmd} set owner_name=名字 owner_aliases=叫法1,叫法2`（没有别的叫法就不写 owner_aliases）。"]})
 
@@ -110,6 +111,14 @@ def report(root):
     else:
         out.append({"key": "feishu", "title": "飞书", "need": False, "ok": True,
                     "say": "本人没打算接（事项在心响里自己新建）。以后想接，在心响的引导或设置里打开「我要接飞书」。"})
+    if slack:
+        out.append({"key": "slack", "title": "Slack", "need": False, "ok": True, "say": "已接入。"})
+    elif want_slack:
+        out.append({"key": "slack", "title": "Slack", "need": True, "ok": False, "say": "本人想接 Slack，还没接好。", "steps": [
+            "带本人打开 https://api.slack.com/apps ，点 Create New App → From scratch，选他自己的工作区。",
+            "在 OAuth & Permissions → User Token Scopes 里加上这些权限：search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read",
+            "点 Install to Workspace，请本人点同意。页面上会出现一串 xoxp- 开头的 User OAuth Token。",
+            "请本人自己把这串 Token 粘贴到 心响 → 设置 → 办公工具 → Slack 里，点「连接」。不要让他把 Token 发到对话里。"]})
     return {"ready": all(x["ok"] for x in out if x["need"]), "items": out, "cmd": cmd}
 
 

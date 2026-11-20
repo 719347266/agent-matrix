@@ -211,6 +211,7 @@ def build_state(root):
         cfg = load_config(root / "config.yaml")
         settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model, "gemini": cfg.worker_gemini_model}
         settings["want_feishu"] = bool(thread.setting(root, "want_feishu", False))
+        settings["want_slack"] = bool(thread.setting(root, "want_slack", False))
         from . import setupshim
         settings["setup_prompt"] = setupshim.prompt(root)   # the one message the owner pastes to their own AI
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
@@ -514,8 +515,9 @@ class Handler(BaseHTTPRequestHandler):
                 from . import thread
                 if body.get("engine") in {"codex", "claude", "gemini", "cindy"}:
                     thread.set_setting(root, "engine", body["engine"])
-                if "want_feishu" in body:   # the owner means to connect Feishu: the setup check then says how
-                    thread.set_setting(root, "want_feishu", bool(body["want_feishu"]))
+                for want in ("want_feishu", "want_slack"):   # the owner means to connect it: the setup check then says how
+                    if want in body:
+                        thread.set_setting(root, want, bool(body[want]))
                 if "cindy_project" in body:
                     thread.set_setting(root, "cindy_project", str(body["cindy_project"] or "")[:500])
                 if body.get("engine_sort") in {"codex", "claude", "gemini", "cindy"}:
