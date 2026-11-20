@@ -615,9 +615,9 @@ def cindy_setup_text(root):
 - prompt 用下面这段：
 
 你是本人在 Cindy 里的 AI 员工，替心响做事。一次只做一件，做完就结束。
-1. 运行 `{cmd} next --driver Cindy --kinds item`，拿到这件事（folder、instructions、job）。返回 {{"idle": true}} 就直接结束。
+1. 运行 `{cmd} next --driver Cindy`，拿到这件事（folder、instructions、job）。返回 {{"idle": true}} 就直接结束。
 2. 回复第一行写「心响 #编号 标题」。
-3. 这件事属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。
+3. kind 是 item 的，属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。kind 是 meeting、chat、triage、learn 的是整理类的活：只按 instructions 做，不要套用项目模板。
 4. 按 instructions 做，交付文件写到 folder 里；按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
 
 建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查都对就行。"""

@@ -228,7 +228,7 @@ button:disabled{opacity:.5;cursor:wait}
 .composer .bot .btns{margin-left:auto;display:flex;gap:6px}
 .composer .bot .btn{margin-left:0}
 .eng{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:5px;font-size:11px;font-weight:650;background:var(--gray-soft);color:var(--ink2);flex:none}
-.eng.gpt{background:#e7f6ef;color:#16794c}.eng.claude{background:#fbeee6;color:#b4532a}
+.eng.gpt{background:#e7f6ef;color:#16794c}.eng.claude{background:#fbeee6;color:#b4532a}.eng.gemini{background:var(--blue-soft);color:var(--blue)}
 :root[data-theme=dark] .eng.gpt{background:#173326;color:#4cc38a}:root[data-theme=dark] .eng.claude{background:#3a2419;color:#e8936a}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .eng.gpt{background:#173326;color:#4cc38a}:root:not([data-theme=light]) .eng.claude{background:#3a2419;color:#e8936a}}
 .sess{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 8px;align-items:center;width:100%;border:0;background:none;padding:6px 0;text-align:left;border-top:1px solid var(--line2)}
@@ -1037,8 +1037,8 @@ const OB=[
       ${setRow("后台程序","收消息、整理、提醒都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)}</div>`; }},
   {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在设置里随时能换。",body:st=>modeCards(st)},
   {key:"ai",title:"让哪个 AI 来做事",sub:"选一个并测一下能不能连通。以后可以随时换。",body:(st,s)=>{ const found=s.engines||{}, cindy=st.cindy||{};
-    return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]]))}
-      ${st.engine==="cindy"?cindyRows(cindy):engineRow(st.engine==="claude"?"claude":"codex",st,found[st.engine==="claude"?"claude":"codex"])}</div>`; }},
+    return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]])]))}
+      ${st.engine==="cindy"?cindyRows(cindy):engineRow(LOCAL_ENGINES.includes(st.engine)?st.engine:"codex",st,found[LOCAL_ENGINES.includes(st.engine)?st.engine:"codex"])}</div>`; }},
   {key:"notify",title:"通知发到哪",sub:"AI 做完了、卡住了、有新的事，都会在心响里提醒你。",body:(st,s)=>
     `<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`},
   {key:"check",title:"最后查一遍",sub:"没通的照着做；也可以先开始用，之后在 设置 → 配置检查 里随时看。",body:()=>checkList()},
@@ -1057,7 +1057,7 @@ const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?
 const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
 const SET_IC={check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
   bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
-const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
+const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
 /* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
 function setMenu(st,s){ const r=s.record||{};
   const left=setupProblems().length;
@@ -1080,11 +1080,11 @@ function setupChecks(){
   const st=D.settings||{}, s=D.system||{}, r=s.record||{}, here=s.here||{}, found=s.engines||{}, tests=st.engine_tests||{}, me=st.me||{};
   const win=here.platform==="windows", py=here.python?`"${here.python}"`:"python", root=here.root||"心响所在的文件夹";
   const manual=st.intake_mode==="manual", reading=!manual&&(r.feishu_ready||s.slack), busy=S.testing||{};
-  const install={codex:["npm install -g @openai/codex","codex login"],claude:["npm install -g @anthropic-ai/claude-code","claude"]};
+  const install={codex:["npm install -g @openai/codex","codex login"],claude:["npm install -g @anthropic-ai/claude-code","claude"],gemini:["npm install -g @google/gemini-cli","gemini"]};
   const node=here.npm===false?[[`先装 Node.js（装 AI 命令行要用它）：到 <a href="https://nodejs.org/zh-cn/download" target="_blank" rel="noopener">nodejs.org</a> 下载安装包，一路点下一步。装完把终端关掉重开。`]]:[];
   const local=(name,job)=>{ const label=ENGINE_NAME[name], t=tests[name];
     if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。`,how:howSteps([...node,[`打开${TERM()}，装上它：`,install[name][0]],
-        [name==="codex"?"登录你的 ChatGPT 账号：":"运行一次并按提示登录：",install[name][1]],["回到这里点「再查一遍」，然后点「测试连接」。"]])};
+        [name==="codex"?"登录你的 ChatGPT 账号：":"运行一次并按提示登录：",install[name][1]],...(name==="gemini"?[["个人 Google 账号可能登录不了。那就到 设置 → 谁来做事 里填一个 Gemini API Key。"]]:[]),["回到这里点「再查一遍」，然后点「测试连接」。"]])};
     if(busy[name]) return {state:"todo",text:"正在测试，最多要一两分钟…"};
     if(!t) return {state:"todo",text:`${label} 装好了，还没试过能不能用。`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">测试连接</button>`};
     if(!t.ok) return {state:"bad",text:`${label} 连不上：${esc(t.error||"没有回复")}`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">再测一次</button>`,
@@ -1100,7 +1100,9 @@ function setupChecks(){
     :c.ready&&c.same_project?{state:"ok",text:"Cindy 每 5 分钟来领一次活。"}
     :{state:"bad",text:"Cindy 还没接好，交给 AI 的事不会开工。",ctl:`<button class="btn pri" onclick="S.setTab='ai';render()">去接好</button>`})});
   const sort=st.engine_sort||"codex";
-  if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${ENGINE_NAME[sort]||sort}`,...local(sort,"会议和聊天里的事提不出来")});
+  if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${ENGINE_NAME[sort]||sort}`,...(sort!=="cindy"?local(sort,"会议和聊天里的事提不出来")
+    :c.ready&&c.same_project?{state:"ok",text:"Cindy 每 5 分钟来领一次，会议和聊天会晚几分钟整理出来。"}
+    :{state:"bad",text:"Cindy 还没接好，会议和聊天里的事提不出来。",ctl:`<button class="btn pri" onclick="S.setTab='ai';render()">去接好</button>`})});
   out.push({key:"me",need:!!reading,title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
     :{state:reading?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
   const run=m=>`${win?"$env:PYTHONUTF8=1; ":""}cd "${root}"${win?";":" &&"} ${win?"& ":""}${py} -m ${m}`;
@@ -1143,7 +1145,8 @@ function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{}, men
 }
 const switchCtl=(on,call)=>`<div class="switch ${on?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!on}" tabindex="0" onclick="${call}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${call}}"><div class="tr"></div></div>`;
 const toggle=(key,on)=>switchCtl(on,`setSetting('${key}',${!on})`);
-const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"]};
+const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"],gemini:["Gemini","gemini 命令行","worker_gemini_model"]};
+const LOCAL_ENGINES=["codex","claude","gemini"];
 function engineRow(name,st,found){
   const [label,cli,key]=ENG[name], t=(st.engine_tests||{})[name], busy=S.testing&&S.testing[name], model=(st.models||{})[name]||"";
   const state=found===false?`<span class="eng-state bad">没找到 ${cli}</span>`:busy?`<span class="eng-state busy">正在测试…</span>`
@@ -1151,18 +1154,28 @@ function engineRow(name,st,found){
   const used=[st.engine===name?"做事":"",st.engine_sort===name?"整理":""].filter(Boolean).join("、");
   const err=t&&!t.ok&&!busy&&t.error?`<div class="d" style="color:var(--red);margin-top:6px">${esc(t.error)}</div>`:"";
   return setRow(`${label}<span class="hint" style="margin:0 0 0 8px;font-weight:400">${cli}${used?`　正在用于：${used}`:""}</span>`,
-    `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="claude"?"留空用账号默认":"模型名"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
-    `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err);
+    `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="codex"?"模型名":"留空用默认"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
+    `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err+(name==="gemini"?geminiKeyRow(st):""));
+}
+function geminiKeyRow(st){
+  return `<div class="d" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">API Key：<input id="gemkey" type="password" autocomplete="off" placeholder="${st.gemini_key?"已填，粘贴新的可替换":"可不填；个人账号登录不了时填"}" style="width:230px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')saveGeminiKey()"><button class="btn" onclick="saveGeminiKey()">保存</button>${st.gemini_key?`<button class="btn ghost" onclick="saveGeminiKey(true)">清掉</button>`:""}
+    <span>在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a> 申请；只存在这台电脑上。</span></div>`;
+}
+async function saveGeminiKey(clear){
+  const el=$("#gemkey"), v=clear?"":String(el&&el.value||"").trim(); if(!clear&&!v) return el&&el.focus();
+  try{ await api("/api/settings",{worker_gemini_api_key:v}); D.settings.gemini_key=!!v; if(el) el.value=""; toast(v?"已保存，点「测试连接」试一下":"已清掉"); }catch(e){ toast(e.message||"没保存成功"); }
+  render();
 }
 function aiPage(st,s){
   const found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy";
-  const local=[["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]];
-  const used=["codex","claude"].filter(e=>(st.engine||"codex")===e||(st.engine_sort||"codex")===e);   // only the engines in use need a connection
+  const local=LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]), cindyOk=cindy.installed===false?false:true, sortCindy=st.engine_sort==="cindy";
+  const used=LOCAL_ENGINES.filter(e=>(st.engine||"codex")===e||(st.engine_sort||"codex")===e);   // only the engines in use need a connection
   return setSec("run","做事","",
     setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。",
-      choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...local]))
+      choice("engine",st.engine||"codex",[["cindy","Cindy",cindyOk],...local]))
     +(useCindy?cindyRows(cindy):""))
-   +setSec("sort","整理","",setRow("谁来整理","从会议和聊天里找待办、判断新进来的事。",choice("engine_sort",st.engine_sort||"codex",local)))
+   +setSec("sort","整理","",setRow("谁来整理",`从会议和聊天里找待办、判断新进来的事。${sortCindy?"Cindy 每 5 分钟来领一次，所以会议和聊天会晚几分钟才整理出来。":""}`,choice("engine_sort",st.engine_sort||"codex",[["cindy","Cindy",cindyOk],...local]))
+    +(sortCindy&&!useCindy?cindyRows(cindy):""))
    +setSec("conn","连接状态","",used.map(e=>engineRow(e,st,found[e])).join(""));
 }
 function advancedSection(st,s,w){
@@ -1287,7 +1300,7 @@ async function testEngine(name){
   S.testing[name]=false; render();
 }
 async function saveModel(key,value){
-  value=String(value||"").trim(); const name=key==="worker_model"?"codex":"claude";
+  value=String(value||"").trim(); const name=Object.keys(ENG).find(e=>ENG[e][2]===key);
   if(((D.settings||{}).models||{})[name]===value) return;
   if(key==="worker_model"&&!value) return toast("GPT 需要填模型名");
   try{ await api("/api/settings",{[key]:value}); (D.settings.models ||= {})[name]=value; toast("模型已保存，下一件活开始用"); }
@@ -1549,7 +1562,7 @@ const ICON={
   all:'<path d="M5.5 4.5h8M5.5 8h8M5.5 11.5h8"/><circle cx="2.8" cy="4.5" r=".6"/><circle cx="2.8" cy="8" r=".6"/><circle cx="2.8" cy="11.5" r=".6"/>',
   mem:'<path d="M8 3.2c-2.6 0-4.5 1.8-4.5 4.1 0 1.4.7 2.6 1.9 3.3V13h5.2v-2.4c1.2-.7 1.9-1.9 1.9-3.3 0-2.3-1.9-4.1-4.5-4.1z"/><path d="M6.4 13h3.2"/>',
   sys:'<circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/>'};
-function engineTag(s){ const e=s.engine||""; return `<span class="eng ${e}">${esc(s.local?(s.driver||"AI"):e==="gpt"?"本机 GPT":e==="claude"?"本机 Claude":String(s.driver||"AI").slice(0,8))}</span>`; }
+function engineTag(s){ const e=s.engine||""; return `<span class="eng ${e}">${esc(s.local?(s.driver||"AI"):e==="gpt"?"本机 GPT":e==="claude"?"本机 Claude":e==="gemini"?"本机 Gemini":String(s.driver||"AI").slice(0,8))}</span>`; }
 /* every AI conversation replying right now: which app, what it is about, which item it is for */
 const replyingNow = s => s.local?(s.working??s.status==="open"):s.status==="open";
 function sessCard(s){

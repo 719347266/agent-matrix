@@ -73,6 +73,13 @@ function reset(item) {
   assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
   for (const label of ["没接，可以不接","怎么接飞书","lark-cli auth login","agent_matrix setup"]) assert.ok(pane("check").includes(label), label);
   assert.equal(evaluate("OB.at(-1).key"),"check");
+  // three local AIs and Cindy, for doing items and for sorting
+  evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
+  let ai = pane("ai");
+  for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活","晚几分钟"]) assert.ok(ai.includes(label), label);
+  assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use");
+  assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
+  evaluate('D.system.engines.gemini=false'); assert.match(pane("check"),/npm install -g @google\/gemini-cli/);
   // rules the AI learned wait on top for the owner's yes or no
   evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
   let mem = evaluate("memPage()");

@@ -203,13 +203,14 @@ def build_state(root):
             settings["cindy"]["setup_text"] = local_sessions.cindy_setup_text(root)
     except Exception:
         settings["cindy"] = {}
-    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude")}
+    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude", "gemini")}
     try:  # where conversations open and items are picked up (设置 → AI 对话)
         from . import local_sessions
         from .config import load as load_config
         found = local_sessions.apps(load_config(root / "config.yaml"))
         cfg = load_config(root / "config.yaml")
-        settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model}
+        settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model, "gemini": cfg.worker_gemini_model}
+        settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
                         sources={"meetings": cfg.meeting_watch_enabled, "chats": cfg.chat_watch_enabled, "tasks": cfg.feishu_tasks_enabled})
@@ -286,10 +287,10 @@ def system_info(root):
     except (TypeError, ValueError):
         pass
     from .config import load
-    from .workenv import claude_binary, codex_binary
+    from .workenv import claude_binary, codex_binary, gemini_binary
     try:
         config = load(Path(root) / "config.yaml")
-        found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
+        found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config)), "gemini": bool(gemini_binary(config))}
         mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
         record = {"review_every": config.chat_review_every_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
                   "notion": bool(config.notion_database_id), "notion_url": notion_url,
@@ -491,16 +492,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
             if path == "/api/settings":
                 from . import thread
-                if body.get("engine") in {"codex", "claude", "cindy"}:
+                if body.get("engine") in {"codex", "claude", "gemini", "cindy"}:
                     thread.set_setting(root, "engine", body["engine"])
                 if "cindy_project" in body:
                     thread.set_setting(root, "cindy_project", str(body["cindy_project"] or "")[:500])
-                if body.get("engine_sort") in {"codex", "claude"}:
+                if body.get("engine_sort") in {"codex", "claude", "gemini", "cindy"}:
                     thread.set_setting(root, "engine_sort", body["engine_sort"])
-                if any(k in body for k in ("worker_model", "worker_claude_model")):  # model names live in config.yaml
+                if "worker_gemini_api_key" in body:  # kept in config.yaml on this computer, handed to the gemini command only
                     from .config import load as load_config, save as save_config
                     config = load_config(root / "config.yaml")
-                    for key in ("worker_model", "worker_claude_model"):
+                    config.worker_gemini_api_key = str(body["worker_gemini_api_key"] or "").strip()[:200]
+                    save_config(root / "config.yaml", config)
+                if any(k in body for k in ("worker_model", "worker_claude_model", "worker_gemini_model")):  # model names live in config.yaml
+                    from .config import load as load_config, save as save_config
+                    config = load_config(root / "config.yaml")
+                    for key in ("worker_model", "worker_claude_model", "worker_gemini_model"):
                         if key in body:
                             value = " ".join(str(body[key] or "").split())[:80]
                             if key == "worker_model" and not value:
@@ -619,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .config import load
                 from .engines import test_engine
                 name = body.get("engine")
-                if name not in {"codex", "claude"}:
+                if name not in {"codex", "claude", "gemini"}:
                     return self._send(400, {"ok": False, "reply": "不认识这个 AI。"})
                 return self._send(200, {"ok": True, **test_engine(root, load(root / "config.yaml"), name)})
             if path == "/api/session/unbind":

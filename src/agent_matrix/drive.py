@@ -371,10 +371,53 @@ def item_runner(root):
     return "cindy" if setting(Path(root), "engine", "codex") == "cindy" else "local"
 
 
+def sort_runner(root):
+    """Who sorts (judging new items, meetings, chats, learning rules): "cindy" or "local"."""
+    from .thread import setting
+    return "cindy" if setting(Path(root), "engine_sort", "") == "cindy" else "local"
+
+
+def cindy_kinds(root):
+    """What Cindy's schedule takes: the items and/or the sorting, as the owner chose (设置 → 谁来做事)."""
+    return [*(SORTING if sort_runner(root) == "cindy" else ()), *(("item",) if item_runner(root) == "cindy" else ())]
+
+
+def local_kinds(root):
+    """What the built-in driver takes: whatever was not handed to Cindy."""
+    return [*(SORTING if sort_runner(root) != "cindy" else ()), *(("item",) if item_runner(root) != "cindy" else ())]
+
+
+def has_sorting_for(root, config):
+    """Is there a meeting, a round of chats or new items to judge waiting? Cheap: a schedule's pre-run check asks."""
+    from . import thread as conversation
+    from .workenv import _check
+    try:
+        code, checked = _check(root, "agent_matrix.meeting_watch")
+        taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
+        if any(m.get("status") == "ready" and m["meeting_id"] not in taken for m in checked.get("ready") or []):
+            return "meeting"
+        if not _busy(root, "chat"):
+            code, checked = _check(root, "agent_matrix.chat_review")
+            if code == 0 and checked.get("run_model"):
+                return "chat"
+        if conversation.setting(Path(root), "auto_assign", False) and not _busy(root, "triage"):
+            from .itemwork import _pending_new
+            from .snapshot import _snapshot
+            if _pending_new(_snapshot(root).get("rows") or [], conversation.judgments(root)):
+                return "triage"
+    except Exception as exc:
+        activity.swallowed(root, "drive.has_sorting_for", exc)
+    return None
+
+
 def next_job(root, config, driver, *, skip=(), kinds=None):
     """The next piece of work for this driver, already prepared; None when there is nothing to do.
     kinds limits what it takes: e.g. Cindy takes only items, the built-in driver then only sorting work."""
     root = Path(root)
+    if "cindy" in str(driver).lower():   # Cindy takes what the owner handed it, whatever its schedule's prompt asks for
+        kinds = cindy_kinds(root)
+        if not kinds:
+            return None
     wanted = set(kinds or (*SORTING, "item"))
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
@@ -701,6 +744,10 @@ def main(argv=None):
             # a schedule's pre-run check: exit 0 = there is an item to do, 2 = nothing (skip this round, no tokens)
             if item_runner(root) == "cindy" and has_items_for(root, config):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))
+                return 0
+            sorting = sort_runner(root) == "cindy" and has_sorting_for(root, config)
+            if sorting:
+                print(json.dumps({"ok": True, "work": sorting}, ensure_ascii=False))
                 return 0
             print(json.dumps({"ok": True, "work": None}, ensure_ascii=False))
             return 2

@@ -209,7 +209,7 @@ class Item:
     def prepare_folder(self, client, rows, row, notes):
         from . import background
         keep = record_copy(self.root, self.rid)
-        for name in (".thread", ".claude-session", "交付.md", ".seen.json"):  # carry the conversation over if the folder moved
+        for name in (".thread", ".claude-session", ".gemini-session", "交付.md", ".seen.json"):  # carry the conversation over if the folder moved
             if (keep / name).is_file() and not (self.workdir / name).is_file():
                 shutil.copyfile(keep / name, self.workdir / name)
         previous = None
@@ -300,7 +300,7 @@ class Item:
         from .prework import add_note, notify, publish_markdown
         self.show("交付中", "建飞书文档")
         keep = record_copy(self.root, self.rid)
-        for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".claude-session", ".seen.json"):
+        for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".claude-session", ".gemini-session", ".seen.json"):
             # On a plain-ASCII project path the AI works in the project's own copy: nothing to copy then.
             if (self.workdir / name).is_file() and (self.workdir / name).resolve() != (keep / name).resolve():
                 shutil.copyfile(self.workdir / name, keep / name)

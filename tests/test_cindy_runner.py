@@ -36,6 +36,64 @@ class CindyRunner(unittest.TestCase):
             drive.next_job(self.root, None, "Cindy", kinds=["item"])
             self.assertEqual(seen, ["item"])
 
+    def test_the_owner_decides_what_cindy_takes_and_the_builtin_driver_takes_the_rest(self):
+        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([], [*drive.SORTING, "item"]))
+        set_setting(self.root, "engine_sort", "cindy")                      # Cindy sorts, a local AI does the items
+        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING], ["item"]))
+        set_setting(self.root, "engine", "cindy")                           # Cindy does everything
+        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING, "item"], []))
+        seen = []
+        stub = lambda name: (lambda root, config, driver, **k: seen.append(name) or None)
+        with patch.object(drive, "_prepare_triage", stub("triage")), patch.object(drive, "_prepare_meeting", stub("meeting")), \
+             patch.object(drive, "_prepare_chat", stub("chat")), patch.object(drive, "_prepare_learn", stub("learn")), \
+             patch.object(drive, "_prepare_item", stub("item")):
+            drive.next_job(self.root, None, "Cindy", kinds=["item"])        # an older schedule still asks for items only
+            self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
+            seen.clear()
+            set_setting(self.root, "engine", "gemini")
+            set_setting(self.root, "engine_sort", "gemini")
+            self.assertIsNone(drive.next_job(self.root, None, "Cindy"))     # nothing was handed to Cindy
+            self.assertEqual(seen, [])
+        args = ["gate", "--config", str(self.root / "config.yaml")]
+        (self.root / "config.yaml").write_text("{}", encoding="utf-8")
+        set_setting(self.root, "engine_sort", "cindy")
+        with patch.object(drive, "install_shim"), patch.object(drive, "has_sorting_for", return_value="chat"), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(drive.main(args), 0)                           # a round of chats waits: Cindy is let in
+        self.assertIn('"work": "chat"', out.getvalue())
+        with patch.object(drive, "install_shim"), patch.object(drive, "has_sorting_for", return_value=None), redirect_stdout(io.StringIO()):
+            self.assertEqual(drive.main(args), 2)
+
+    def test_gemini_is_a_local_ai_like_the_others(self):
+        import json
+        from agent_matrix import engines
+        from agent_matrix.models import Config
+        self.assertIs(engines.engine(self.root), engines.CodexRun)
+        set_setting(self.root, "engine", "gemini")
+        self.assertIs(engines.engine(self.root), engines.GeminiRun)
+        self.assertIs(engines.engine(self.root, "sort"), engines.GeminiRun)
+        set_setting(self.root, "engine_sort", "cindy")                      # what the built-in driver still does uses the work AI
+        self.assertIs(engines.engine(self.root, "sort"), engines.GeminiRun)
+        config = Config(worker_gemini="/x/gemini", worker_gemini_model="gemini-pro", worker_gemini_api_key="k-123")
+        run = engines.GeminiRun(config, self.root)
+        argv = run.argv()
+        self.assertEqual((argv[0], argv[-2:]), ("/x/gemini", ["-p", ""]))
+        self.assertIn("stream-json", argv); self.assertIn("gemini-pro", argv); self.assertNotIn("--resume", argv)
+        self.assertEqual((run.env()["GEMINI_API_KEY"], run.env()["GEMINI_CLI_TRUST_WORKSPACE"]), ("k-123", "true"))
+        for event in ({"type": "init", "session_id": "s-1", "model": "m"}, {"type": "message", "role": "user", "content": "任务"},
+                      {"type": "message", "role": "assistant", "content": "先看", "delta": True},
+                      {"type": "tool_use", "tool_name": "run_shell_command", "tool_id": "t", "parameters": {}},
+                      {"type": "tool_result", "tool_id": "t", "status": "success"},
+                      {"type": "message", "role": "assistant", "content": "做", "delta": True},
+                      {"type": "message", "role": "assistant", "content": "完了", "delta": True},
+                      {"type": "result", "status": "success", "stats": {"input_tokens": 10, "output_tokens": 4, "cached": 1}}):
+            run._event(json.dumps(event, ensure_ascii=False), None)
+        run._event("not json", None)
+        self.assertEqual((run.thread, run.commands, run.messages, run.usage["input_tokens"]), ("s-1", 1, 2, 10))
+        self.assertEqual((self.root / ".last.txt").read_text(encoding="utf-8"), "做完了")       # its last message is the answer
+        self.assertEqual((self.root / ".gemini-session").read_text(encoding="utf-8"), "s-1")
+        self.assertIn("--resume", engines.GeminiRun(config, self.root, thread="s-1").argv())
+        self.assertNotIn("GEMINI_API_KEY", engines.GeminiRun(Config(worker_gemini="/x/gemini"), self.root).env())
+
     def test_the_schedule_check_says_go_only_when_cindy_does_items_and_one_waits(self):
         args = ["gate", "--config", str(self.root / "config.yaml")]
         (self.root / "config.yaml").write_text("{}", encoding="utf-8")

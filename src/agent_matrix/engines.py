@@ -18,7 +18,7 @@ import time
 from .models import MatrixBusy, MatrixError
 from .state import State, exclusive_lock
 from .timeutil import TZ
-from .workenv import _env, claude_binary, codex_binary, now, provider_overrides, scratch
+from .workenv import _env, claude_binary, codex_binary, gemini_binary, now, provider_overrides, scratch
 
 
 class CodexRun:
@@ -284,7 +284,66 @@ class ClaudeRun(CodexRun):
             on_event(event)
 
 
-ENGINES = {"codex": "CodexRun", "claude": "ClaudeRun"}
+class GeminiRun(CodexRun):
+    """One headless `gemini` turn (Google's Gemini CLI), the prompt on stdin, events as stream-json."""
+    THREAD_FILE = ".gemini-session"
+    NAME = "本机 Gemini"
+
+    def argv(self):
+        binary = gemini_binary(self.config)
+        if not binary:
+            raise MatrixError("找不到 Gemini 命令行（gemini）。在 config.yaml 的 worker_gemini 写上它的路径。")
+        argv = [binary, "-o", "stream-json", "--approval-mode", "yolo"]   # headless: nobody is there to approve a tool
+        if sys.platform == "darwin" and self.config.worker_gemini_sandbox:
+            argv.append("-s")   # macOS Seatbelt: it can read, use the network, and write only inside this folder
+        if self.config.worker_gemini_model:
+            argv += ["-m", self.config.worker_gemini_model]
+        if self.thread:
+            argv += ["--resume", "latest"]   # sessions are kept per folder, and every job has its own folder
+        return [*argv, "-p", ""]             # the prompt itself comes on stdin
+
+    def env(self):
+        env = _env(self.config)
+        env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"   # the job's own folder; without it a headless run refuses to start
+        if self.config.worker_gemini_api_key:
+            env["GEMINI_API_KEY"] = self.config.worker_gemini_api_key
+        return env
+
+    def _event(self, line, on_event):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(event, dict):
+            return
+        kind = event.get("type")
+        if kind == "init" and event.get("session_id"):
+            self.thread = event["session_id"]
+            if not self.ephemeral:
+                (self.workdir / self.THREAD_FILE).write_text(self.thread, encoding="utf-8")
+        elif kind == "message" and event.get("role") == "assistant":
+            if not event.get("delta") or not getattr(self, "_said", ""):
+                self.messages += 1
+            self._said = (getattr(self, "_said", "") if event.get("delta") else "") + str(event.get("content") or "")
+            (self.workdir / ".last.txt").write_text(self._said, encoding="utf-8")   # its last message is the answer
+        elif kind == "tool_use":
+            self._said = ""   # what it says after a tool is a new message
+            if event.get("tool_name") == "run_shell_command":
+                self.commands += 1
+        elif kind == "result":
+            stats = event.get("stats") or {}
+            for k in ("input_tokens", "output_tokens", "cached"):
+                self.usage[k] = self.usage.get(k, 0) + (stats.get(k) or 0)
+        if on_event:
+            on_event(event)
+
+
+ENGINES = {"codex": "CodexRun", "claude": "ClaudeRun", "gemini": "GeminiRun"}
+
+
+def run_class(name):
+    """The class for one local AI, looked up by name each time (a test may have put a stand-in in its place)."""
+    return globals()[ENGINES.get(name, "CodexRun")]
 
 
 def engine(root, purpose="work"):
@@ -295,14 +354,14 @@ def engine(root, purpose="work"):
     if work not in ENGINES:   # items done by Cindy: the built-in driver still sorts, with GPT unless chosen
         work = "codex"
     chosen = conversation.setting(Path(root), "engine_sort", work) if purpose == "sort" else work
-    return ClaudeRun if chosen == "claude" else CodexRun
+    return run_class(chosen if chosen in ENGINES else work)   # sorting handed to Cindy: what the built-in driver still does itself uses the work AI
 
 
 def test_engine(root, config, name):
     """Can this AI be reached right now? One tiny turn in a scratch folder: did it answer, how long, which model.
     The result is kept for the settings page."""
     from . import thread as conversation
-    base = ClaudeRun if name == "claude" else CodexRun
+    base = run_class(name)
 
     class Probe(base):
         raw = ()
@@ -314,7 +373,7 @@ def test_engine(root, config, name):
     folder = scratch(root, "engine-test", name)
     (folder / ".last.txt").unlink(missing_ok=True)
     started = time.monotonic()
-    model = (config.worker_claude_model or "Claude 账号默认") if name == "claude" else config.worker_model
+    model = {"claude": config.worker_claude_model or "Claude 账号默认", "gemini": config.worker_gemini_model or "Gemini 默认"}.get(name, config.worker_model)
     try:
         run = Probe(config, folder, effort="low", timeout_minutes=2, ephemeral=True).run("只回复两个字：连通。不要运行任何命令。")
         reply = (folder / ".last.txt").read_text(encoding="utf-8").strip() if (folder / ".last.txt").is_file() else ""
@@ -326,7 +385,9 @@ def test_engine(root, config, name):
         ok = "连通" in reply
         if reply and not ok:  # it answered, but not the AI: e.g. "Not logged in · Please run /login"
             problem = reply[:300]
-        if "login" in problem.lower() or "logged in" in problem.lower() or "unauthorized" in problem.lower() or "401" in problem:
+        if "no longer supported" in problem or "IneligibleTier" in problem or "GEMINI_API_KEY" in problem:
+            problem = "Google 已不再让个人账号直接登录这个命令行。到 aistudio.google.com 申请一个 Gemini API Key，填到下面的「API Key」里再测。"
+        elif "login" in problem.lower() or "logged in" in problem.lower() or "unauthorized" in problem.lower() or "401" in problem:
             problem += "（没登录：在终端运行一次这个命令行并登录）"
         result = {"ok": ok, "reply": reply[:60], "error": problem, "seconds": round(time.monotonic() - started, 1)}
     except MatrixError as exc:
