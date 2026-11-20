@@ -952,6 +952,7 @@ function autoSwitch(){
     ? "已开启：AI 先看这件事之后的聊天，你已经办完的直接关掉、不用做的放下，能独立做的接手，要你拍板的先备材料，只能你做的留在这里。"
     : "开启后，新进来的事先让 AI 看上下文再判断：办完的关掉、不用做的放下、能做的接手、要你来的先备材料。对外发送、审批、付款这类事 AI 不会接手。"}</span></div></div>`;
 }
+/* settings the server keeps as they are sent */
 const SOURCE_KEY={meeting_watch_enabled:"meetings",chat_watch_enabled:"chats",feishu_tasks_enabled:"tasks"};
 async function setSetting(key, on){
   D.settings = {...(D.settings||{}), [key]:on};
@@ -1032,7 +1033,7 @@ const OB=[
   {key:"source",title:"接入你的办公工具",sub:"接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",body:(st,s)=>{ const r=s.record||{}, on=st.sources||{};
     return `<div class="list">${r.feishu_ready
         ?setRow("飞书","已接入","",pushLine(s))+setRow("读会议","",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","",toggle("feishu_tasks_enabled",on.tasks))
-        :setRow("飞书","没有接入。需要的话，按安装说明运行一次 setup。",`<span class="eng-state">未接入</span>`)}
+        :setRow("我要接飞书",st.want_feishu?"好。最后一步会给你一段话，发给你的 AI，它带你接好。":"不接也可以，事项自己新建。想自动收进会议、聊天里别人找你的事，就打开。",switchCtl(!!st.want_feishu,`setSetting('want_feishu',${!st.want_feishu})`))}
       ${setRow("Slack",s.slack?`已接入 ${esc(s.slack.team||"")}`:"需要时到 设置 → 办公工具 里粘贴 Token 连接。",`<span class="eng-state ${s.slack?"ok":""}">${s.slack?"已接入":"未接入"}</span>`)}
       ${setRow("后台程序","收消息、整理、提醒都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)}</div>`; }},
   {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在设置里随时能换。",body:st=>modeCards(st)},
@@ -1041,7 +1042,7 @@ const OB=[
       ${st.engine==="cindy"?cindyRows(cindy):engineRow(LOCAL_ENGINES.includes(st.engine)?st.engine:"codex",st,found[LOCAL_ENGINES.includes(st.engine)?st.engine:"codex"])}</div>`; }},
   {key:"notify",title:"通知发到哪",sub:"AI 做完了、卡住了、有新的事，都会在心响里提醒你。",body:(st,s)=>
     `<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`},
-  {key:"check",title:"最后查一遍",sub:"没通的照着做；也可以先开始用，之后在 设置 → 配置检查 里随时看。",body:()=>checkList()},
+  {key:"check",title:"剩下的交给你的 AI",sub:"也可以先开始用，之后在 设置 → 配置检查 里随时看。",body:()=>checkList()},
 ];
 function obView(){
   const i=S.ob.step, step=OB[i], last=i===OB.length-1;
@@ -1076,57 +1077,51 @@ function copyText(text,said){
 const cmdBox = c => `<div class="cmd"><code>${esc(c)}</code><button class="btn" data-cmd="${esc(c)}" onclick="copyText(this.dataset.cmd,'已复制，粘贴到终端里回车')">复制</button></div>`;
 const howSteps = steps => steps.map(([text,c],k)=>`<div class="step-n"><i>${k+1}</i><div>${text}${c?cmdBox(c):""}</div></div>`).join("");
 const TERM = () => ((D.system||{}).here||{}).platform==="windows"?"「开始」菜单里的 PowerShell":"「终端」（聚焦搜索里搜“终端”）";
+const ASK_AI="把上面那段话发给你的 AI，它会";
 function setupChecks(){
   const st=D.settings||{}, s=D.system||{}, r=s.record||{}, here=s.here||{}, found=s.engines||{}, tests=st.engine_tests||{}, me=st.me||{};
-  const win=here.platform==="windows", py=here.python?`"${here.python}"`:"python", root=here.root||"心响所在的文件夹";
   const manual=st.intake_mode==="manual", reading=!manual&&(r.feishu_ready||s.slack), busy=S.testing||{};
-  const install={codex:["npm install -g @openai/codex","codex login"],claude:["npm install -g @anthropic-ai/claude-code","claude"],gemini:["npm install -g @google/gemini-cli","gemini"]};
-  const node=here.npm===false?[[`先装 Node.js（装 AI 命令行要用它）：到 <a href="https://nodejs.org/zh-cn/download" target="_blank" rel="noopener">nodejs.org</a> 下载安装包，一路点下一步。装完把终端关掉重开。`]]:[];
   const local=(name,job)=>{ const label=ENGINE_NAME[name], t=tests[name];
-    if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。`,how:howSteps([...node,[`打开${TERM()}，装上它：`,install[name][0]],
-        [name==="codex"?"登录你的 ChatGPT 账号：":"运行一次并按提示登录：",install[name][1]],...(name==="gemini"?[["个人 Google 账号可能登录不了。那就到 设置 → 谁来做事 里填一个 Gemini API Key。"]]:[]),["回到这里点「再查一遍」，然后点「测试连接」。"]])};
+    if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。${ASK_AI}装好，中途会请你登录一次账号。`};
     if(busy[name]) return {state:"todo",text:"正在测试，最多要一两分钟…"};
     if(!t) return {state:"todo",text:`${label} 装好了，还没试过能不能用。`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">测试连接</button>`};
-    if(!t.ok) return {state:"bad",text:`${label} 连不上：${esc(t.error||"没有回复")}`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">再测一次</button>`,
-        how:howSteps([[`多半是没登录。打开${TERM()}运行：`,install[name][1]],["登录好后回来点「再测一次」。"]])};
+    if(!t.ok) return {state:"bad",text:`${label} 连不上：${esc(t.error||"没有回复")}`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">再测一次</button>`};
     return {state:"ok",text:`${label} 已连通（${esc(t.at||"")}）。`,ctl:`<button class="btn ghost" onclick="testEngine('${name}')">再测</button>`}; };
+  const cindyState=(c,job)=>c.ready&&c.same_project?{state:"ok",text:"Cindy 每 5 分钟来领一次活。"}
+    :{state:"bad",text:`Cindy 还没接好，${job}。`,ctl:`<button class="btn pri" onclick="S.setTab='ai';render()">去接好</button>`};
   const out=[];
   out.push({key:"listener",need:true,title:"后台程序",...(s.listener==="运行中"?{state:"ok",text:"在运行。收消息、叫 AI 开工、提醒都靠它。"}
-    :here.client?{state:"bad",text:"没在运行，所以现在什么都不会自动发生。",how:howSteps([["在右下角托盘的心响图标上点右键 →「重启监听」；找不到图标就从开始菜单重新打开「心响」。"],["等一分钟，回来点「再查一遍」。"]])}
-    :{state:"bad",text:"没在运行，所以现在什么都不会自动发生。",how:howSteps([[`打开${TERM()}，运行下面这行，它会装好并开机自启：`,
-        win?`powershell -ExecutionPolicy Bypass -File "${root}\\windows\\install.ps1"`:`"${root}/launchd/install-listen.sh"`],["等一分钟，回来点「再查一遍」。"]])})});
+    :{state:"bad",text:`没在运行，所以现在什么都不会自动发生。${here.client?"从开始菜单重新打开「心响」，等一分钟。":ASK_AI+"把它启动并设成开机自启。"}`})});
   const eng=st.engine||"codex", c=st.cindy||{};
-  out.push({key:"engine",need:true,title:`做事的 AI：${ENGINE_NAME[eng]||eng}`,...(eng!=="cindy"?local(eng,"交给 AI 的事没人做")
-    :c.ready&&c.same_project?{state:"ok",text:"Cindy 每 5 分钟来领一次活。"}
-    :{state:"bad",text:"Cindy 还没接好，交给 AI 的事不会开工。",ctl:`<button class="btn pri" onclick="S.setTab='ai';render()">去接好</button>`})});
+  out.push({key:"engine",need:true,title:`做事的 AI：${ENGINE_NAME[eng]||eng}`,...(eng!=="cindy"?local(eng,"交给 AI 的事没人做"):cindyState(c,"交给 AI 的事不会开工"))});
   const sort=st.engine_sort||"codex";
-  if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${ENGINE_NAME[sort]||sort}`,...(sort!=="cindy"?local(sort,"会议和聊天里的事提不出来")
-    :c.ready&&c.same_project?{state:"ok",text:"Cindy 每 5 分钟来领一次，会议和聊天会晚几分钟整理出来。"}
-    :{state:"bad",text:"Cindy 还没接好，会议和聊天里的事提不出来。",ctl:`<button class="btn pri" onclick="S.setTab='ai';render()">去接好</button>`})});
-  out.push({key:"me",need:!!reading,title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
-    :{state:reading?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
-  const run=m=>`${win?"$env:PYTHONUTF8=1; ":""}cd "${root}"${win?";":" &&"} ${win?"& ":""}${py} -m ${m}`;
-  out.push({key:"tools",need:false,title:"办公工具",...(r.feishu_ready||s.slack?{state:"ok",text:`已接入${[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean).join("、")}${manual?"；现在是手动模式，不会自动收":""}。`,ctl:`<button class="btn ghost" onclick="S.setTab='tool';render()">管理</button>`}
-    :{state:"off",text:"没接，可以不接：要做的事点「＋ 新建事项」自己加。想让它自动收进别人找你的事，再接飞书或 Slack。",ctl:`<button class="btn ghost" onclick="S.setTab='tool';render()">接 Slack</button>`,
-      fold:"怎么接飞书",how:howSteps([...(here.lark_cli?[]:[...node,[`打开${TERM()}，装飞书的命令行工具：`,"npm install -g @larksuite/cli"]]),
-        ["登录你的飞书账号，按提示在浏览器里点同意：","lark-cli auth login"],["建好存事项的表格（只用做一次）：",run("agent_matrix setup")],
-        ["补齐表格里的栏目：",`${run("agent_matrix.brief_migration setup-fields")}${win?";":" &&"} ${win?"& ":""}${py} -m agent_matrix.brief_migration apply`],["回到这里点「再查一遍」。"]])})});
+  if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${ENGINE_NAME[sort]||sort}`,...(sort!=="cindy"?local(sort,"会议和聊天里的事提不出来"):cindyState(c,"会议和聊天里的事提不出来"))});
+  out.push({key:"me",need:!!(reading||st.want_feishu),title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
+    :{state:reading||st.want_feishu?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
+  const wantSwitch=switchCtl(!!st.want_feishu,`setSetting('want_feishu',${!st.want_feishu})`);
+  out.push({key:"tools",need:!!st.want_feishu&&!r.feishu_ready,title:"办公工具",...(r.feishu_ready||s.slack&&!st.want_feishu?{state:"ok",text:`已接入${[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean).join("、")}${manual?"；现在是手动模式，不会自动收":""}。`,ctl:`<button class="btn ghost" onclick="S.setTab='tool';render()">管理</button>`}
+    :st.want_feishu?{state:"todo",text:`你想接飞书，还没接好。${ASK_AI}带你接：装工具、建表格，中途请你在浏览器里登录飞书、点一次同意。`,ctl:`<span class="hint" style="margin:0">我要接飞书</span>${wantSwitch}`}
+    :{state:"off",text:"没接，可以不接：要做的事点「＋ 新建事项」自己加。想让它自动收进会议、聊天里别人找你的事，就打开右边的开关。",ctl:`<span class="hint" style="margin:0">我要接飞书</span>${wantSwitch}`})});
   const store=s.store||{};
   out.push({key:"store",need:false,title:"事项存在哪",...(store.failed?{state:"todo",text:`事项都在本机，没丢；有 ${store.failed} 条还没同步出去。`,ctl:`<button class="btn" onclick="retryBackup()">重试</button>`}
     :{state:"ok",text:`${STORE_NAME[r.mode||"feishu"]||""}${r.mode==="device"?"":"，本机也有一份"}。`,ctl:`<button class="btn ghost" onclick="S.setTab='store';render()">换</button>`})});
   return out;
 }
+function copySetupPrompt(){
+  const t=(D.settings||{}).setup_prompt; if(!t) return toast("还读不到，稍后再试");
+  copyText(t,"已复制。粘贴到你常用的 AI 里发送，它会把剩下的配好");
+}
 const setupProblems = () => setupChecks().filter(x=>x.need&&x.state!=="ok");
 function checkList(){
   const list=setupChecks(), bad=list.filter(x=>x.need&&x.state!=="ok"), MARK={ok:"✓",bad:"!",todo:"…",off:""};
-  const sum=bad.length?`<div class="sum ${bad.some(x=>x.state==="bad")?"bad":"todo"}"><div><b>还差 ${bad.length} 步才能用</b><br><span>${bad.map(x=>esc(x.title.split("：")[0])).join("、")}</span></div><button class="btn" onclick="recheck()">再查一遍</button></div>`
-    :`<div class="sum"><div><b>都配好了，可以用</b><br><span>下面每一项都能随时改。</span></div><button class="btn" onclick="recheck()">再查一遍</button></div>`;
-  return sum+`<div class="list">${list.map(x=>`<div class="chk ${x.state}"><span class="mark">${MARK[x.state]}</span><div><div class="k">${esc(x.title)}${x.need?"":`<span class="hint" style="margin:0 0 0 8px;font-weight:400">可选</span>`}</div><div class="d">${x.text}</div></div><div class="ctl">${x.ctl||""}</div>
-      ${x.how?(x.fold?`<details class="how" ${S.howOpen===x.key?"open":""} ontoggle="S.howOpen=this.open?'${x.key}':(S.howOpen==='${x.key}'?null:S.howOpen)"><summary style="cursor:pointer;color:var(--brand);font-size:12.5px">${x.fold}</summary><div class="how" style="margin-top:8px">${x.how}</div></details>`:`<div class="how">${x.how}</div>`):""}</div>`).join("")}</div>`;
+  const ai=`<button class="btn ${bad.length?"pri":""}" onclick="copySetupPrompt()">复制给 AI 的话</button>`;
+  const sum=bad.length?`<div class="sum ${bad.some(x=>x.state==="bad")?"bad":"todo"}"><div><b>还差 ${bad.length} 步才能用</b><br><span>不用自己动手：点右边复制一段话，粘贴到你常用的 AI（Cindy、Claude、Codex、Cursor…）里发送，它会把剩下的配好。配好一项，这里就变绿一项。</span></div>${ai}</div>`
+    :`<div class="sum"><div><b>都配好了，可以用</b><br><span>以后要改什么，也可以把这段话发给你的 AI 让它来弄。</span></div>${ai}</div>`;
+  return sum+`<div class="list">${list.map(x=>`<div class="chk ${x.state}"><span class="mark">${MARK[x.state]}</span><div><div class="k">${esc(x.title)}${x.need||x.state==="ok"?"":`<span class="hint" style="margin:0 0 0 8px;font-weight:400">可选</span>`}</div><div class="d">${x.text}</div></div><div class="ctl">${x.ctl||""}</div></div>`).join("")}</div>`;
 }
 async function recheck(){ if(!LIVE) return toast("原型里不能检查"); await load(); const n=setupProblems().length; toast(n?`还差 ${n} 步`:"都配好了"); }
 const SET_PAGES={
-  check:(st,s,w)=>["配置检查","每一项现在通没通；没通的，照着做就行。",checkList()],
+  check:(st,s,w)=>["配置检查","每一项现在通没通。没通的不用自己弄，交给你的 AI。",checkList()],
   tool:(st,s,w)=>["办公工具","接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",toolPage(st,s)],
   mode:(st,s,w)=>["收到消息怎么处理","别人找你的事，要不要自动变成事项。",modePage(st,s)],
   ai:(st,s,w)=>["谁来做事","",aiPage(st,s)],
@@ -1226,7 +1221,7 @@ function slackRow(s){
 }
 function toolPage(st,s){
   const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack;
-  const feishu=!fs?setRow("飞书","没有接入。要接入，按安装说明运行一次 setup；不接也可以，事项自己新建就行。",`<span class="eng-state">未接入</span>`)
+  const feishu=!fs?setRow("我要接飞书",st.want_feishu?"还没接好。到「配置检查」复制那段话发给你的 AI，它带你接好。":"没有接入。不接也可以，事项自己新建就行。",switchCtl(!!st.want_feishu,`setSetting('want_feishu',${!st.want_feishu})`))
     :setRow("飞书","","",pushLine(s))
      +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
      +setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))
