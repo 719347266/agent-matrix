@@ -356,12 +356,7 @@ def pickup_choice(root, found=None):
 
 
 def gpt_open_choice(root, found=None):
-    from .thread import setting
-    found = found or apps()
-    chosen = setting(Path(root), "gpt_open", "here")
-    if chosen == "chatgpt" and not found.get("chatgpt"):
-        return "here"
-    return chosen if chosen in GPT_OPEN else "here"
+    return "here"   # the built-in GPT's conversation is always read in 心响 (the choice was taken away)
 
 
 def _gpt_said(root, record_id, limit=12):

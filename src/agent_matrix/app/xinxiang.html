@@ -73,6 +73,7 @@ button:disabled{opacity:.5;cursor:wait}
 .aicard .l span{color:var(--ink3)}
 
 .main{display:flex;flex-direction:column;min-width:0;overflow:auto;container-type:inline-size}
+.side,.main,.detail,.aicard,.ob,.modal .mb{scrollbar-width:none}.side::-webkit-scrollbar,.main::-webkit-scrollbar,.detail::-webkit-scrollbar,.aicard::-webkit-scrollbar,.ob::-webkit-scrollbar,.modal .mb::-webkit-scrollbar{display:none}   /* scrolls like an app: no bar on the side */
 .topbar{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:12px;padding:12px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
 .topbar h1{font-size:16px;font-weight:650;margin:0;white-space:nowrap}
 .topbar h1 .c{color:var(--ink3);font-weight:500;margin-left:6px}
@@ -1359,9 +1360,7 @@ function talkSection(st){
   const f=st.apps||{};
   return setSec("talk","","",
     setRow("接着做","在事项里点「接着做」时，默认用哪个软件打开新对话。单件事想换别的，在那件事的「AI 会话」里点「换一个 App」，不影响这里。",
-      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]],["terminal-gemini","终端 · Gemini",f["terminal-gemini"]]]))
-    +setRow("看本机 GPT 的对话","点开一段本机 GPT 对话时，在哪里显示。",
-      choice("gpt_open",st.gpt_open||"here",[["here","心响里",true],["chatgpt","ChatGPT 桌面版",f.chatgpt],["terminal","终端",f["terminal-codex"]]])));
+      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]],["terminal-gemini","终端 · Gemini",f["terminal-gemini"]]])));
 }
 function wechatRows(st,s){
   const w=s.wechat||{}, t=w.status||{}, c=S.wechatCheck;
@@ -1622,7 +1621,7 @@ function replyState(i){
 function sessionControl(s, css, label){
   if(!s.can_open) return "";
   if(s.link && /^https?:\/\//i.test(s.link)) return `<a class="${css}" href="${esc(s.link)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${label}</a>`;
-  const own=!s.local&&s.engine==="gpt"&&(D.settings||{}).gpt_open!=="chatgpt"&&(D.settings||{}).gpt_open!=="terminal";   // read here
+  const own=!s.local&&s.engine==="gpt";   // the built-in GPT's conversation is read here, in 心响
   return `<button class="${css}" data-job="${esc(s.job)}" onclick="event.stopPropagation();${own?"openTranscript(this.dataset.job)":"openSession(this.dataset.job)"}">${label}</button>`;
 }
 function sessionsTab(i){
