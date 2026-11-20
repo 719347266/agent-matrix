@@ -247,6 +247,64 @@ class ConversationTests(unittest.TestCase):
             self.assertIs(engine(root), ClaudeRun)
 
 
+    def test_dev_mode_waits_for_the_owner_before_each_asked_step(self):
+        """开发模式: the fake speaks claude's stdio permission protocol (shapes from a real run); the owner allows one
+        step and refuses the other in 心响, and each answer goes back to the same request."""
+        import threading, time
+        from unittest.mock import patch
+        from agent_matrix import approvals
+        from agent_matrix.worker import ClaudeRun
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "fake_claude.py"
+            fake.write_text(textwrap.dedent("""\
+                import json, sys, pathlib
+                prompt = json.loads(sys.stdin.readline())["message"]["content"]
+                print(json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}), flush=True)
+                seen = []
+                for rid, cmd in (("r1", "git push"), ("r2", "rm -rf build")):
+                    print(json.dumps({"type": "control_request", "request_id": rid, "request": {"subtype": "can_use_tool",
+                          "tool_name": "Bash", "input": {"command": cmd}, "description": "收尾"}}), flush=True)
+                    seen.append(json.loads(sys.stdin.readline())["response"])
+                pathlib.Path("seen.json").write_text(json.dumps({"prompt": prompt, "answers": seen, "args": sys.argv[1:]}))
+                print(json.dumps({"type": "result", "result": "完", "usage": {}}), flush=True)
+                sys.stdin.read()   # exits only once the driver closes stdin
+                """))
+            root, work = Path(tmp) / "root", Path(tmp) / "work"
+            work.mkdir()
+            guard = {"root": root, "mode": "risky", "record_id": "rec1"}
+
+            def owner():
+                answered = set()
+                for _ in range(200):
+                    for a in approvals.pending(root):
+                        approvals.decide(root, a["id"], a["what"] == "git push", "别删")
+                        answered.add(a["id"])
+                    if len(answered) == 2:
+                        return
+                    time.sleep(0.05)
+            threading.Thread(target=owner, daemon=True).start()
+            original_argv = ClaudeRun.argv
+            with patch.object(ClaudeRun, "argv", lambda run: [sys.executable, str(fake), *original_argv(run)[1:]]):
+                run = ClaudeRun(Config(worker_claude=str(fake)), work, guard=guard, timeout_minutes=1).run("开始")
+            self.assertFalse(run.timed_out)
+            seen = json.loads((work / "seen.json").read_text())
+            self.assertEqual(seen["prompt"], "开始")
+            allow, deny = seen["answers"]
+            self.assertEqual((allow["request_id"], allow["response"]["behavior"], allow["response"]["updatedInput"]),
+                             ("r1", "allow", {"command": "git push"}))
+            self.assertEqual((deny["request_id"], deny["response"]["behavior"]), ("r2", "deny"))
+            self.assertIn("别删", deny["response"]["message"])
+            args = seen["args"]
+            self.assertEqual(args[args.index("--permission-mode") + 1], "default")
+            self.assertIn("--permission-prompt-tool", args)
+            settings = json.loads(args[args.index("--settings") + 1])
+            self.assertIn("Bash(git push:*)", settings["permissions"]["ask"])
+            self.assertFalse(settings["sandbox"]["autoAllowBashIfSandboxed"])   # sandboxed Bash would skip the ask
+            every = ClaudeRun(Config(worker_claude=str(fake)), work, guard={**guard, "mode": "every"}).argv()
+            self.assertNotIn("--allowedTools", every)                            # nothing pre-allowed
+            self.assertEqual(approvals.pending(root), [])
+
+
 class CardTests(unittest.TestCase):
     def test_tapped_button_becomes_a_result_line(self):
         from agent_matrix.brief_v1 import _block, _row_item, card

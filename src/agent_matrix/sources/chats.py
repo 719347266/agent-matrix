@@ -3,7 +3,10 @@
 Reads the owner's most active chats as the owner (user identity), and keeps only lines
 that can be about the owner's work:
   - the owner commits to something ("我来" "明天给你" "我跟进"),
-  - someone asks the owner (@ / nickname / in a private chat) with a request or a time.
+  - someone talks to the owner: anything in a private chat, or a group line that @-s or names the owner,
+  - a reply to something the owner posted, or an @all / @here notice (the owner is one of "all").
+Whether that person actually wants something is the model's call, not a word list: "这个弹窗只展示一点"
+has no ask word and is still a request. Code only drops pure small talk ("好的" "哈哈" "👍").
 Everything else never leaves the machine. The model only reads the kept lines, in batches.
 """
 from datetime import datetime, timedelta
@@ -12,11 +15,8 @@ import re
 
 COMMIT = re.compile(r"我来|我去|我会|我负责|我晚点|我稍后|我待会|我明天|我今天|我这边|回头(我)?(发|给|弄|看|整理)|"
                     r"我跟进|我处理|我整理|我弄|我改|我补|我出|包在我|交给我|收到[，,。！!]?我")
-ASK = re.compile(r"麻烦|帮忙|帮我|帮看|能不能|可不可以|可以.{0,10}吗|需要你|请你|辛苦|尽快|抓紧|跟进|确认一下|"
-                 r"看一下|过一下|反馈|评审|审核|ddl|DDL|deadline|截止|之前(给|发|交|完成|出)|记得|别忘")
-WHEN = re.compile(r"今天|今晚|明天|后天|周[一二三四五六日天]|下周|本周|这周|月底|\d{1,2}[:：点]\d{0,2}|\d{1,2}月\d{1,2}|\d{1,2}[./-]\d{1,2}")
-# In a private chat most asks are casual: "借我登一下" "账号密码有吗" "加好了和我说一下".
-P2P_ASK = re.compile(r"[?？]|https?://|吗|一下|借我|给我|和我说|告诉我|跟我说|好了没|怎么样了|进展")
+# Nothing but an acknowledgement, a laugh, emoji or punctuation: never a request.
+SMALL_TALK = re.compile(r"^(?:好的?|好嘞|好滴|行|收到|嗯+|哦+|噢+|ok(?:ay)?|谢谢|感谢|多谢|thx|thanks|哈+|呵+|嘿+|:[\w+-]+:|[\W_])*$", re.I)
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
 MAX_CHATS = 25
 
@@ -26,8 +26,13 @@ def table(state):
 
 
 def skipped_chat(config, name):
-    """Built-in noise (bots, notices) or a chat the owner chose to ignore on the 系统 page."""
-    return bool(SKIP_CHAT.search(name)) or any(w and w.lower() in name.lower() for w in config.chat_skip_chats)
+    """Built-in noise (bots, notices): never read."""
+    return bool(SKIP_CHAT.search(name))
+
+
+def muted_chat(config, name):
+    """A chat the owner chose to ignore on the 系统 page: only someone @-ing the owner still gets through."""
+    return any(w and w.lower() in name.lower() for w in config.chat_skip_chats)
 
 
 def skipped_text(config, text):
@@ -53,22 +58,42 @@ def _text(message):
     return " ".join(str(body or "").split())
 
 
-def classify(text, *, from_owner, chat_mode, names, mentioned=False):
-    """Which kind of candidate this line is, or None to drop it."""
+def classify(text, *, from_owner, chat_mode, names, mentioned=False, replied=False, broadcast=False):
+    """Which kind of candidate this line is, or None to drop it. A muted chat keeps only "@你"."""
     if from_owner:
         return "我的承诺" if len(text) >= 6 and COMMIT.search(text) else None
     if mentioned:  # @you in a group: always worth a look, however short ("@你 人生模拟器反馈")
         return "@你" if len(re.sub(r"@\S+", "", text).strip()) >= 2 else None
-    if len(text) < 6:
+    if SMALL_TALK.match(text):
         return None
-    to_owner = chat_mode == "p2p" or any(w in text for w in names)
-    if to_owner and (ASK.search(text) or WHEN.search(text) or (chat_mode == "p2p" and P2P_ASK.search(text))):
+    # Talking to the owner is enough; whether they want something is for the model to judge.
+    if chat_mode == "p2p" or any(w in text for w in names):
         return "找你的"
-    return None
+    return "回你的" if replied else "全员" if broadcast else None
+
+
+MINE_KEEP = 300
+
+
+def remember_mine(state, key, message_id):
+    """The owner's own recent messages, so a reply to one of them is known to be for the owner.
+    ponytail: only what was seen since this started; a thread the owner opened before that is not known."""
+    state.set(key, [*state.get(key, []), message_id][-MINE_KEEP:])
+
+
+def recent_lines(state, key):
+    """The last lines seen in a chat, kept across polls: with a poll every minute, the line before is often
+    in the previous poll, and a kept line without it ("just a link") means nothing to the model."""
+    return list(state.get(key, []))[-2:]
 
 
 def mentions_owner(message, owner_open_id):
     return any(m.get("id") == owner_open_id for m in message.get("mentions") or [] if isinstance(m, dict))
+
+
+def mentions_all(message):
+    return any(m.get("id") in ("all", "@_all") or m.get("key") == "@_all"
+               for m in message.get("mentions") or [] if isinstance(m, dict)) or "@_all" in str(message.get("content") or "")
 
 
 def poll(config, client, state, now, *, skip_chat_ids=()):
@@ -83,12 +108,15 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         cid, cname = chat.get("chat_id"), str(chat.get("name") or "")
         if not cid or cid in exclude or skipped_chat(config, cname):
             continue
+        muted = muted_chat(config, cname)
         cursor_key = "chats:cursor:" + cid
         since = state.get(cursor_key) or (now - timedelta(hours=2)).isoformat()
         got = client._exec(["im", "+chat-messages-list", "--chat-id", cid, "--start", since, "--end", now.isoformat(),
                             "--order", "asc", "--no-reactions", "--as", "user", "--format", "json"])
         messages = got.get("messages") or got.get("items") or []
-        history = []
+        history_key = "chats:recent:" + cid
+        history = recent_lines(state, history_key)
+        mine = set(state.get("chats:mine", []))
         for m in messages:
             sender = m.get("sender") or {}
             text = _text(m)
@@ -97,9 +125,14 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
                 continue
             scanned += 1
             from_owner = sender.get("id") == config.owner_open_id
+            if from_owner:
+                remember_mine(state, "chats:mine", m.get("message_id"))
+                mine.add(m.get("message_id"))
             kind = classify(text, from_owner=from_owner, chat_mode=chat.get("chat_mode"), names=names,
-                            mentioned=not from_owner and mentions_owner(m, config.owner_open_id))
-            if kind:
+                            mentioned=not from_owner and mentions_owner(m, config.owner_open_id),
+                            replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
+                            broadcast=mentions_all(m))
+            if kind and (not muted or kind == "@你"):
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
                     m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
                     "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],
@@ -107,6 +140,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
                 kept += 1
             history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
         state.db.commit()
+        state.set(history_key, history[-2:])
         state.set(cursor_key, now.isoformat())
     if kept:
         from .. import activity

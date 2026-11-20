@@ -199,6 +199,9 @@ def build_state(root):
     settings["engine_sort"] = thread.setting(root, "engine_sort", settings["engine"] if settings["engine"] != "cindy" else "codex")
     settings["pickup_buddy"] = (root / "state/cindy-pickup.json").is_file()
     settings["cindy_project"] = thread.setting(root, "cindy_project", "")
+    from . import approvals
+    settings["dev_mode"] = approvals.mode(root)
+    waiting = [{**a, "n": n_of.get(a.get("record_id"))} for a in approvals.pending(root)]
     try:
         from . import local_sessions
         settings["cindy"] = local_sessions.cindy_status(root)
@@ -237,7 +240,7 @@ def build_state(root):
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
-            "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external,
+            "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
             "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}, "bugs": _bugs(root)}
 
 
@@ -590,6 +593,10 @@ class Handler(BaseHTTPRequestHandler):
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 return self._send(200, {"ok": True})
+            if path == "/api/approval":
+                from . import approvals
+                ok = approvals.decide(root, str(body.get("id") or ""), bool(body.get("allow")), body.get("note"))
+                return self._send(200 if ok else 400, {"ok": ok, "reply": "" if ok else "这一步已经不在等了（AI 那一轮可能已结束）"})
             if path == "/api/backup/retry":
                 from . import itemstore
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
@@ -599,6 +606,9 @@ class Handler(BaseHTTPRequestHandler):
                 ai_names = {aidrivers.setting_of(d["name"]) for d in aidrivers.known(root)}
                 if body.get("engine") in {"codex", "claude", "gemini", "cindy"} | ai_names:
                     thread.set_setting(root, "engine", body["engine"])
+                from . import approvals
+                if body.get("dev_mode") in approvals.MODES:
+                    thread.set_setting(root, "dev_mode", body["dev_mode"])
                 for want in ("want_feishu", "want_slack", "want_wechat"):   # the owner means to connect it: the setup check then says how
                     if want in body:
                         thread.set_setting(root, want, bool(body[want]))

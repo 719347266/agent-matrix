@@ -154,17 +154,25 @@ def run_item_job(root, config, job):
                  stage="找背景", step="读任务单和背景", item_started=now().isoformat(timespec="seconds"),
                  stage_at=now().isoformat(timespec="seconds"))
     Run = item_engine(root, item.rid)
+    from . import approvals
+    mode = approvals.mode(root)
+    if mode != "off" and Run is not ClaudeRun:
+        # codex exec cannot stop mid-turn to ask, so in 开发模式 GPT does not touch items at all
+        item.defer("开发模式开着：只有本机 Claude 能每步等你批准。到「设置 → AI 执行」把做事换成本机 Claude，或关掉开发模式", 0)
+        drive._close(root, drive.get(root, job["id"]), "released")
+        return {"status": "deferred"}
+    guard = {"root": Path(root), "mode": mode, "record_id": item.rid} if mode != "off" else None
     thread_file, timed = item.workdir / Run.THREAD_FILE, item.workdir / ".timed_out"
     thread = thread_file.read_text().strip() if thread_file.is_file() else None
     prompt, seen, result = (job["builtin_prompt"] if thread else job["instructions"]), {}, {}
     stop = lambda: drive.get(root, job["id"])["status"] != "open"
     for _ in range(MAX_FIX_ROUNDS + 1):
-        run = Run(config, item.workdir, thread=thread).run(prompt, on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
+        run = Run(config, item.workdir, thread=thread, guard=guard).run(prompt, on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
         if not run.stopped and not stop() and thread and not run.messages and not run.timed_out and run.returncode:
             # the old conversation cannot be resumed: start a new one, the history comes with the instructions
             thread_file.unlink(missing_ok=True)
             thread = None
-            run = Run(config, item.workdir).run(job["instructions"], on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
+            run = Run(config, item.workdir, guard=guard).run(job["instructions"], on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
         if run.stopped or stop():
             item.release()
             from .prework import add_note

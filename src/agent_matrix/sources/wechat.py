@@ -18,7 +18,7 @@ import shutil
 import subprocess
 
 from ..models import MatrixError
-from .chats import classify, owner_words, skipped_chat, skipped_text
+from .chats import classify, muted_chat, owner_words, recent_lines, skipped_chat, skipped_text
 
 MAX_CHATS_PER_ROUND = 4
 LINE = re.compile(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d)(?::\d\d)?\] (.*?): (.*)$", re.S)
@@ -104,7 +104,9 @@ def store(config, root, state, now, read):
     kept = scanned = 0
     for chat in read["chats"]:
         mode, cname = ("group" if chat["group"] else "p2p"), "微信 · " + chat["name"]
-        history = []
+        muted = muted_chat(config, chat["name"])   # a chat the owner muted: only someone @-ing them gets through
+        history_key = "wechat:recent:" + chat["id"]
+        history = recent_lines(state, history_key)
         for raw in chat["lines"]:
             found = LINE.match(str(raw))
             if not found:
@@ -120,13 +122,14 @@ def store(config, root, state, now, read):
             mine = names | ({me} if len(me) >= 2 else set())
             kind = classify(text, from_owner=from_owner, chat_mode=mode, names=mine,
                             mentioned=not from_owner and any("@" + w in text for w in mine))
-            if kind:
+            if kind and (not muted or kind == "@你"):
                 mid = "wechat:" + sha1(f"{chat['id']}|{sent}|{sender}|{text}".encode("utf-8")).hexdigest()[:24]
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
                     mid, chat["id"], cname, mode, sender, "我" if from_owner else sender, sent, text[:500],
                     json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
                 kept += state.db.execute("SELECT changes()").fetchone()[0]
             history.append(f"{'我' if from_owner else sender}：{text[:120]}")
+        state.set(history_key, history[-2:])
         state.set("wechat:cursor:" + chat["id"], chat["upto"])
     state.db.commit()
     if kept:

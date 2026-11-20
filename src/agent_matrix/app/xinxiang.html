@@ -516,7 +516,7 @@ async function load(){
   catch(e){ if(seq!==loadSequence)return; failing=true; }
   if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item or the inbox
   clearTimeout(refreshTimer);
-  refreshTimer=setTimeout(load,commands().some(waiting)?1500:8000);
+  refreshTimer=setTimeout(load,commands().some(waiting)||(D&&D.approvals||[]).length?1500:8000);
 }
 /* while the window is open, new things say so instead of waiting to be found */
 function announce(){
@@ -1295,7 +1295,11 @@ function aiPage(st,s){
    +setSec("run","做事","",
     setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。来登记过的 AI 会出现在这里，也可以手动换。某一件想换，在那件事里改「哪个 AI」。",
       choice("engine",st.engine||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
-    +(useCindy?cindyRows(cindy):""))
+    +(useCindy?cindyRows(cindy):"")
+    +setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
+        every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
+      +(st.dev_mode&&st.dev_mode!=="off"&&st.engine!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
+      choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])))
    +setSec("sort","整理","",setRow("谁来整理",`从会议和聊天里找待办、判断新进来的事。${sortCindy?"Cindy 每 5 分钟来领一次，所以会议和聊天会晚几分钟才整理出来。":""}`,choice("engine_sort",st.engine_sort||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
     +(sortCindy&&!useCindy?cindyRows(cindy):""))
    +setSec("conn","连接状态","",used.map(e=>engineRow(e,st,found[e])).join(""));
@@ -1404,9 +1408,9 @@ function pushLine(s){
 }
 function filterRow(r){
   const skipC=r.skip_chats||[], skipW=r.skip_words||[], pick=(r.recent_chats||[]).filter(n=>!skipC.some(w=>n.includes(w))).slice(0,12);
-  return setRow("不想看的","群名或消息里带这些字的直接跳过，一行一个。",`<button class="btn pri" onclick="saveFilters()">保存过滤</button>`,
-    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="hint" style="margin:0 0 4px">屏蔽的群</div><textarea id="skipchats" rows="3" data-draft="skip-chats" placeholder="群名里的字" style="width:100%">${esc(skipC.join("\n"))}</textarea></div>
-     <div><div class="hint" style="margin:0 0 4px">跳过的消息</div><textarea id="skipwords" rows="3" data-draft="skip-words" placeholder="消息里的字" style="width:100%">${esc(skipW.join("\n"))}</textarea></div></div>
+  return setRow("不想看的","名字里含这些字的群只收 @你 的消息；消息里原样出现这些字就跳过（逐字匹配，不按意思判断）。飞书和 Slack 都管用，一行一个。",`<button class="btn pri" onclick="saveFilters()">保存过滤</button>`,
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="hint" style="margin:0 0 4px">屏蔽的群</div><textarea id="skipchats" rows="3" data-draft="skip-chats" placeholder="例：bot-loyalty&#10;all-member" style="width:100%">${esc(skipC.join("\n"))}</textarea></div>
+     <div><div class="hint" style="margin:0 0 4px">跳过的消息</div><textarea id="skipwords" rows="3" data-draft="skip-words" placeholder="例：Issue created&#10;部署通知" style="width:100%">${esc(skipW.join("\n"))}</textarea></div></div>
      ${pick.length?`<div class="chips" style="margin:6px 0 0">${pick.map(n=>`<button class="chip" onclick="addSkipChat(${esc(JSON.stringify(n.replace(/^Slack · /,"")))})">+ ${esc(n)}</button>`).join("")}</div>`:""}`);
 }
 function dataSection(s){
@@ -1870,6 +1874,21 @@ function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openM
 const NAV_OF={inbox:"today",todo:"today",doing:"today",done:"all"};   // pages that are reached from another one
 const TITLES={today:"今天",inbox:"全部消息",todo:"等我处理",doing:"进行中",done:"已完成",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
+/* 开发模式: steps the AI is waiting on you for, shown above every page */
+function approvalView(){
+  const list=(D&&D.approvals)||[];
+  if(!list.length) return "";
+  return `<div class="sec-h">等你批准<span class="n">${list.length}</span><span class="aside">开发模式：AI 停在这一步</span></div><div class="list">${list.map(a=>`<div class="set-row"><div style="min-width:0">
+    <div class="k">${a.n?`#${a.n} `:""}${esc(a.tool||"")}${a.why?`　<span class="hint" style="margin:0;font-weight:400">${esc(a.why)}</span>`:""}</div>
+    <pre style="white-space:pre-wrap;word-break:break-all;margin:6px 0 0">${esc(a.what||"")}</pre></div>
+    <div class="ctl"><button class="btn pri" onclick="decide('${a.id}',true)">批准</button><button class="btn" onclick="decide('${a.id}',false)">不行</button></div></div>`).join("")}</div>`;
+}
+async function decide(id, allow){
+  const note=allow?"":(prompt("告诉 AI 为什么不行（可留空）")||"");
+  D.approvals=(D.approvals||[]).filter(a=>a.id!==id); render();
+  try{ await api("/api/approval",{id,allow,note}); toast(allow?"已批准，AI 继续":"已拒绝，AI 会换个做法或停下问你"); }catch(e){ toast(e.message||"没提交成功"); }
+  load();
+}
 function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
 function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
 function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
@@ -1905,7 +1924,7 @@ function render(){
   const count={today:todayCount(),inbox:unreadCount(),todo:D.items.filter(needsYou).length}[S.view];
   putHTML("#ttl",esc(title)+(!S.q&&!solo&&count?`<span class="c">${count}</span>`:""));
   const page=S.q?searchPage:{today:todayPage,inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
-  let changed=putHTML("#main",solo?`<div class="solo">${itemView(item)}</div>`:page());
+  let changed=putHTML("#main",approvalView()+(solo?`<div class="solo">${itemView(item)}</div>`:page()));
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
   changed=putHTML("#adder",S.adding?addView():S.moving?moveView():S.bugging?bugView():"")||changed;

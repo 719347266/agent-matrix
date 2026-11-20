@@ -79,6 +79,12 @@ class WeChatTests(unittest.TestCase):
         wechat.store(self.config, self.root, self.state, NOW, wechat.collect(self.config, {}, NOW, run=fake()))
         self.assertEqual(len(pending(self.state)), before)
 
+    def test_a_muted_group_keeps_only_mentions(self):
+        config = self.config.model_copy(update={"chat_skip_chats": ["产品"]})
+        wechat.store(config, self.root, self.state, NOW, wechat.collect(config, {}, NOW, run=fake()))
+        groups = {m["text"] for m in pending(self.state) if m["chat_mode"] == "group"}
+        self.assertEqual(groups, {"@王小明 周五前把定价方案发群里"})
+
     def test_when_the_records_cannot_be_read_the_last_message_still_counts(self):
         read = wechat.collect(self.config, {}, NOW, run=fake(history=None))
         self.assertEqual(read["behind"], 2)

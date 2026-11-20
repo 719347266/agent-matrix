@@ -25,11 +25,18 @@ class ChatFilterTests(unittest.TestCase):
         self.assertIsNone(keep("今天天气不错，大家辛苦了", from_owner=True))
         self.assertEqual(keep("小王，周五前帮忙看下这个需求"), "找你的")
         self.assertIsNone(keep("周五前帮忙看下这个需求"))            # group line not addressed to the owner
+        self.assertEqual(keep("试了一下还是超时", replied=True), "回你的")   # a reply to the owner's post
+        self.assertEqual(keep("今晚 10 点封版", broadcast=True), "全员")
+        self.assertIsNone(keep("好的", replied=True))
+        self.assertEqual(keep("小王 这个页面样式错位了"), "找你的")   # named, no ask word: the model decides
         self.assertEqual(keep("能不能明天把数据发我", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("哈哈哈哈哈好", chat_mode="p2p"))
         self.assertEqual(keep("哥们，你们超管后台借我登一下", chat_mode="p2p"), "找你的")  # casual private asks
         self.assertEqual(keep("兄弟，加好了和我说一下", chat_mode="p2p"), "找你的")
-        self.assertIsNone(keep("你的头像哈哈哈哈哈哈", chat_mode="p2p"))
+        self.assertEqual(keep("网页比例100%时弹窗只展示一点", chat_mode="p2p"), "找你的")  # a report, no ask word
+        self.assertEqual(keep("在吗", chat_mode="p2p"), "找你的")
+        for chat in ("好的👍", "收到！", "哈哈哈", ":thumbsup:", "ok", "。。。"):
+            self.assertIsNone(keep(chat, chat_mode="p2p"), chat)
         self.assertEqual(keep("<http://dreame-netherlands.myshopify.com|dreame-netherlands.myshopify.com>", chat_mode="p2p"), "找你的")
         self.assertIsNone(keep("嗯嗯"))
 
@@ -53,6 +60,29 @@ class ChatReviewTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         fields = chat_fields(CONFIG, *kept[0])
         self.assertEqual((fields["执行方"], fields["状态"], fields["来源"]), (["我"], ["未开始"], ["聊天"]))
+
+    def test_every_private_line_needs_a_decision_and_is_kept_at_any_confidence(self):
+        from agent_matrix.chat_review import ChatSkip
+        folder = self.root / "state/chat-batches/b2"; folder.mkdir(parents=True)
+        dm = {"chat_id": "D1", "chat_name": "Slack · cara", "chat_mode": "p2p", "sender_id": "U1", "sender_name": "cara",
+              "sent_at": "2026-11-19 18:50", "context": "[]", "kind": "找你的"}
+        messages = [{**dm, "message_id": "m1", "text": "网页比例100%时，这个会员弹窗只能展示一点出来"},
+                    {**dm, "message_id": "m2", "text": "<http://dreame-us.myshopify.com|dreame-us.myshopify.com>"},
+                    {**dm, "message_id": "m3", "chat_id": "D2", "text": "哈哈你那天说的店我去了"}]
+        (folder / "candidates.json").write_text(json.dumps({"batch_id": "b2", "messages": messages}, ensure_ascii=False))
+        fix = ChatAction(message_id="m1", title="会员弹窗 100% 缩放只露一点", quote="这个会员弹窗只能展示一点出来",
+                         commitment_phrase="这个会员弹窗只能展示一点出来", owner_name="王小明", confidence=0.5)
+        rest = [ChatSkip(message_id="m2", kind="并入另一条", why="同一个弹窗问题的店铺链接"),
+                ChatSkip(message_id="m3", kind="闲聊", why="聊去过的店")]
+        kept = validate(CONFIG, ChatReview(batch_id="b2", actions=[fix], skipped=rest), self.root)
+        self.assertEqual([a.message_id for a, _ in kept], ["m1"])          # 0.5 is kept: it was written to the owner
+        with self.assertRaisesRegex(MatrixError, "没有结论"):                 # silently left out
+            validate(CONFIG, ChatReview(batch_id="b2", actions=[fix], skipped=rest[1:]), self.root)
+        with self.assertRaisesRegex(MatrixError, "并入另一条"):               # nothing in that chat to go into
+            validate(CONFIG, ChatReview(batch_id="b2", skipped=[*rest, ChatSkip(message_id="m1", kind="闲聊", why="x")]),
+                     self.root)
+        with self.assertRaises(ValueError):                                 # only the listed kinds
+            ChatSkip(message_id="m3", kind="不重要", why="x")
 
     def test_guesses_are_rejected_and_low_confidence_dropped(self):
         for bad in ({"quote": "没说过的话"}, {"commitment_phrase": "我来负责"}, {"owner_name": "李大伟"}):
@@ -371,7 +401,7 @@ class SlackSourceTests(unittest.TestCase):
         finally:
             state.close()
 
-    def test_skipped_chats_and_words_are_not_read(self):
+    def test_muted_chats_keep_only_mentions_and_words_are_skipped(self):
         from agent_matrix.sources import slack
         from agent_matrix.state import State
         root = Path(tempfile.mkdtemp())
@@ -382,16 +412,80 @@ class SlackSourceTests(unittest.TestCase):
                 return {"user": {"profile": {"display_name": "大山"}}}
             return {"messages": {"matches": [
                 {"ts": "1795000000.000100", "user": "UX", "text": "<@UME> 帮忙看下", "channel": {"id": "C1", "name": "bot-loyalty-alerts"}},
+                {"ts": "1795000000.000200", "user": "UX", "text": "<@UME> 优化一下这个", "channel": {"id": "C3", "name": "team-rd5-dev"}},
+                {"ts": "1795000000.000300", "user": "UX", "text": "YuHao Lin 今天能看下这个吗", "channel": {"id": "C3", "name": "team-rd5-dev"}},
                 {"ts": "1795000001.000100", "user": "UX", "text": "<@UME> Issue created 帮忙看下", "channel": {"id": "C2", "name": "team-dev"}},
                 {"ts": "1795000002.000100", "user": "UX", "text": "<@UME> 帮忙看下这个需求", "channel": {"id": "C2", "name": "team-dev"}}],
                 "paging": {"pages": 1}}}
         state = State(root / "state.db")
         try:
-            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["Loyalty"], chat_skip_words=["issue created"])
+            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["RD5"], chat_skip_words=["issue created"])
             out = slack.poll(config, root, state, datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
-            self.assertEqual(out["candidates"], 1)   # the muted channel and the muted words are skipped, case-insensitive
-            text, = state.db.execute("SELECT text FROM chat_candidates").fetchone()
-            self.assertIn("这个需求", text)
+            # bot channels are never read; a muted channel keeps only real @-mentions; muted words skip, case-insensitive
+            texts = sorted(t for t, in state.db.execute("SELECT text FROM chat_candidates"))
+            self.assertEqual(out["candidates"], 2)
+            self.assertEqual(texts, ["@YuHao Lin 优化一下这个", "@YuHao Lin 帮忙看下这个需求"])
+        finally:
+            state.close()
+
+    def test_private_report_with_screenshots_is_kept_and_context_survives_polls(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        dm = {"id": "D1", "name": "cara", "is_im": True}
+        rounds = [[{"ts": "1795000000.000100", "user": "UX", "subtype": "file_share", "text": "截图在这", "channel": dm},
+                   {"ts": "1795000000.000200", "user": "UX", "text": "网页比例100%时，这个会员弹窗只能展示一点出来", "channel": dm}],
+                  [{"ts": "1795000060.000100", "user": "UX", "text": "<http://dreame-us.myshopify.com|dreame-us.myshopify.com>", "channel": dm}]]
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "cara"}}}
+            return {"messages": {"matches": rounds.pop(0) if rounds else [], "paging": {"pages": 1}}}
+        state = State(root / "state.db")
+        try:
+            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin")
+            slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
+            slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
+            rows = {t: json.loads(c) for t, c in state.db.execute("SELECT text, context FROM chat_candidates")}
+            # a bug report in a DM has no ask words but is kept; the picture's caption is read
+            self.assertIn("网页比例100%时，这个会员弹窗只能展示一点出来", rows)
+            self.assertEqual(rows["网页比例100%时，这个会员弹窗只能展示一点出来"], ["cara：截图在这"])
+            # the next poll still sees what came just before
+            self.assertEqual(rows["<http://dreame-us.myshopify.com|dreame-us.myshopify.com>"],
+                             ["cara：截图在这", "cara：网页比例100%时，这个会员弹窗只能展示一点出来"])
+        finally:
+            state.close()
+
+    def test_replies_to_the_owner_and_channel_notices_are_kept_unless_muted(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        dev, noisy = {"id": "C1", "name": "dev"}, {"id": "C2", "name": "bot-free-noise"}
+        def thread_link(c, ts, root_ts):
+            return f"https://acme.slack.com/archives/{c}/p{ts.replace('.', '')}?thread_ts={root_ts}&cid={c}"
+        rounds = [[{"ts": "1795000000.000100", "user": "UME", "text": "导出功能今天上 dev 了", "channel": dev},
+                   {"ts": "1795000000.000200", "user": "UME", "text": "噪音群里我也发一句", "channel": noisy}],
+                  [{"ts": "1795000060.000100", "user": "UX", "text": "试了一下，还是超时",
+                    "permalink": thread_link("C1", "1795000060.000100", "1795000000.000100"), "channel": dev},
+                   {"ts": "1795000060.000200", "user": "UX", "text": "<!here> 今晚 10 点封版", "channel": dev},
+                   {"ts": "1795000060.000300", "user": "UX", "text": "午饭吃啥", "channel": dev},
+                   {"ts": "1795000060.000400", "user": "UX", "text": "收到，我也看看",
+                    "permalink": thread_link("C2", "1795000060.000400", "1795000000.000200"), "channel": noisy},
+                   {"ts": "1795000060.000500", "user": "UX", "text": "<!channel> 例行通知", "channel": noisy}]]
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "大山"}}}
+            return {"messages": {"matches": rounds.pop(0) if rounds else [], "paging": {"pages": 1}}}
+        state = State(root / "state.db")
+        try:
+            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["noise"])
+            slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
+            slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
+            kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))
+            self.assertEqual(kinds, {"试了一下，还是超时": "回你的", "@here 今晚 10 点封版": "全员"})
         finally:
             state.close()
 

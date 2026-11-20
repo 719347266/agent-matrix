@@ -5,8 +5,9 @@
     python -m agent_matrix.chat_review validate --review <batch>/review.json
     python -m agent_matrix.chat_review publish  --review <batch>/review.json
 
-Same strict rules as meetings: a task needs the exact words of commitment, the owner must
-be the sender or be named in the line, dates only when written. No task → no message.
+Quotes must be the message's own words, the owner must be the sender, named, or the one written to
+privately, dates only when written. A candidate the model does not take goes in `skipped` with a kind;
+a private message is never left out silently (see _every_private_line_decided). No task → no message.
 """
 import argparse
 from datetime import datetime, time, timedelta
@@ -48,10 +49,23 @@ class ChatAction(BaseModel):
     accepted_quote: str | None = Field(default=None, max_length=80)
 
 
+# Why a candidate is not an item. Not taking a line means saying which of these it is; a private message that
+# fits none of them is someone asking the owner for something, so it becomes an item.
+SKIP_KINDS = ("闲聊", "表态", "无关通知", "已办完", "点了别人", "同事的活", "并入另一条")
+
+
+class ChatSkip(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message_id: str
+    kind: Literal[SKIP_KINDS]
+    why: str = Field(min_length=1, max_length=40)
+
+
 class ChatReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     batch_id: str
     actions: list[ChatAction] = Field(default_factory=list)
+    skipped: list[ChatSkip] = Field(default_factory=list)
 
 
 def _times(config):
@@ -205,9 +219,35 @@ def validate(config, review, root):
         if (getattr(config, "intake_mode", "all") == "accepted" and a.owner_name == config.owner_name
                 and not owner_accepted(config, a, m)):
             continue  # 全自动: asked of the owner but not taken on by them, so it is not an item
-        if a.confidence >= MIN_CONFIDENCE:
+        # A private message is someone talking to the owner: no "宁可漏" there, any confidence is kept.
+        if a.confidence >= MIN_CONFIDENCE or private(m):
             kept.append((a, m))
+    _every_private_line_decided(review, batch, by_id)
     return kept
+
+
+def private(m):
+    return m.get("chat_mode") == "p2p" and m.get("sender_name") != "我"
+
+
+def _every_private_line_decided(review, batch, by_id):
+    """Someone wrote to the owner directly: such a line is never dropped in silence. Each one is an item or is
+    in `skipped` with a reason kind; "并入另一条" needs an item from the same chat in this batch to go into."""
+    for s in review.skipped:
+        if s.message_id not in by_id:
+            raise MatrixError(f"skipped 里的 {s.message_id} 不在本批里。")
+    acted = {a.message_id for a in review.actions}
+    chats_with_item = {by_id[i]["chat_id"] for i in acted if i in by_id}
+    for s in review.skipped:
+        m = by_id[s.message_id]
+        if s.kind == "并入另一条" and private(m) and m["chat_id"] not in chats_with_item:
+            raise MatrixError(f"私聊「{m['text'][:30]}」写了并入另一条，但这个私聊在本批里没有提取任何待办；"
+                              "它说的事要么提取成待办，要么换成别的类别。")
+    decided = acted | {s.message_id for s in review.skipped}
+    missing = [m for m in batch["messages"] if private(m) and m["message_id"] not in decided]
+    if missing:
+        lines = "；".join(f"{m['message_id']}（{m['sender_name']}：{m['text'][:30]}）" for m in missing[:5])
+        raise MatrixError(f"这几条私聊没有结论：{lines}。私聊的每一条要么提取成待办，要么写进 skipped 并选一个类别。")
 
 
 def task_fields(config, a, m):
@@ -303,7 +343,8 @@ def main(argv=None):
                 review = ChatReview.model_validate_json(args.review.read_text())
                 if args.command == "validate":
                     kept = validate(config, review, root)
-                    print(js({"ok": True, "actions": len(kept), "dropped_low_confidence": len(review.actions) - len(kept)})); return 0
+                    print(js({"ok": True, "actions": len(kept), "skipped": len(review.skipped),
+                              "dropped_low_confidence": len(review.actions) - len(kept)})); return 0
                 client = Feishu(config, root); client.verify_owner(client.auth())
                 print(js(publish(config, client, state, review))); return 0
             finally:
