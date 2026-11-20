@@ -147,7 +147,14 @@ node tests/test_client.cjs && node tests/test_client_live.cjs    # 页面交互�
 
 ## Windows
 
-需要 Windows 10/11、Python 3.11+、Node.js，以及已登录的 `lark-cli`（`npm install -g @larksuite/cli`，再运行 `lark-cli auth login`）。
+**安装包（推荐）**：到 [Releases](https://github.com/MILESMAKMAK/agent-matrix/releases/latest) 下载 `Xinxiang-Setup-<版本>.exe`，双击安装，不需要另外装 Python，也不用开终端。装完心响会自己打开，并待在任务栏右下角的托盘里；数据放在 `%LOCALAPPDATA%\Xinxiang`，卸载不会删。
+
+- 刚装好就能用：事项存在本机，在心响里点「＋ 新建事项」自己加。
+- 要让 AI 做事、要接飞书或 Slack：打开「设置 → 配置检查」，每一项没通的都写了下一步，命令可以直接复制。
+- 安装包没有代码签名，Windows 可能提示“已保护你的电脑”，点“更多信息 → 仍要运行”。
+- 自己构建：在 Windows 上运行 `powershell -ExecutionPolicy Bypass -File windows\build.ps1`（装了 Inno Setup 6 会顺带生成安装包），`windows\smoke.ps1` 会用全新的数据目录试运行一遍。
+
+**从源码安装（开发用）**：需要 Windows 10/11、Python 3.11+、Node.js，以及已登录的 `lark-cli`（`npm install -g @larksuite/cli`，再运行 `lark-cli auth login`）。
 
 ```powershell
 git clone https://github.com/MILESMAKMAK/agent-matrix.git
