@@ -25,6 +25,10 @@ function Get-State {
 }
 function Fail([string]$why) {
     Write-Host "FAILED: $why"
+    try { Write-Host ("update status: " + ((Get-State).system.update | ConvertTo-Json -Compress)) } catch { Write-Host "state unreadable: $_" }
+    Get-ChildItem $env:TEMP -Filter "Xinxiang-Setup*" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "downloaded: $($_.Name) $($_.Length) bytes" }
+    Get-ChildItem $env:TEMP -Filter "Setup Log*" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "---- $($_.Name)"; Get-Content $_.FullName -Tail 30 }
+    Get-CimInstance Win32_Process | Where-Object { $_.Name -match "python|Setup|cmd|is-" } | ForEach-Object { Write-Host "proc: $($_.Name) :: $($_.CommandLine)" }
     foreach ($f in "$Data\logs\listen.log", "$Data\logs\client.log") { if (Test-Path $f) { Write-Host "---- $f"; Get-Content $f -Tail 40 -Encoding UTF8 } }
     Stop-Xinxiang; exit 1
 }
@@ -42,11 +46,11 @@ try {
     $go = Invoke-RestMethod "${url}api/update" -Method Post -Headers $headers -ContentType "application/json" -Body '{"install":true}' -TimeoutSec 120
     if (-not $go.ok) { Fail "update did not start: $($go.reply)" }
     $done = $false
-    foreach ($i in 1..120) {
+    foreach ($i in 1..36) {
         Start-Sleep 5
         try { $s = Get-State; if ($s.system.update.current -eq $before.latest -and $s.system.listener -eq "运行中") { $done = $true; break } } catch { }
     }
-    if (-not $done) { Fail "after 10 minutes it is still not running $($before.latest)" }
+    if (-not $done) { Fail "after 3 minutes it is still not running $($before.latest)" }
     $s = Get-State
     if (-not ($s.items | Where-Object { $_.n -eq $made.n -and $_.title -eq "更新前建的事" })) { Fail "the item made before the update is gone" }
     Write-Host "OK: $($before.current) updated itself to $($s.system.update.current); it is running again and the data is intact."
