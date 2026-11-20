@@ -26,6 +26,7 @@ function Get-State {
 function Fail([string]$why) {
     Write-Host "FAILED: $why"
     try { Write-Host ("update status: " + ((Get-State).system.update | ConvertTo-Json -Compress)) } catch { Write-Host "state unreadable: $_" }
+    Get-ChildItem "$app\python\Lib\site-packages" -Filter "agent_matrix-*" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "installed record: $($_.Name)" }
     Get-ChildItem $env:TEMP -Filter "Xinxiang-Setup*" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "downloaded: $($_.Name) $($_.Length) bytes" }
     Get-ChildItem $env:TEMP -Filter "Setup Log*" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "---- $($_.Name)"; Get-Content $_.FullName -Tail 30 }
     Get-CimInstance Win32_Process | Where-Object { $_.Name -match "python|Setup|cmd|is-" } | ForEach-Object { Write-Host "proc: $($_.Name) :: $($_.CommandLine)" }

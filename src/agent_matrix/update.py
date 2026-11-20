@@ -35,9 +35,10 @@ def current():
         found = re.search(r'^version = "(.+)"', (repo / "pyproject.toml").read_text(encoding="utf-8"), re.M)
         if found:
             return found.group(1)
-    try:
-        from importlib.metadata import version
-        return version("agent-matrix")
+    try:   # the newest one on record: an install over an older one may have left the old record behind
+        from importlib.metadata import distributions
+        found = [d.version for d in distributions() if (d.metadata["Name"] or "").lower().replace("_", "-") == "agent-matrix"]
+        return max(found, key=_number) if found else ""
     except Exception:
         return ""
 

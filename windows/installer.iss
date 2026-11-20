@@ -37,6 +37,10 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "在桌面放一个图标"
 Name: "autostart"; Description: "开机自动启动（只进托盘，不弹窗口）"
 
+[InstallDelete]
+; 覆盖安装前把旧版本的程序文件清干净（数据不在这里），否则旧版本的文件和版本记录会留下来
+Type: filesandordirs; Name: "{app}\python"
+
 [Files]
 Source: "{#Source}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
