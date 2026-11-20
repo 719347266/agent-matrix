@@ -376,6 +376,19 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .set-pane .modes{margin-bottom:6px}
 @container (max-width:720px){.set-grid{grid-template-columns:1fr}.set-menu{position:static}}
 .row.flat.mem{grid-template-columns:8px 68px minmax(0,1fr) auto}
+/* items by project: the projects on the left (a row can be dropped on one), the items on the right */
+.proj-grid{display:grid;grid-template-columns:224px minmax(0,1fr);gap:22px;align-items:start}
+.proj-list{position:sticky;top:70px}
+.pdot{width:9px;height:9px;border-radius:3px;flex:none;display:inline-block}
+.proj-list .cell{min-height:40px;padding:7px 12px}.proj-list .cell .val.need{color:var(--red);font-weight:650}
+.cell.drop{outline:2px dashed var(--brand);outline-offset:-2px}
+.cell.new{gap:6px}.cell.new input{flex:1;min-width:0;height:28px;padding:3px 9px}
+.proj-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}.proj-head .chips{margin:0;flex:1}
+.pick{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--ink3);display:grid;place-items:center;font-size:11px;color:#fff;margin-left:-5px}
+.pick.on{background:var(--brand);border-color:var(--brand)}
+.batch{position:sticky;bottom:16px;margin:16px auto 0;width:max-content;max-width:100%;display:flex;gap:8px;align-items:center;padding:7px 8px 7px 16px;border-radius:99px;background:var(--sheet);border:1px solid var(--stroke);box-shadow:var(--soft);-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
+.proj-chip{display:inline-flex;align-items:center;gap:6px;border:0;background:var(--gray-soft);border-radius:99px;padding:2px 10px;font-size:12.5px;color:var(--ink)}
+@container (max-width:720px){.proj-grid{grid-template-columns:1fr;gap:12px}.proj-list{position:static}.proj-list .list{display:flex;overflow-x:auto;scrollbar-width:none}.proj-list .cell{width:auto;flex:none;border-top:0;white-space:nowrap}.proj-list .cell.new{min-width:190px}}
 .mem-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}.mem-bar .seg{margin:0}
 
 @media (max-width:820px){
@@ -440,7 +453,7 @@ async function api(path, body, ms=12000){
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
-function midEdit(){ return !!S.ob||!!S.adding||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
+function midEdit(){ return !!S.ob||!!S.adding||!!S.moving||!!S.picking||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
@@ -461,7 +474,7 @@ function announce(){
   newestSeen=top;
   const n=unreadCount(); document.title=n?`(${n}) 心响`:"心响";
 }
-const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"进行中", doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
+const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"进行中", proj:"all", pick:new Set(), picking:false, moving:null, doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
 // Requests stay visible across refreshes; an ambiguous transport error keeps the
 // same ID for reconciliation instead of creating another write.
 const localCommands = new Map();
@@ -658,10 +671,11 @@ function sub(i){
 function row(i, opts={}){
   const unread=unreadOf(i.n).length>0, d=due(i);
   const open = (i.status==="待验收"||i.status==="完成") && i.url && !isWorking(i) ? `<a class="btn link" href="${esc(i.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">打开交付</a>` : "";
-  return `<div class="row ${unread?"unread":""} ${S.item===i.n?"sel":""}" onclick="openItem(${i.n})"><span class="ud"></span><span class="no">#${i.n}</span>
+  const picked=opts.pick&&S.pick.has(i.n);
+  return `<div class="row ${unread?"unread":""} ${S.item===i.n||picked?"sel":""}" ${opts.drag?`draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${i.n}')"`:""} onclick="${opts.pick?`togglePick(${i.n})`:`openItem(${i.n})`}">${opts.pick?`<span class="pick ${picked?"on":""}">${picked?"✓":""}</span>`:`<span class="ud"></span>`}<span class="no">#${i.n}</span>
     <div style="min-width:0"><div class="t">${esc(i.title)}</div>${sub(i)}</div>
     <div class="meta">${pill(i)}<span class="opt">${avatar(i)}</span><span class="due opt ${late(i)?"late":""}">${esc(d)}</span><span class="ago opt">${esc(ago(i.updated))}</span></div>
-    <div class="acts">${open}${opts.noButtons?"":rowButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i)}`;
+    <div class="acts">${opts.pick?"":open}${opts.noButtons||opts.pick?"":rowButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i)}`;
 }
 const section=(title,items,extra="")=>items.length?`<div class="sec-h">${title}<span class="n">${items.length}</span>${extra}</div><div class="list">${items.map(i=>row(i)).join("")}</div>`:"";
 const byDue=(a,b)=>(a.due||"9")>(b.due||"9")?1:(a.due||"9")<(b.due||"9")?-1:a.n-b.n;
@@ -810,10 +824,66 @@ function donePage(){
   return `<div class="chips">${tabs}</div><p class="hint">点开任何一件都能看到当时和 AI 的对话。要改，直接在对话里说，AI 会接着原来的对话改出新版本。</p>`+
     (groups.map(([t,g])=>section(t,g)).join("")||`<div class="list"><div class="empty">没有</div></div>`);
 }
+/* ---------- 事项：按项目看。项目是本人自己分的；没分的由系统猜，猜的会标出来 ---------- */
+const projOf = id => (D.projects||[]).find(p=>p.id===id);
+const projDot = p => `<span class="pdot" style="background:${p&&p.color?esc(p.color):"var(--ink3)"}"></span>`;
 function allPage(){
   const F={"进行中":i=>!["完成","取消"].includes(i.status),"你来做":i=>i.who==="我"&&!["完成","取消"].includes(i.status),"AI 做":i=>i.who==="AI"&&!["完成","取消"].includes(i.status),"别人做":i=>i.who==="别人"&&!["完成","取消"].includes(i.status),"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
-  const list=D.items.filter(i=>!i.hidden&&F[S.all](i)).sort(byDue);
-  return `<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div><div class="list">${list.map(i=>row(i)).join("")||'<div class="empty">没有</div>'}</div>`;
+  const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking;
+  const shown=D.items.filter(i=>!i.hidden&&F[S.all](i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
+  const count=k=>shown.filter(i=>inP(i,k)).length, need=k=>shown.filter(i=>inP(i,k)&&needsYou(i)).length;
+  const drop=k=>`ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');moveItems([+event.dataTransfer.getData('text/plain')],${k})"`;
+  const cell=(k,name,p)=>`<button class="cell ${cur===k?"on":""}" onclick="S.proj=${k==="all"?"'all'":k};S.renaming=false;render()" ${k==="all"?"":drop(k)}>${k==="all"?"":projDot(p)}<span class="lab">${esc(name)}</span><span class="val ${need(k)?"need":""}">${need(k)?`${need(k)} 件等你`:count(k)}</span></button>`;
+  const rows=list=>list.sort(byDue).map(i=>row(i,{drag:true,pick})).join("");
+  const group=(p,list)=>list.length?`<div class="sec-h">${projDot(p)}${esc(p.name)}<span class="n">${list.length}</span></div><div class="list">${rows(list)}</div>`:"";
+  const list=shown.filter(i=>inP(i,cur)), here=projOf(cur);
+  const body=!list.length?'<div class="list"><div class="empty">没有</div></div>'
+    :cur==="all"&&P.length?P.map(p=>group(p,list.filter(i=>i.project===p.id))).join("")+group({name:"未归类"},list.filter(i=>!i.project))
+    :`<div class="list">${rows(list)}</div>`;
+  const manage=!here?"":S.renaming?`<input id="proj-rename" data-draft="proj-rename" value="${esc(here.name)}" maxlength="20" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')renameProject(${here.id});if(event.key==='Escape'){S.renaming=false;render()}"><button class="btn pri" onclick="renameProject(${here.id})">保存</button>`
+    :`<button class="btn ghost" onclick="S.renaming=true;render()">改名</button><button class="btn ghost" onclick="toast('删除后，里面的事回到未归类','删除项目',()=>removeProject(${here.id}))">删除项目</button>`;
+  return `<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${P.length?cell(0,"未归类"):""}
+      <div class="cell new"><input id="proj-name" data-draft="proj-name" maxlength="20" placeholder="新建项目" aria-label="新项目的名字" onkeydown="if(event.key==='Enter')newProject(null,'proj-name')"><button class="btn" onclick="newProject(null,'proj-name')">＋</button></div></div>
+      ${P.length?"":`<p class="hint" style="margin:8px 4px 0">建几个项目，把事情分开看。分过几件后，同类的事会自动归过去。</p>`}</div>
+    <div><div class="proj-head"><div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>${manage}
+        ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:""}</div>
+      ${body}
+      ${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}</div></div>`;
+}
+function togglePick(n){ S.pick.has(n)?S.pick.delete(n):S.pick.add(n); render(); }
+function moveView(){
+  const ns=S.moving.filter(n=>byN(n)), one=ns.length===1&&byN(ns[0]);
+  return `<div class="modal" onclick="if(event.target===this){S.moving=null;render()}"><div class="box" role="dialog" aria-modal="true" style="width:min(380px,100%)"><div class="mh"><b>${one?"移到哪个项目":`把 ${ns.length} 件事移到`}</b><button class="btn ghost x" onclick="S.moving=null;render()">关闭</button></div>
+    <div class="mb" style="padding:6px 0;gap:0">${[...(D.projects||[]),{id:0,name:"未归类"}].map(p=>`<button class="cell" onclick="moveItems([${ns}],${p.id})">${projDot(p)}<span class="lab">${esc(p.name)}</span>${one&&(one.project||0)===p.id?`<span class="val">${one.project_by==="猜"?"系统猜的":"现在在这"}</span>`:""}</button>`).join("")}
+      <div class="cell new"><input id="proj-name-m" data-draft="proj-name-m" maxlength="20" placeholder="新建项目并移进去" aria-label="新项目的名字" onkeydown="if(event.key==='Enter')newProject([${ns}],'proj-name-m')"><button class="btn" onclick="newProject([${ns}],'proj-name-m')">＋</button></div></div></div></div>`;
+}
+async function moveItems(ns,pid){
+  ns=ns.filter(n=>byN(n)); if(!ns.length) return;
+  ns.forEach(n=>Object.assign(byN(n),{project:pid||null,project_by:pid?"本人":null}));
+  Object.assign(S,{moving:null,picking:false,pick:new Set()}); render();
+  if(LIVE){ try{ await api("/api/item/project",{numbers:ns,project:pid}); }catch(e){ toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); return load(); } load(); }
+  toast(`已移到「${pid?(projOf(pid)||{}).name:"未归类"}」${ns.length>1?`（${ns.length} 件）`:""}`);
+}
+async function newProject(ns,field){
+  const el=$("#"+field), name=String(el&&el.value||"").trim(); if(!name) return el&&el.focus();
+  let id;
+  if(LIVE){ try{ const r=await api("/api/projects",{add:name}); D.projects=r.projects; id=r.id; }catch(e){ return toast(e.confirmed?e.message:"没建成，连不上本机服务"); } }
+  else{ const old=(D.projects||=[]).find(p=>p.name===name); id=old?old.id:Math.max(0,...D.projects.map(p=>p.id))+1; if(!old) D.projects.push({id,name,color:"#5856d6"}); }
+  drafts.delete(field); if(el) el.value="";
+  if(ns&&ns.length) return moveItems(ns,id);
+  S.proj=id; toast(`已新建项目「${name}」`); render();
+}
+async function renameProject(id){
+  const el=$("#proj-rename"), name=String(el&&el.value||"").trim(); if(!name) return el&&el.focus();
+  if(LIVE){ try{ D.projects=(await api("/api/projects",{rename:id,name})).projects; }catch(e){ return toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); } }
+  else projOf(id).name=name;
+  drafts.delete("proj-rename"); S.renaming=false; render();
+}
+async function removeProject(id){
+  if(LIVE){ try{ D.projects=(await api("/api/projects",{remove:id})).projects; }catch(e){ return toast("没删成，连不上本机服务"); } }
+  else D.projects=D.projects.filter(p=>p.id!==id);
+  D.items.forEach(i=>{ if(i.project===id) Object.assign(i,{project:null,project_by:null}); });
+  S.proj="all"; render(); if(LIVE) load();
 }
 function searchPage(){
   const q=S.q.replace(/^#/,"").toLowerCase();
@@ -1297,7 +1367,9 @@ function composer(i){
 function itemView(i){
   const [what,tone]=nowText(i), dvs=(D.deliverables[i.n]||[]).length, d=due(i), tab=S.tab||"talk";
   const talk=(D.threads[i.n]||[]).filter(m=>m.from!=="system"&&m.kind!=="step").length, sess=(i.sessions||[]).length;
+  const pj=projOf(i.project), guessed=pj&&i.project_by==="猜";
   const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
+    ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="quiet-link" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
     ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
     [i.status==="取消"?"关闭":"完成",closedText(i)],
     ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="act(${i.n},'link','粘贴新的交付链接',this);return false">${i.url?"换链接":"填链接"}</a>`}`],
@@ -1384,7 +1456,7 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length,"need"],["sys","设置",0,""]];
+  const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length,"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
@@ -1466,7 +1538,7 @@ function drawTranscript(scroll){
   const mb=box.querySelector(".mb"); if(mb&&(scroll&&atEnd||!old)) mb.scrollTop=mb.scrollHeight;
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
-const TITLES={inbox:"收件箱",todo:"等我处理",doing:"进行中",done:"已完成",all:"全部事项",mem:"记忆",sys:"设置"};
+const TITLES={inbox:"收件箱",todo:"等我处理",doing:"进行中",done:"已完成",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
 function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
 function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
@@ -1492,7 +1564,7 @@ function render(){
   let changed=putHTML("#main",solo?`<div class="solo">${itemView(item)}</div>`:page());
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
-  changed=putHTML("#adder",S.adding?addView():"")||changed;
+  changed=putHTML("#adder",S.adding?addView():S.moving?moveView():"")||changed;
   if(changed){
     for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft], #adder [data-draft]")){
       if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);

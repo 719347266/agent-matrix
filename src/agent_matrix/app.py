@@ -151,6 +151,13 @@ def build_state(root):
         if dv and not any(m["kind"] == "deliver" for m in msgs):
             msgs += [{"at": v["at"], "from": "ai", "kind": "deliver", "text": v["summary"] or "交付", "url": v["url"], "driver": "AI"} for v in dv]
         threads[n], deliverables[n] = msgs, dv
+    try:  # which project each item is in: where the owner put it, or a guess shown as a guess
+        from . import projects
+        project_list, placed = projects.all(root), projects.place(root, rows)
+    except Exception:
+        project_list, placed = [], {}
+    for item in items:
+        item["project"], item["project_by"] = placed.get(item["rid"], (None, None))
     from . import local_sessions
     external = local_sessions.view(root, sessions_of, running_sessions, items)
     from . import cindy_pickup
@@ -214,7 +221,7 @@ def build_state(root):
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
-            "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,
+            "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external, "system": {**system_info(root), "store": store_info(root)}}
 
 
@@ -433,6 +440,31 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/projects":  # the owner's projects: add one, rename one, take one away
+                from . import projects
+                from .models import MatrixError
+                try:
+                    made = projects.create(root, body["add"]) if body.get("add") else None
+                    if body.get("rename"):
+                        projects.rename(root, body["rename"], body.get("name"))
+                    if body.get("remove"):
+                        projects.remove(root, body["remove"])
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True, "id": made, "projects": projects.all(root)})
+            if path == "/api/item/project":  # put items in a project (0 = none)
+                from . import projects
+                from .models import MatrixError
+                from .snapshot import _snapshot
+                rid = {int(r.get("编号") or 0): r.get("record_id") for r in _snapshot(root).get("rows") or []}
+                ids = [rid[int(n)] for n in body.get("numbers") or [] if rid.get(int(n))]
+                if not ids:
+                    return self._send(400, {"ok": False, "reply": "找不到这个编号的事项。"})
+                try:
+                    projects.assign(root, ids, body.get("project"))
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True})
             if path == "/api/item/link":  # string two items together (or take the link away): earlier → later
                 from . import itemlinks
                 from .models import MatrixError

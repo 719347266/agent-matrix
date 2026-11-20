@@ -96,6 +96,11 @@ SCHEMAS = {
     ], [
         # a rule the AI learned waits for the owner to say it is right (memory.py)
         _add_columns("preferences", "confirmed INTEGER NOT NULL DEFAULT 0"),
+    ], [
+        # the owner's own sorting of items into projects (projects.py)
+        """CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT,
+            created TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1)""",
+        "CREATE TABLE IF NOT EXISTS item_projects (record_id TEXT PRIMARY KEY, project_id INTEGER NOT NULL, created TEXT NOT NULL)",
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

@@ -64,6 +64,25 @@ function reset(item) {
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   assert.match(evaluate('S.memTab="wait"; memPage()'),/年卡要不要打折/);
   evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
+  // projects: the owner's own sorting; a guess is marked, and moving is one call
+  const keep = evaluate("JSON.stringify(D.items)");
+  evaluate('D.projects=[{id:1,name:"标签体系",color:"#5856d6"},{id:2,name:"招人",color:"#ff9500"}]; D.items=[{n:1,title:"写标签文档",status:"进行中",who:"AI",project:1,project_by:"本人"},{n:2,title:"标签更新",status:"待验收",who:"AI",project:1,project_by:"猜"},{n:3,title:"发招聘",status:"进行中",who:"我"}]; S.all="进行中"; S.proj="all"');
+  let all = evaluate("allPage()");
+  for (const label of ["全部项目","标签体系","招人","未归类","新建项目","多选"]) assert.ok(all.includes(label), label);
+  assert.match(all,/标签体系<\/span><span class="val need">1 件等你/);
+  assert.match(evaluate("itemView(byN(2))"),/系统猜的/); assert.doesNotMatch(evaluate("itemView(byN(1))"),/系统猜的/);
+  assert.match(evaluate("itemView(byN(3))"),/未归类/);
+  await evaluate("moveItems([2,3],2)");
+  assert.deepEqual(plain("D.items.map(i=>[i.project,i.project_by])"),[[1,"本人"],[2,"本人"],[2,"本人"]]);
+  evaluate('S.proj=2'); assert.doesNotMatch(evaluate("allPage()").split('class="proj-head"')[1],/写标签文档/);
+  evaluate('S.picking=true; togglePick(1); S.moving=[...S.pick]');
+  assert.match(evaluate("moveView()"),/移到哪个项目/); assert.match(evaluate("moveView()"),/moveItems\(\[1\],0\)/);
+  await evaluate("moveItems([1],0)");
+  assert.deepEqual(plain("[byN(1).project,S.picking,S.moving,S.pick.size]"),[null,false,null,0]);
+  await evaluate("removeProject(2)");
+  assert.deepEqual(plain("[D.projects.length,byN(3).project,S.proj]"),[1,null,"all"]);
+  evaluate(`D.items=${keep}; D.projects=[]; S.proj="all"`);
+  assert.doesNotMatch(evaluate("allPage()"),/未归类|多选/, "no projects yet: a plain list and a place to make one");
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
   for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
     evaluate(`S.ob={step:${step}}`);
