@@ -76,6 +76,17 @@ function reset(item) {
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/带你接/);
   evaluate('D.settings.want_feishu=false');
   assert.equal(evaluate("OB.at(-1).key"),"check");
+  // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself
+  evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,kind:"client",checked:"11-20 12:00"}');
+  let up = pane("update");
+  for (const label of ["现在的版本　0.4.0","updateNow()","更新到 0.4.1","检查更新","数据不动"]) assert.ok(up.includes(label), label);
+  assert.match(evaluate('S.setTab="update"; sysPage()').split('class="set-pane"')[0],/版本与更新<\/span><span class="val">有新版 0.4.1/);
+  assert.match(evaluate("sideHTML()"),/title="有新版本 0.4.1">更新</);
+  evaluate('D.system.update={current:"0.4.1",latest:"0.4.1",newer:false,can:false,kind:"git",why:"这份是开发中的版本"}');
+  up = pane("update"); assert.match(up,/已是最新/); assert.doesNotMatch(up,/updateNow/); assert.match(up,/开发中的版本/);
+  assert.doesNotMatch(evaluate("sideHTML()"),/>更新</);
+  evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,doing:"正在下载 0.4.1…"}'); assert.match(pane("update"),/正在下载 0\.4\.1…/);
+  evaluate('D.system.update=null');
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");

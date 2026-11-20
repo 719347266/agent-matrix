@@ -164,6 +164,9 @@ def main(argv=None):
             def open(self, target):
                 open_window(target) if target and target.startswith(url) else super().open(target)
         ClientTray(root).run()   # returns when the owner picks 退出
+    except Exception as exc:     # no tray on this desktop: 心响 still has to keep running
+        print(f"tray unavailable ({type(exc).__name__}: {exc}); running without it", flush=True)
+        threading.Event().wait()   # until this program is closed; the keeper thread looks after the background program
     finally:
         keeper.stop()
     return 0

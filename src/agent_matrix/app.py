@@ -226,7 +226,18 @@ def build_state(root):
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
-            "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external, "system": {**system_info(root), "store": store_info(root)}}
+            "worker": worker, "inbox": box, "running": running_sessions, "local_sessions": external,
+            "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}}
+
+
+def _update_status(root):
+    try:
+        from . import update
+        update.check_soon(root)   # looks at the releases page in the background, a few times a day at most
+        return update.status(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.update_status", exc)
+        return {}
 
 
 def page_version():
@@ -452,6 +463,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/update":  # look for a newer version, or get it
+                from . import update
+                if body.get("install"):
+                    return self._send(200, update.start(root))
+                update.check(root, force=True)
+                return self._send(200, {"ok": True, **update.status(root)})
             if path == "/api/projects":  # the owner's projects: add one, rename one, take one away
                 from . import projects
                 from .models import MatrixError
@@ -694,6 +711,11 @@ def start_background(root, config):
         thread.backfill(root)
         inbox.import_history(root)
         drive.install_shim(root)  # `~/.agent-matrix/bin/xinxiang`: the command any AI calls
+        try:
+            from . import update
+            update.settle(root)   # an update that was under way has landed
+        except Exception as exc:
+            activity.swallowed(root, "app.update_settle", exc)
         from . import meeting_review
         meeting_review.backfill_meetings(root)  # earlier meetings become history (quietly, once)
     except Exception as exc:

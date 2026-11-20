@@ -24,6 +24,16 @@ jobs:
       - name: Try the build on a clean data folder
         shell: pwsh
         run: ./windows/smoke.ps1
+      - name: Install it silently (the way an update does) and try the installed copy
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist/Xinxiang-Setup-*.exe).FullName
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/MERGETASKS="!desktopicon,!autostart"' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Xinxiang"
+          if (-not (Test-Path "$app\python\pythonw.exe")) { throw "nothing was installed at $app" }
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*agent_matrix*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          ./windows/smoke.ps1 -App $app
       - name: Unit tests on Windows (for information)
         continue-on-error: true
         shell: pwsh

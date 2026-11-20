@@ -1056,17 +1056,17 @@ function obView(){
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
 const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?`<div class="sec-h">${title}</div>`:""}${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
 const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
-const SET_IC={check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
+const SET_IC={update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
   bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
 /* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
 function setMenu(st,s){ const r=s.record||{};
-  const left=setupProblems().length;
+  const left=setupProblems().length, upd=s.update||{};
   return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean).join("、")||"都没接"],
       ["mode","inbox","#ff9500","收到消息怎么处理",(MODES.find(m=>m[0]===(st.intake_mode||"all"))||MODES[0])[1]]]],
     ["AI",[["ai","ai","#5856d6","谁来做事",ENGINE_NAME[st.engine||"codex"]||""],["talk","chat","#34c759","打开对话",pickupName()]]],
     ["数据与通知",[["store","db","#00c7be","事项存在哪",STORE_NAME[r.mode||"feishu"]||""],["notify","bell","#ff3b30","通知",r.feishu_ready&&st.brief_channel!=="local"?"心响 + 飞书简报":"只在心响里"]]],
-    ["通用",[["look","eye","#8e8e93","外观",THEME_NAME[savedTheme()]||""],["guide","guide","#ffcc00","新手引导",""],["adv","adv","#636366","高级",""]]]];
+    ["通用",[["update","update",upd.newer&&upd.can?"#ff3b30":"#007aff","版本与更新",upd.newer?`有新版 ${upd.latest}`:(upd.current||"")],["look","eye","#8e8e93","外观",THEME_NAME[savedTheme()]||""],["guide","guide","#ffcc00","新手引导",""],["adv","adv","#636366","高级",""]]]];
 }
 /* ---------- 配置检查：每一项现在通没通，没通的下一步做什么 ---------- */
 function copyText(text,said){
@@ -1120,6 +1120,31 @@ function checkList(){
   return sum+`<div class="list">${list.map(x=>`<div class="chk ${x.state}"><span class="mark">${MARK[x.state]}</span><div><div class="k">${esc(x.title)}${x.need||x.state==="ok"?"":`<span class="hint" style="margin:0 0 0 8px;font-weight:400">可选</span>`}</div><div class="d">${x.text}</div></div><div class="ctl">${x.ctl||""}</div></div>`).join("")}</div>`;
 }
 async function recheck(){ if(!LIVE) return toast("原型里不能检查"); await load(); const n=setupProblems().length; toast(n?`还差 ${n} 步`:"都配好了"); }
+/* ---------- 版本与更新：有新版时点一下就更新 ---------- */
+function updatePage(u){
+  const busy=S.updating||!!u.doing;
+  const state=u.failed?`<span class="eng-state bad">${esc(u.failed)}</span>`:busy?`<span class="eng-state busy">${esc(u.doing||"开始更新…")}</span>`
+    :u.newer?`<span class="eng-state bad">有新版本 ${esc(u.latest)}</span>`:u.latest?`<span class="eng-state ok">已是最新</span>`:`<span class="eng-state">${u.error?esc(u.error):"还没查过"}</span>`;
+  const go=u.newer&&u.can?`<button class="btn pri" ${busy?"disabled":""} onclick="updateNow()">${busy?"正在更新…":`更新到 ${esc(u.latest)}`}</button>`:"";
+  return `<div class="list">${setRow(`现在的版本　${esc(u.current||"未知")}`,
+      u.newer?(u.can?"点一下就行：自己下载、安装、重新打开，数据不动。":esc(u.why||"")+(u.page?` <a href="${esc(u.page)}" target="_blank" rel="noopener">去发布页看看</a>`:""))
+        :(u.checked?`上次检查 ${esc(u.checked)}。`:"")+(u.can?"":esc(u.why||"")),
+      `${state}${go}<button class="btn" ${S.checkingUpdate||busy?"disabled":""} onclick="checkUpdate()">${S.checkingUpdate?"正在检查…":"检查更新"}</button>`)}</div>`;
+}
+async function checkUpdate(){
+  if(!LIVE) return toast("原型里不能检查");
+  S.checkingUpdate=true; render();
+  try{ const r=await api("/api/update",{check:true},30000); (D.system ||= {}).update=r; toast(r.error?r.error:r.newer?`有新版本 ${r.latest}`:"已经是最新版本"); }
+  catch(e){ toast("检查没完成，连不上本机服务"); }
+  S.checkingUpdate=false; render();
+}
+async function updateNow(){
+  if(!LIVE) return toast("原型里不能更新");
+  S.updating=true; render();
+  try{ const r=await api("/api/update",{install:true},60000); toast(r.reply||"开始更新"); if(!r.ok) S.updating=false; }
+  catch(e){ S.updating=false; toast("没能开始更新，连不上本机服务"); }
+  render(); setTimeout(()=>{ S.updating=false; },180000);   // the page reloads itself once the new version is up
+}
 const SET_PAGES={
   check:(st,s,w)=>["配置检查","每一项现在通没通。没通的不用自己弄，交给你的 AI。",checkList()],
   tool:(st,s,w)=>["办公工具","接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",toolPage(st,s)],
@@ -1128,6 +1153,7 @@ const SET_PAGES={
   talk:(st,s,w)=>["打开对话","",talkSection(st)],
   store:(st,s,w)=>["事项存在哪","事项一直存在这台电脑上，点了立刻生效。下面选的是另外同步到哪。",dataSection(s)],
   notify:(st,s,w)=>["通知","AI 做完了、卡住了、有新的事，都会提醒你。",`<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`],
+  update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
   look:(st,s,w)=>["外观","",`<div class="list">${setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)}</div>`],
   guide:(st,s,w)=>["新手引导","重新走一遍首次设置：称呼、办公工具、接收模式、谁来做事、通知。",`<button class="btn pri" onclick="obOpen()">打开引导</button>`],
   adv:(st,s,w)=>["高级","一般不用动。",advancedSection(st,s,w)],
@@ -1576,7 +1602,8 @@ function sideHTML(){
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
-  return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${(NAV_OF[S.view]||S.view)===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
+  const upd=(D.system||{}).update||{};
+  return `<div class="brand"><i></i><span>心响</span>${upd.newer&&upd.can?`<button class="pill red" style="margin-left:auto;border:0;cursor:pointer" onclick="S.setTab='update';go('sys')" title="有新版本 ${esc(upd.latest)}">更新</button>`:""}</div>`+nav.map(x=>x?`<button class="nav ${(NAV_OF[S.view]||S.view)===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
     `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${replying?`AI 正在回复 ${replying}`:"AI 空闲"}</div>${replying?now.map(sessCard).join(""):idle}</div>`;
 }
 function localBindControl(s){
