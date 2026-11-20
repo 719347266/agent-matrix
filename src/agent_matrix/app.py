@@ -303,10 +303,11 @@ def system_info(root):
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
         slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
         wechat_status = json.loads((db.execute("SELECT value FROM kv WHERE key='wechat:status'").fetchone() or ["null"])[0])
+        feishu_health = json.loads((db.execute("SELECT value FROM kv WHERE key='feishu:health'").fetchone() or ["null"])[0])
         notion_url = json.loads((db.execute("SELECT value FROM kv WHERE key='notion:url'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat, slack, notion_url, wechat_status = {}, None, None, None, None
+        status, beat, slack, notion_url, wechat_status, feishu_health = {}, None, None, None, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
@@ -336,6 +337,9 @@ def system_info(root):
         wechat = {"installed": bool(wechat_source.binary(config)), "enabled": bool(config.wechat_enabled), "status": wechat_status}
     except Exception:
         wechat = {"installed": False, "enabled": False, "status": None}
+    # connected on paper is not enough: a few failed sign-in checks in a row mean nothing is being read
+    broken = bool(feishu_health and feishu_health.get("ok") is False and feishu_health.get("count", 0) >= 3)
+    record["feishu_broken"] = {"why": feishu_health.get("why") or "", "since": feishu_health.get("since") or ""} if broken and record.get("feishu_ready") else None
     return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 

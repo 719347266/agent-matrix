@@ -100,7 +100,15 @@ def report(root):
                 "say": f"{name}。" if name else "还没填，分不清会议和聊天里哪些事是本人的。",
                 "steps": [] if name else [f"问本人：同事在会议和聊天里怎么叫你（名字，和别的叫法）。然后运行 `{cmd} set owner_name=名字 owner_aliases=叫法1,叫法2`（没有别的叫法就不写 owner_aliases）。"]})
 
-    if feishu:
+    broken = record.get("feishu_broken")
+    if feishu and broken:
+        out.append({"key": "feishu", "title": "飞书", "need": True, "ok": False,
+                    "say": f"接着，但从 {broken.get('since') or '刚才'} 起读不到：{broken.get('why') or '原因不明'}。会议、聊天、飞书任务都收不进来。",
+                    "steps": ["先看现在的登录状态：`lark-cli auth status --json --verify`。",
+                              "重新登录：运行 `lark-cli auth login`，按它的提示做（会打开浏览器，请本人点同意）。",
+                              "再运行一次 `lark-cli auth status --json --verify`，user 和 bot 两项都是 ready、verified 才算好。",
+                              "等两分钟，再运行 doctor：心响下一次定时检查通过后，这一项会变成已就绪。"]})
+    elif feishu:
         out.append({"key": "feishu", "title": "飞书", "need": False, "ok": True, "say": "已接入。"})
     elif want_feishu:
         run = (f'$env:PYTHONUTF8=1; cd "{root}"; & "{python}" -m ' if here.get("platform") == "windows" else f'cd "{root}" && "{python}" -m ')

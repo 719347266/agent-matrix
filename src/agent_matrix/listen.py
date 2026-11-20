@@ -193,7 +193,16 @@ class Listener:
             state = State(self.root / "state/state.db")
             try:
                 client = Feishu(config, self.root)
-                client.verify_owner(client.auth())
+                try:
+                    client.verify_owner(client.auth())
+                except MatrixError as exc:
+                    if not isinstance(exc, MatrixBusy) and not client.feishu_free():
+                        from .feishu import note_health
+                        note_health(state, exc)   # every timer stops here while Feishu cannot be used: say so on the page
+                    raise
+                if not client.feishu_free():
+                    from .feishu import note_health
+                    note_health(state)
                 return job(config, client, state)
             finally:
                 state.close()

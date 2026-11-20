@@ -81,6 +81,18 @@ class SetupCheckTests(unittest.TestCase):
         self.assertTrue({x["key"]: x for x in self.report(fine)["items"]}["wechat"]["ok"])
         self.assertEqual(setupcheck.parse(["wechat_enabled=true"]), {"wechat_enabled": True})
 
+    def test_feishu_connected_but_unreadable_is_a_step_with_the_reason(self):
+        (self.root / "config.yaml").write_text("intake_mode: all\nowner_name: 王小明\n", encoding="utf-8")
+        thread.set_setting(self.root, "engine_test:codex", {"ok": True})
+        broken = {**READY, "record": {"feishu_ready": True, "feishu_broken": {"why": "飞书登录过期了，要重新登录一次", "since": "11-20 14:36"}}}
+        rep = self.report(broken)
+        item = {x["key"]: x for x in rep["items"]}["feishu"]
+        self.assertFalse(rep["ready"])
+        self.assertTrue(item["need"] and not item["ok"])
+        self.assertIn("飞书登录过期了", item["say"]); self.assertIn("11-20 14:36", item["say"])
+        self.assertIn("lark-cli auth login", "\n".join(item["steps"]))
+        self.assertIn("【要处理】飞书", setupcheck.text(rep))
+
     def test_the_desktop_client_and_another_ai(self):
         thread.set_setting(self.root, "engine", "gemini")
         system = {**BARE, "here": {**BARE["here"], "platform": "windows", "client": True}}

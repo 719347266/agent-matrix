@@ -145,6 +145,13 @@ function reset(item) {
   evaluate('D.system.update={current:"0.4.2",latest:"0.4.6",newer:true,can:true,failed:"更新没有完成。再点一次试试"}');
   assert.match(pane("update"),/更新没有完成/); assert.match(pane("update"),/onclick="updateNow\(\)">更新到 0\.4\.6/);
   evaluate('D.system.update=null');
+  // Feishu connected on paper but unreadable: it is a step, with the reason, wherever "connected" was shown
+  evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"王小明"},engine_tests:{codex:{ok:true,at:"x"}}}; D.system={listener:"运行中",engines:{codex:true},record:{feishu_ready:true,mode:"feishu",feishu_broken:{why:"飞书登录过期了，要重新登录一次",since:"11-20 14:36"}},store:{local:true},here:{platform:"windows",client:true}}');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["feishu"]);
+  for (const label of ["还差 1 步才能用","飞书登录过期了","11-20 14:36","都收不进来"]) assert.ok(pane("check").includes(label), label);
+  assert.match(pane("tool"),/现在读不到/); assert.match(evaluate("todayPage()"),/还差 1 步才能用/);
+  assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/飞书（读不到）/);
+  evaluate('D.system.record.feishu_broken=null'); assert.deepEqual(plain("setupProblems()"),[]); assert.doesNotMatch(pane("tool"),/现在读不到/);
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");

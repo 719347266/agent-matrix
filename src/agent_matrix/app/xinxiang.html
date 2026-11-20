@@ -1082,7 +1082,7 @@ const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemin
 /* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
 function setMenu(st,s){ const r=s.record||{};
   const left=setupProblems().length, upd=s.update||{}, waiting=(D.bugs||[]).filter(b=>b.status==="open").length;
-  return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、")||"都没接"],
+  return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&(r.feishu_broken?"飞书（读不到）":"飞书"),s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、")||"都没接"],
       ["mode","inbox","#ff9500","收到消息怎么处理",(MODES.find(m=>m[0]===(st.intake_mode||"all"))||MODES[0])[1]]]],
     ["AI",[["ai","ai","#5856d6","谁来做事",ENGINE_NAME[st.engine||"codex"]||""],["talk","chat","#34c759","打开对话",pickupName()]]],
     ["数据与通知",[["store","db","#00c7be","事项存在哪",STORE_NAME[r.mode||"feishu"]||""],["notify","bell","#ff3b30","通知",r.feishu_ready&&st.brief_channel!=="local"?"心响 + 飞书简报":"只在心响里"]]],
@@ -1120,6 +1120,8 @@ function setupChecks(){
   out.push({key:"me",need:!!(reading||st.want_feishu||st.want_slack||st.want_wechat),title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
     :{state:reading||st.want_feishu||st.want_slack||st.want_wechat?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
   const wxBad=wxOn(s)&&((s.wechat.status||{}).ok===false);
+  if(r.feishu_ready&&r.feishu_broken) out.push({key:"feishu",need:true,title:"飞书",state:"bad",
+    text:`接着，但从 ${esc(r.feishu_broken.since||"刚才")} 起读不到：${esc(r.feishu_broken.why||"原因不明")}。会议、聊天、飞书任务都收不进来。${ASK_AI}带你重新登录，中途请你在浏览器里点一次同意。`});
   const missing=[st.want_feishu&&!r.feishu_ready&&"飞书",st.want_slack&&!s.slack&&"Slack",(st.want_wechat&&!wxOn(s)||wxBad)&&"微信"].filter(Boolean), have=[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&!wxBad&&"微信"].filter(Boolean);
   const manage=`<button class="btn ghost" onclick="S.setTab='tool';render()">${have.length||missing.length?"管理":"去接"}</button>`;
   out.push({key:"tools",need:missing.length>0,title:"办公工具",...(missing.length?{state:"todo",text:`你想接${missing.join("和")}，还没接好。${ASK_AI}带你接，中途请你在浏览器里登录、点一次同意。${have.length?`已接入${have.join("、")}。`:""}`,ctl:manage}
@@ -1325,7 +1327,8 @@ function slackRow(s){
 function toolPage(st,s){
   const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack||wxOn(s);
   const feishu=!fs?setRow("我要接飞书",st.want_feishu?"还没接好。到「配置检查」复制那段话发给你的 AI，它带你接好。":"没有接入。不接也可以，事项自己新建就行。",switchCtl(!!st.want_feishu,`setSetting('want_feishu',${!st.want_feishu})`))
-    :setRow("飞书","","",pushLine(s))
+    :(r.feishu_broken?setRow("现在读不到",`${esc(r.feishu_broken.why||"原因不明")}（从 ${esc(r.feishu_broken.since||"刚才")} 起）。会议、聊天、飞书任务都收不进来。到「配置检查」复制那段话发给你的 AI，它带你重新登录。`,`<span class="eng-state bad">读不到</span><button class="btn pri" onclick="S.setTab='check';render()">去修</button>`):"")
+     +setRow("飞书","","",pushLine(s))
      +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
      +setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))
      +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));

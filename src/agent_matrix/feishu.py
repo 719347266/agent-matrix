@@ -48,6 +48,32 @@ class FeishuError(MatrixError):
         super().__init__(f"飞书调用失败（{self.code}）；已停止，不自动重放写操作。")
 
 
+def why_not(exc):
+    """Why Feishu cannot be used right now, in words the owner can act on."""
+    code = getattr(exc, "code", None)
+    if code is None:
+        return str(exc)[:160]   # already a sentence: bot not available, another app, another account
+    return {"user_needs_refresh": "飞书登录过期了，要重新登录一次",
+            "cli_unavailable": "找不到飞书命令行（lark-cli）",
+            "timeout": "飞书命令行太久没有响应",
+            "invalid_json": "飞书命令行返回的内容读不懂（可能版本太旧或没登录）"}.get(str(code), f"飞书命令行报错（{code}）")
+
+
+def note_health(state, exc=None):
+    """Remember whether the sign-in check passed: the page says "connected" only while Feishu can really be read."""
+    from datetime import datetime
+    from .timeutil import TZ
+    now = datetime.now(TZ)
+    if exc is None:
+        if (state.get("feishu:health") or {}).get("ok") is not True:
+            state.set("feishu:health", {"ok": True, "at": now.strftime("%m-%d %H:%M")})
+        return
+    was = state.get("feishu:health") or {}
+    state.set("feishu:health", {"ok": False, "why": why_not(exc), "at": now.strftime("%m-%d %H:%M"),
+                                "since": was.get("since") if was.get("ok") is False else now.strftime("%m-%d %H:%M"),
+                                "count": (was.get("count", 0) if was.get("ok") is False else 0) + 1})
+
+
 AUTH_KEEP_SECONDS = 45
 _AUTH = {}   # (command, project) → (when, answer): the last good sign-in check
 

@@ -45,5 +45,32 @@ class QuietWindowsTests(unittest.TestCase):
             feishu._AUTH.clear()
 
 
+class FeishuHealthTests(unittest.TestCase):
+    """Connected on paper is not connected: the page must say when Feishu cannot actually be read, and why."""
+
+    def test_failed_sign_in_checks_are_counted_and_one_good_check_clears_them(self):
+        from agent_matrix.models import MatrixError
+        from agent_matrix.state import State
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "state").mkdir()
+            state = State(Path(tmp) / "state/state.db")
+            try:
+                feishu.note_health(state)
+                self.assertTrue(state.get("feishu:health")["ok"])
+                for _ in range(3):
+                    feishu.note_health(state, feishu.FeishuError("user_needs_refresh", authorization=True))
+                health = state.get("feishu:health")
+                self.assertEqual((health["ok"], health["count"], health["why"]), (False, 3, "飞书登录过期了，要重新登录一次"))
+                self.assertTrue(health["since"])
+                feishu.note_health(state, MatrixError("飞书机器人授权不可用。"))
+                self.assertEqual((state.get("feishu:health")["count"], state.get("feishu:health")["why"]), (4, "飞书机器人授权不可用。"))
+                feishu.note_health(state)
+                self.assertEqual(state.get("feishu:health")["ok"], True)
+            finally:
+                state.close()
+        self.assertEqual(feishu.why_not(feishu.FeishuError("cli_unavailable")), "找不到飞书命令行（lark-cli）")
+        self.assertIn("99991663", feishu.why_not(feishu.FeishuError(99991663)))
+
+
 if __name__ == "__main__":
     unittest.main()
