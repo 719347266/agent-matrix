@@ -13,7 +13,7 @@
 :root{color-scheme:light;
 --bg:#f2f3f7;--blob1:#e4e3ff;--blob2:#dcebfb;--blob3:#fbe8f0;
 --side:rgba(255,255,255,.58);--panel:rgba(255,255,255,.74);--sheet:rgba(251,251,253,.9);--bar:rgba(242,243,247,.4);--raise:rgba(255,255,255,.95);--field:rgba(255,255,255,.66);--stroke:rgba(255,255,255,.85);
---navsel:rgba(60,60,67,.09);--hover:rgba(120,120,128,.09);--sel:rgba(88,86,214,.1);--line:rgba(60,60,67,.14);--line2:rgba(60,60,67,.09);
+--solid:#f6f6f9;--navsel:rgba(60,60,67,.09);--hover:rgba(120,120,128,.09);--sel:rgba(88,86,214,.1);--line:rgba(60,60,67,.14);--line2:rgba(60,60,67,.09);
 --ink:#1c1c1e;--ink2:rgba(60,60,67,.8);--ink3:rgba(60,60,67,.56);
 --brand:#5856d6;--brand-soft:rgba(88,86,214,.14);--brand-glow:rgba(88,86,214,.32);--dot:#ff3b30;
 --blue:#0a6fe0;--blue-soft:rgba(0,122,255,.13);--amber:#a85800;--amber-soft:rgba(255,149,0,.18);--red:#d70015;--red-soft:rgba(255,59,48,.14);
@@ -23,7 +23,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;
 --bg:#111216;--blob1:#1c1e3a;--blob2:#11242f;--blob3:#24182a;
 --side:rgba(28,29,35,.62);--panel:rgba(44,45,54,.5);--sheet:rgba(34,35,42,.9);--bar:rgba(17,18,22,.45);--raise:rgba(120,120,128,.36);--field:rgba(118,118,128,.18);--stroke:rgba(255,255,255,.08);
---navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
+--solid:#1a1b21;--navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
 --ink:#f4f4f6;--ink2:rgba(235,235,245,.74);--ink3:rgba(235,235,245,.48);--brand:#8a88ff;--brand-soft:rgba(138,136,255,.18);--brand-glow:rgba(138,136,255,.22);--dot:#ff453a;
 --blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
 --green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
@@ -31,7 +31,7 @@
 :root[data-theme=dark]{color-scheme:dark;
 --bg:#111216;--blob1:#1c1e3a;--blob2:#11242f;--blob3:#24182a;
 --side:rgba(28,29,35,.62);--panel:rgba(44,45,54,.5);--sheet:rgba(34,35,42,.9);--bar:rgba(17,18,22,.45);--raise:rgba(120,120,128,.36);--field:rgba(118,118,128,.18);--stroke:rgba(255,255,255,.08);
---navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
+--solid:#1a1b21;--navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
 --ink:#f4f4f6;--ink2:rgba(235,235,245,.74);--ink3:rgba(235,235,245,.48);--brand:#8a88ff;--brand-soft:rgba(138,136,255,.18);--brand-glow:rgba(138,136,255,.22);--dot:#ff453a;
 --blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
 --green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
@@ -344,7 +344,7 @@ body{background-color:var(--bg);background-image:radial-gradient(60vmax 60vmax a
 }
 .topbar{background:var(--bar);border-bottom:0;padding-top:16px}
 .topbar h1{font-size:22px;font-weight:750;letter-spacing:-.01em}
-.d-head,.composer{background:var(--sheet)}
+.d-head,.composer{background:var(--solid)}
 .nav{border-radius:11px;padding:8px 11px}
 .nav.on{background:var(--navsel);color:var(--ink);box-shadow:none}
 .nav.on svg{color:var(--brand)}
@@ -428,6 +428,21 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .macapp .detail .d-head{padding-top:34px}
 .macapp .ob-mask,.macapp .modal{padding-top:36px}
 @media (max-width:820px){.macapp .side{padding-top:34px}.macapp .topbar{padding-top:10px}}
+/* columns that line up down a list: status, who, due, updated, then the buttons. The widths of the status and the
+   buttons are measured per list (alignRows), so a row with two buttons and a row with none still share their columns. */
+.row .meta{display:grid;grid-template-columns:var(--pill,auto) 24px 72px 84px;gap:0 12px;align-items:center;justify-items:end}
+.row .meta>.pill{justify-self:start}.row .meta>.opt:first-of-type{justify-self:center}
+.row .meta .due,.row .meta .ago{min-width:0;width:100%;text-align:right;overflow:hidden;text-overflow:ellipsis}
+.row.ev .meta{grid-template-columns:84px}
+.row>.acts{min-width:var(--acts,0);justify-content:flex-end}
+@container (max-width:760px){.row .meta{grid-template-columns:var(--pill,auto)}.row.ev .meta{grid-template-columns:84px}}
+/* a narrow list (the detail is open beside it): number, title, status, button; everything else is in the detail */
+@container (max-width:560px){
+  .row{grid-template-columns:8px 36px minmax(0,1fr) auto auto}
+  .row.ev,.row.flat.mem{grid-template-columns:8px 68px minmax(0,1fr) auto}
+  .row .meta{display:grid}.row.ev .meta{display:none}
+  .row>.acts .btn.link{display:none}
+}
 .mem-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}.mem-bar .seg{margin:0}
 
 @media (max-width:820px){
@@ -1811,6 +1826,20 @@ function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render()
 function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
 function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
 function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
+/* after drawing: in every list, give the status column and the button column the width of their widest entry */
+function alignRows(){
+  for(const list of document.querySelectorAll("#main .list, #detail .list")){
+    let pill=0, acts=0;
+    list.style.removeProperty("--pill"); list.style.removeProperty("--acts");
+    for(const row of list.querySelectorAll(":scope > .row")){
+      const p=row.querySelector(":scope > .meta > .pill"), a=row.querySelector(":scope > .acts");
+      if(p) pill=Math.max(pill,Math.ceil(p.getBoundingClientRect().width));
+      if(a&&a.children.length) acts=Math.max(acts,Math.ceil(a.scrollWidth));
+    }
+    if(pill) list.style.setProperty("--pill",pill+"px");
+    if(acts) list.style.setProperty("--acts",acts+"px");
+  }
+}
 function render(){
   const focused=document.activeElement, focusKey=focused?.dataset?.draft;
   const selection=focusKey?[focused.selectionStart,focused.selectionEnd]:null;
@@ -1833,6 +1862,7 @@ function render(){
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
   changed=putHTML("#adder",S.adding?addView():S.moving?moveView():S.bugging?bugView():"")||changed;
+  if(changed) alignRows();
   if(changed){
     for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft], #adder [data-draft]")){
       if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);
