@@ -1289,10 +1289,8 @@ function aiPage(st,s){
   const used=LOCAL_ENGINES.filter(e=>work===e||sort===e);   // only the local AIs in use need a connection
   const who=v=>{ const d=(st.drivers||[]).find(x=>"driver:"+x.name===v);
     return d?`${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${d.app||d.model?"　":""}<span class="eng-state ${d.online?"ok":""}">${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</span>`:""; };
-  const main=String(work).startsWith("driver:")||!split
-    ?setRow(split?`做事：${esc(engName(work))}`:esc(engName(work)),(split?"":"心响里所有要 AI 做的事都交给它：做事项、整理会议和聊天、判断新进来的事。")+(who(work)?`<br>${who(work)}`:""),
-      `<button class="btn" onclick="copySetupPrompt()">换一个 AI</button>`)
-    :setRow(`做事：${esc(engName(work))}`,"","");
+  const main=setRow(split?`做事：${esc(engName(work))}`:esc(engName(work)),(split?"":"心响里所有要 AI 做的事都交给它：做事项、整理会议和聊天、判断新进来的事。")+(who(work)?`<br>${who(work)}`:""),
+      `<button class="btn" onclick="copySetupPrompt()">换一个 AI</button>`);
   return setSec("any","驱动心响的 AI","",main
       +(split?setRow(`整理：${esc(engName(sort))}`,who(sort),""):"")
       +(!(st.drivers||[]).length?`<p class="hint" style="margin:10px 14px">想换成你常用的 AI：点「换一个 AI」复制一段话发给它，它来报到后就接手全部。</p>`:""))
