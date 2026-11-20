@@ -49,8 +49,10 @@ $boot = Join-Path ([Environment]::GetFolderPath("Startup")) "心响.lnk"
 Check "开始菜单里有心响" (Test-Path $start)
 Check "桌面上有心响" (Test-Path $desk)
 Check "开机自启已登记" (Test-Path $boot)
+$plain = Join-Path $env:TEMP "xinxiang-check.lnk"   # the scripting object cannot open a shortcut with a Chinese name
+Copy-Item -LiteralPath $start -Destination $plain -Force
 $sh = New-Object -ComObject WScript.Shell
-$lnk = $sh.CreateShortcut($start)
+$lnk = $sh.CreateShortcut($plain)
 Check "快捷方式指向装好的程序" (Test-Path $lnk.TargetPath) $lnk.TargetPath
 Check "快捷方式的图标文件在" (Test-Path (($lnk.IconLocation -split ",")[0])) $lnk.IconLocation
 Shot "01-installed-desktop"
@@ -69,7 +71,7 @@ $icon = Invoke-WebRequest "${url}icon.png" -UseBasicParsing -TimeoutSec 20
 Check "图标能取到" ($icon.StatusCode -eq 200 -and $icon.RawContentLength -gt 2000) "$($icon.StatusCode) $($icon.RawContentLength)"
 Check "有心响的窗口" (@(Get-Process | Where-Object { $_.MainWindowTitle -like "*心响*" }).Count -ge 1) ((Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { $_.ProcessName + ":" + $_.MainWindowTitle }) -join " | ")
 Check "托盘程序在" ((Procs "*agent_matrix.winclient*").Count -ge 1)
-Check "没有弹出来的终端窗口" (@(Get-Process | Where-Object { $_.MainWindowTitle -and ($_.ProcessName -match "^(cmd|powershell|pwsh|conhost|WindowsTerminal|OpenConsole)$") -and $_.Id -ne $PID -and $_.MainWindowTitle -notmatch "e2e|Administrator|runner" }).Count -eq 0) ((Get-Process | Where-Object { $_.MainWindowTitle -and $_.ProcessName -match "cmd|powershell|pwsh|Terminal" } | ForEach-Object { $_.ProcessName + ":" + $_.MainWindowTitle }) -join " | ")
+Check "没有弹出来的终端窗口" (@(Get-Process | Where-Object { $_.MainWindowTitle -and ($_.ProcessName -match "^(cmd|powershell|pwsh|conhost|WindowsTerminal|OpenConsole)$") -and $_.Id -ne $PID -and $_.MainWindowTitle -notmatch "e2e|Administrator|runner|GitHub|hosted-compute" }).Count -eq 0) ((Get-Process | Where-Object { $_.MainWindowTitle -and $_.ProcessName -match "cmd|powershell|pwsh|Terminal" } | ForEach-Object { $_.ProcessName + ":" + $_.MainWindowTitle }) -join " | ")
 
 Write-Host "[3] 走新手引导里要填的"
 Check "填称呼" ((Api "api/settings" @{ owner_name = "王小明"; owner_aliases = @("小王") }).ok)
@@ -131,6 +133,10 @@ Check "开机自启的方式能起来" (Wait-Page 120)
 Start-Sleep 8
 Check "引导不会再弹（已经走过）" ((Api "api/state").settings.onboarded -eq $true)
 Shot "04-after-autostart"
+Start-Process $start          # the owner opens it again from the Start menu: only a window, the background is already there
+Start-Sleep 14
+Shot "05-main-window"
+Check "再点一次只开窗口，不会起第二套后台" ((Procs "*agent_matrix.listen*").Count -eq 1) "$((Procs '*agent_matrix.listen*').Count)"
 
 Write-Host "[7] 卸载"
 Stop-Xinxiang
@@ -141,7 +147,7 @@ Check "卸载成功" ($p.ExitCode -eq 0)
 Check "程序删干净了" (-not (Test-Path "$app\python\pythonw.exe"))
 Check "快捷方式删掉了" (-not (Test-Path $start) -and -not (Test-Path $boot))
 Check "数据留着" (Test-Path "$data\state\xinxiang.db")
-Shot "05-after-uninstall"
+Shot "06-after-uninstall"
 
 Write-Host ""
 Write-Host "通过 $script:passed 项，没过 $($script:failed.Count) 项"

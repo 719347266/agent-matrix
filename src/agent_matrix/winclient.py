@@ -74,7 +74,9 @@ def open_window(url):
         if base and edge.is_file():
             try:
                 # "#win": the page sizes its own window once (Edge keeps whatever size its last app window had)
-                subprocess.Popen([str(edge), f"--app={url}#win", "--window-size=1320,880"], creationflags=NO_WINDOW)
+                # no "translate this page?" bubble or other browser prompts: this is an app window, not a web page
+                subprocess.Popen([str(edge), f"--app={url}#win", "--window-size=1320,880", "--disable-features=Translate,msEdgeTranslate",
+                                  "--no-first-run", "--no-default-browser-check"], creationflags=NO_WINDOW)
                 return "edge"
             except OSError:
                 break
