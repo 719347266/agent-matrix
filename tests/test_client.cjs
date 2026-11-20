@@ -82,7 +82,9 @@ function reset(item) {
   await evaluate("removeProject(2)");
   assert.deepEqual(plain("[D.projects.length,byN(3).project,S.proj]"),[1,null,"all"]);
   evaluate(`D.items=${keep}; D.projects=[]; S.proj="all"`);
-  assert.doesNotMatch(evaluate("allPage()"),/未归类|多选/, "no projects yet: a plain list and a place to make one");
+  assert.doesNotMatch(evaluate("allPage()"),/未归类|多选|全部项目|proj-grid/, "no projects yet: a plain list, nothing standing alone beside it");
+  assert.match(evaluate("allPage()"),/openNewProject\(\)">＋ 新建项目/);
+  evaluate("S.newProj=true"); assert.match(evaluate("allPage()"),/id="proj-name"/); evaluate("S.newProj=false");
   // 今天: what waits on the owner, the owner's own work due, what the AI is doing and today's messages, on one page
   const keepAll = evaluate("JSON.stringify([D.items,D.inbox])");
   evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"}];

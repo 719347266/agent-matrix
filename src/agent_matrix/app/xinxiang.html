@@ -382,7 +382,7 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .pdot{width:9px;height:9px;border-radius:3px;flex:none;display:inline-block}
 .proj-list .cell{min-height:40px;padding:7px 12px}.proj-list .cell .val.need{color:var(--red);font-weight:650}
 .cell.drop{outline:2px dashed var(--brand);outline-offset:-2px}
-.cell.new{gap:6px}.cell.new input{flex:1;min-width:0;height:28px;padding:3px 9px}
+.cell.new{gap:6px}.cell.new input{flex:1;min-width:0;width:auto!important}
 .proj-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}.proj-head .chips{margin:0;flex:1}
 .pick{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--ink3);display:grid;place-items:center;font-size:11px;color:#fff;margin-left:-5px}
 .pick.on{background:var(--brand);border-color:var(--brand)}
@@ -453,7 +453,7 @@ async function api(path, body, ms=12000){
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
-function midEdit(){ return !!S.ob||!!S.adding||!!S.moving||!!S.picking||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
+function midEdit(){ return !!S.ob||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
@@ -871,14 +871,16 @@ function allPage(){
     :`<div class="list">${rows(list)}</div>`;
   const manage=!here?"":S.renaming?`<input id="proj-rename" data-draft="proj-rename" value="${esc(here.name)}" maxlength="20" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')renameProject(${here.id});if(event.key==='Escape'){S.renaming=false;render()}"><button class="btn pri" onclick="renameProject(${here.id})">保存</button>`
     :`<button class="btn ghost" onclick="S.renaming=true;render()">改名</button><button class="btn ghost" onclick="toast('删除后，里面的事回到未归类','删除项目',()=>removeProject(${here.id}))">删除项目</button>`;
-  return `<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${P.length?cell(0,"未归类"):""}
-      <div class="cell new"><input id="proj-name" data-draft="proj-name" maxlength="20" placeholder="新建项目" aria-label="新项目的名字" onkeydown="if(event.key==='Enter')newProject(null,'proj-name')"><button class="btn" onclick="newProject(null,'proj-name')">＋</button></div></div>
-      ${P.length?"":`<p class="hint" style="margin:8px 4px 0">建几个项目，把事情分开看。分过几件后，同类的事会自动归过去。</p>`}</div>
-    <div><div class="proj-head"><div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>${manage}
-        ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:""}</div>
-      ${body}
-      ${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}</div></div>`;
+  const add=S.newProj?`<input id="proj-name" data-draft="proj-name" maxlength="20" placeholder="项目名" aria-label="新项目的名字" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')newProject(null,'proj-name');if(event.key==='Escape'){S.newProj=false;render()}"><button class="btn pri" onclick="newProject(null,'proj-name')">建好</button>`:"";
+  const head=`<div class="proj-head"><div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>${manage}
+        ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:add||`<button class="btn" onclick="openNewProject()">＋ 新建项目</button>`}</div>`;
+  const right=`${head}${body}${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}`;
+  if(!P.length) return right;   // no projects yet: just the list, and one button to make the first project
+  return `<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${cell(0,"未归类")}
+      ${S.newProj?`<div class="cell new">${add}</div>`:`<button class="cell" style="color:var(--brand)" onclick="openNewProject()"><span class="lab">＋ 新建项目</span></button>`}</div></div>
+    <div>${right}</div></div>`;
 }
+function openNewProject(){ S.newProj=true; render(); setTimeout(()=>$("#proj-name")?.focus(),30); }
 function togglePick(n){ S.pick.has(n)?S.pick.delete(n):S.pick.add(n); render(); }
 function moveView(){
   const ns=S.moving.filter(n=>byN(n)), one=ns.length===1&&byN(ns[0]);
@@ -898,7 +900,7 @@ async function newProject(ns,field){
   let id;
   if(LIVE){ try{ const r=await api("/api/projects",{add:name}); D.projects=r.projects; id=r.id; }catch(e){ return toast(e.confirmed?e.message:"没建成，连不上本机服务"); } }
   else{ const old=(D.projects||=[]).find(p=>p.name===name); id=old?old.id:Math.max(0,...D.projects.map(p=>p.id))+1; if(!old) D.projects.push({id,name,color:"#5856d6"}); }
-  drafts.delete(field); if(el) el.value="";
+  drafts.delete(field); if(el) el.value=""; S.newProj=false;
   if(ns&&ns.length) return moveItems(ns,id);
   S.proj=id; toast(`已新建项目「${name}」`); render();
 }
