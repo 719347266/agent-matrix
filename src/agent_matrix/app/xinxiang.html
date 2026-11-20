@@ -469,7 +469,7 @@ function announce(){
   const top=Math.max(0,...D.inbox.map(m=>m.id));
   if(newestSeen && top>newestSeen){
     const fresh=D.inbox.filter(m=>m.id>newestSeen&&!m.read);
-    if(fresh.length) toast(fresh.length===1?`新动态：${eventTitle(fresh[0])}`:`${fresh.length} 条新动态`,"查看",()=>{ S.view="inbox"; S.inboxTab="未读"; S.q=""; $("#q").value=""; if(!wide()) S.item=null; render(); });
+    if(fresh.length) toast(fresh.length===1?`新动态：${eventTitle(fresh[0])}`:`${fresh.length} 条新动态`,"查看",()=>{ S.view="today"; S.q=""; $("#q").value=""; if(!wide()) S.item=null; render(); });
   }
   newestSeen=top;
   const n=unreadCount(); document.title=n?`(${n}) 心响`:"心响";
@@ -728,7 +728,7 @@ function inboxPage(){
   }
   const sec=(title,rows,empty)=>rows.length||empty?`<div class="sec-h">${title}<span class="n">${rows.length||""}</span></div><div class="list">${rows.join("")||`<div class="empty">${empty}</div>`}</div>`:"";
   const tabs=[["","最近"],["全部","全部"]].map(([k,l])=>`<button class="chip ${(all?"全部":"")===k?"on":""}" onclick="S.inboxTab='${k}';render()">${l}</button>`).join("");
-  return `<div class="chips" style="align-items:center">${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
+  return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('today')">‹ 今天</button>${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
     ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天发生的",groups.today,all?"":"今天还没有新动态。")}
     ${all?sec("更早",groups.old,""):groups.old.length?`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxTab='全部';render();return false">查看更早的 ${groups.old.length} 条</a></p>`:""}`;
 }
@@ -800,6 +800,35 @@ function msgBody(m){
   return `<div class="msg-open" data-msg="${m.id}">${parts.join("")||`<p class="b-p quiet">没有更多内容</p>`}</div>`;
 }
 function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); announce(); render(); }
+/* ---------- 今天：要你处理的、你自己今天要做的、AI 正在做的、今天的消息，都在这一页 ---------- */
+function todayParts(){
+  const v=D.items.filter(live), q=(D.worker&&D.worker.queue)||[], pos=i=>q.indexOf(i.n)<0?99:q.indexOf(i.n);
+  const need=[...v.filter(blockedAI),...v.filter(i=>i.status==="待验收"&&!isWorking(i)).sort(byDue),...v.filter(i=>i.status==="待确认"&&i.who!=="别人")];
+  const mine=v.filter(i=>i.who==="我"&&!["完成","取消","待确认","待验收"].includes(i.status)&&i.due&&i.due<=TODAY).sort(byDue);
+  const working=v.filter(isWorking), queued=v.filter(i=>i.who==="AI"&&active(i)&&!blockedAI(i)&&!isWorking(i)).sort((a,b)=>pos(a)-pos(b));
+  // messages: one row per message that is not just about an item already listed above
+  const listed=new Set([...need,...mine,...working,...queued].map(i=>i.n)), seen=new Set(), msgs={need:[],today:[],old:[]};
+  for(const m of D.inbox||[]){
+    const one=itemOf(m), key=one?"n"+one.n:"m"+m.id;
+    if(seen.has(key)) continue; seen.add(key);
+    if(one&&listed.has(one.n)) continue;
+    msgs[inboxBucket(m)].push(m);
+  }
+  return {need,mine,working,queued,msgs};
+}
+const todayCount = () => { const t=todayParts(); return t.need.length+t.msgs.need.length; };
+function todayPage(){
+  const {need,mine,working,queued,msgs}=todayParts(), box=D.inbox||[];
+  const d=new Date(TODAY), date=`${d.getMonth()+1} 月 ${d.getDate()} 日 周${"日一二三四五六"[d.getDay()]}`;
+  const needRows=need.map(i=>row(i)).join("")+msgs.need.map(m=>inboxRow(m,box)).join("");
+  const more=`<a class="aside" style="margin-left:auto" href="#" onclick="go('inbox');return false">全部消息${msgs.old.length?` ${msgs.old.length+msgs.today.length}`:""}</a>`;
+  return `<p class="hint" style="margin:-4px 2px 14px">${date}</p>
+    <div class="sec-h">要你处理<span class="n">${need.length+msgs.need.length||""}</span></div><div class="list">${needRows||'<div class="empty">现在没有要你处理的。</div>'}</div>`
+   +section("你自己要做的：今天到期或已逾期",mine)
+   +section("AI 正在做",working)+section("AI 排队",queued)
+   +`<div class="sec-h">今天的消息<span class="n">${msgs.today.length||""}</span>${unreadCount()?`<button class="btn ghost" style="height:22px;padding:0 8px" onclick="readAll()">全部标为已读</button>`:""}${more}</div><div class="list">${msgs.today.map(m=>inboxRow(m,box)).join("")||'<div class="empty">今天还没有别的消息。</div>'}</div>`
+   +closedByAI();
+}
 function todoPage(){
   const v=D.items.filter(live);
   const blocked=v.filter(blockedAI), review=v.filter(i=>i.status==="待验收"&&!isWorking(i)).sort(byDue), fresh=v.filter(i=>i.status==="待确认"&&i.who!=="别人");
@@ -1434,6 +1463,7 @@ function sendNote(complete){
 /* ---------- frame ---------- */
 const wide = () => window.innerWidth >= 1180;
 const ICON={
+  today:'<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
   inbox:'<path d="M2.5 9.5l1.6-5.2A1.5 1.5 0 015.5 3.2h5a1.5 1.5 0 011.4 1.1l1.6 5.2v3a1 1 0 01-1 1h-9a1 1 0 01-1-1z"/><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/>',
   todo:'<circle cx="8" cy="8" r="5.8"/><path d="M5.6 8.2l1.7 1.7 3.2-3.4"/>',
   doing:'<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
@@ -1456,11 +1486,11 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length,"need"],["sys","设置",0,""]];
+  const nav=[["today","今天",todayCount(),"hot"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length,"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
-  return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${S.view===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
+  return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${(NAV_OF[S.view]||S.view)===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
     `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${replying?`AI 正在回复 ${replying}`:"AI 空闲"}</div>${replying?now.map(sessCard).join(""):idle}</div>`;
 }
 function localBindControl(s){
@@ -1538,7 +1568,8 @@ function drawTranscript(scroll){
   const mb=box.querySelector(".mb"); if(mb&&(scroll&&atEnd||!old)) mb.scrollTop=mb.scrollHeight;
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
-const TITLES={inbox:"收件箱",todo:"等我处理",doing:"进行中",done:"已完成",all:"事项",mem:"记忆",sys:"设置"};
+const NAV_OF={inbox:"today",todo:"today",doing:"today",done:"all"};   // pages that are reached from another one
+const TITLES={today:"今天",inbox:"全部消息",todo:"等我处理",doing:"进行中",done:"已完成",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
 function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
 function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
@@ -1551,16 +1582,16 @@ function render(){
   for(const b of document.querySelectorAll("[data-n]")) b.disabled=!!pendingFor(Number(b.dataset.n));
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
-  if(!S.view) S.view=unreadCount()?"inbox":"todo";
+  if(!S.view) S.view="today";
   if(S.ob===undefined) S.ob=(LIVE&&D.settings&&D.settings.onboarded===false)?{step:0}:null;
   if(S.item&&!byN(S.item)) S.item=null;
   const item=S.item&&byN(S.item), split=!!item&&wide(), solo=!!item&&!split;
   $("#app").classList.toggle("with-detail",split);
   putHTML("#side",sideHTML());
   const title=solo?`#${item.n}`:S.q?`搜索：${S.q}`:TITLES[S.view];
-  const count={inbox:unreadCount(),todo:D.items.filter(needsYou).length}[S.view];
+  const count={today:todayCount(),inbox:unreadCount(),todo:D.items.filter(needsYou).length}[S.view];
   putHTML("#ttl",esc(title)+(!S.q&&!solo&&count?`<span class="c">${count}</span>`:""));
-  const page=S.q?searchPage:{inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
+  const page=S.q?searchPage:{today:todayPage,inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
   let changed=putHTML("#main",solo?`<div class="solo">${itemView(item)}</div>`:page());
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
@@ -1582,7 +1613,7 @@ function openFromHash(){
   const m=h.match(/^#item-(\d+)$/);
   if(!m||!D||!byN(+m[1])) return false;
   history.replaceState(null,"",location.pathname+location.search);
-  if(!S.view) S.view="inbox";
+  if(!S.view) S.view="today";
   openItem(+m[1]);
   return true;
 }

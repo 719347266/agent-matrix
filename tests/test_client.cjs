@@ -83,6 +83,20 @@ function reset(item) {
   assert.deepEqual(plain("[D.projects.length,byN(3).project,S.proj]"),[1,null,"all"]);
   evaluate(`D.items=${keep}; D.projects=[]; S.proj="all"`);
   assert.doesNotMatch(evaluate("allPage()"),/未归类|多选/, "no projects yet: a plain list and a place to make one");
+  // 今天: what waits on the owner, the owner's own work due, what the AI is doing and today's messages, on one page
+  const keepAll = evaluate("JSON.stringify([D.items,D.inbox])");
+  evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"}];
+    D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"brief",title:"旧早报",text:"旧\\n第二行",read:true}]; S.view=null; S.openMsg=null; S.working=false; render()`);
+  assert.equal(evaluate("S.view"),"today");
+  const today = evaluate("todayPage()");
+  for (const label of ["要你处理","等验收的事","问你的事","你自己要做的","今天要交的事","AI 排队","排队的事","今天的消息","早报","全部消息"]) assert.ok(today.includes(label), label);
+  assert.doesNotMatch(today,/别人的事|旧早报/);
+  assert.equal(today.split("等验收的事").length,2,"an item listed above is not repeated as a message");
+  assert.equal(evaluate("todayCount()"),2);
+  const side = evaluate("sideHTML()");
+  assert.match(side,/今天<span class="c hot">2</); assert.doesNotMatch(side,/收件箱|等我处理|进行中|已完成/);
+  evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('today'\)"/);
+  evaluate(`[D.items,D.inbox]=${keepAll}; S.view="todo"`);
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
   for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
     evaluate(`S.ob={step:${step}}`);
