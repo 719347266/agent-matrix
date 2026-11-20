@@ -36,12 +36,13 @@ jobs:
           ./windows/smoke.ps1 -App $app
       - name: Unit tests on Windows (for information)
         continue-on-error: true
-        shell: pwsh
+        shell: cmd
         run: |
-          cmd /c "python -m pip install --disable-pip-version-check -q -e .[windows] > pip.log 2>&1"
-          cmd /c "python -m unittest discover -s tests > unit.log 2>&1"
-          Get-Content unit.log -Tail 120 -Encoding UTF8
-          exit 0
+          python -m pip install --disable-pip-version-check -q -e .[windows] > pip.log 2>&1
+          type pip.log
+          python -m unittest discover -s tests > unit.log 2>&1
+          powershell -NoProfile -Command "Get-Content unit.log -Tail 200 -Encoding UTF8"
+          exit /b 0
       - uses: actions/upload-artifact@v4
         with:
           name: Xinxiang-Windows
