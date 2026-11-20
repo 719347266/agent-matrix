@@ -425,7 +425,7 @@ class Handler(BaseHTTPRequestHandler):
             page = page.replace("/*__PAGE__*/\"\"", json.dumps(page_version())).replace("/*__TOKEN__*/\"\"", json.dumps(self.server.token))
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
         if path == "/icon.png":  # the app icon doubles as the page logo
-            icon = Path(__file__).resolve().parents[2] / "macapp/AppIcon.png"
+            icon = Path(__file__).resolve().parent / "app/icon.png"   # travels with the program, on every system
             if icon.is_file():
                 return self._send(200, icon.read_bytes(), "image/png")
             return self._send(404, {"error": "no icon"})

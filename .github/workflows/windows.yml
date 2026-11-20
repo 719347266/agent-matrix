@@ -34,6 +34,19 @@ jobs:
           if (-not (Test-Path "$app\python\pythonw.exe")) { throw "nothing was installed at $app" }
           Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*agent_matrix*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           ./windows/smoke.ps1 -App $app
+      - name: The whole way a user goes, with screenshots
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*agent_matrix*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Xinxiang" -Filter "unins*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($un) { Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait }
+          ./windows/e2e.ps1 -Setup (Get-ChildItem dist/Xinxiang-Setup-*.exe).FullName -Shots shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots/*.png
+          if-no-files-found: warn
       - name: Unit tests on Windows (for information)
         continue-on-error: true
         shell: cmd
