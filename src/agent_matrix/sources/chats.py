@@ -3,7 +3,8 @@
 Reads the owner's most active chats as the owner (user identity), and keeps only lines
 that can be about the owner's work:
   - the owner commits to something ("我来" "明天给你" "我跟进"),
-  - someone talks to the owner: anything in a private chat, or a group line that @-s or names the owner.
+  - someone talks to the owner: anything in a private chat, or a group line that @-s or names the owner,
+  - a reply to something the owner posted, or an @all / @here notice (the owner is one of "all").
 Whether that person actually wants something is the model's call, not a word list: "这个弹窗只展示一点"
 has no ask word and is still a request. Code only drops pure small talk ("好的" "哈哈" "👍").
 Everything else never leaves the machine. The model only reads the kept lines, in batches.
@@ -57,8 +58,8 @@ def _text(message):
     return " ".join(str(body or "").split())
 
 
-def classify(text, *, from_owner, chat_mode, names, mentioned=False):
-    """Which kind of candidate this line is, or None to drop it."""
+def classify(text, *, from_owner, chat_mode, names, mentioned=False, replied=False, broadcast=False):
+    """Which kind of candidate this line is, or None to drop it. A muted chat keeps only "@你"."""
     if from_owner:
         return "我的承诺" if len(text) >= 6 and COMMIT.search(text) else None
     if mentioned:  # @you in a group: always worth a look, however short ("@你 人生模拟器反馈")
@@ -66,7 +67,18 @@ def classify(text, *, from_owner, chat_mode, names, mentioned=False):
     if SMALL_TALK.match(text):
         return None
     # Talking to the owner is enough; whether they want something is for the model to judge.
-    return "找你的" if chat_mode == "p2p" or any(w in text for w in names) else None
+    if chat_mode == "p2p" or any(w in text for w in names):
+        return "找你的"
+    return "回你的" if replied else "全员" if broadcast else None
+
+
+MINE_KEEP = 300
+
+
+def remember_mine(state, key, message_id):
+    """The owner's own recent messages, so a reply to one of them is known to be for the owner.
+    ponytail: only what was seen since this started; a thread the owner opened before that is not known."""
+    state.set(key, [*state.get(key, []), message_id][-MINE_KEEP:])
 
 
 def recent_lines(state, key):
@@ -77,6 +89,11 @@ def recent_lines(state, key):
 
 def mentions_owner(message, owner_open_id):
     return any(m.get("id") == owner_open_id for m in message.get("mentions") or [] if isinstance(m, dict))
+
+
+def mentions_all(message):
+    return any(m.get("id") in ("all", "@_all") or m.get("key") == "@_all"
+               for m in message.get("mentions") or [] if isinstance(m, dict)) or "@_all" in str(message.get("content") or "")
 
 
 def poll(config, client, state, now, *, skip_chat_ids=()):
@@ -99,6 +116,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         messages = got.get("messages") or got.get("items") or []
         history_key = "chats:recent:" + cid
         history = recent_lines(state, history_key)
+        mine = set(state.get("chats:mine", []))
         for m in messages:
             sender = m.get("sender") or {}
             text = _text(m)
@@ -107,8 +125,13 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
                 continue
             scanned += 1
             from_owner = sender.get("id") == config.owner_open_id
+            if from_owner:
+                remember_mine(state, "chats:mine", m.get("message_id"))
+                mine.add(m.get("message_id"))
             kind = classify(text, from_owner=from_owner, chat_mode=chat.get("chat_mode"), names=names,
-                            mentioned=not from_owner and mentions_owner(m, config.owner_open_id))
+                            mentioned=not from_owner and mentions_owner(m, config.owner_open_id),
+                            replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
+                            broadcast=mentions_all(m))
             if kind and (not muted or kind == "@你"):
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
                     m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),

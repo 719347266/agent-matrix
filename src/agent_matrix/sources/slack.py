@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..models import MatrixError
-from .chats import MAX_CHATS, classify, muted_chat, owner_words, recent_lines, skipped_chat, skipped_text, table
+from .chats import MAX_CHATS, classify, muted_chat, owner_words, recent_lines, remember_mine, skipped_chat, skipped_text, table
 
 API = "https://slack.com/api/"
 # Subtypes that are still a person talking: a picture or file with its caption, a thread reply also sent to the channel.
@@ -194,6 +194,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
         muted = muted_chat(config, c["name"])
         history_key = "slack:recent:" + cid
         history = recent_lines(state, history_key)
+        mine = set(state.get("slack:mine", []))
         for m in msgs:
             if m.get("subtype") not in USER_SUBTYPES or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
                 continue
@@ -201,15 +202,22 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
             # Owner mentions become the owner's name so the "被点名" rule in chat_review sees them.
             text = " ".join(m["text"].replace(f"<@{my_id}>", me_tag).split())
             text = re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), text)
+            text = re.sub(r"<!(here|channel|everyone)[^>]*>", r"@\1", text)
             scanned += 1
             sender = "我" if from_owner else who(m["user"])
+            if from_owner:
+                remember_mine(state, "slack:mine", cid + ":" + m["ts"])
+                mine.add(cid + ":" + m["ts"])
+            thread = _thread(m)
             kind = classify(text, from_owner=from_owner, chat_mode=mode, names=names,
-                            mentioned=f"<@{my_id}>" in m["text"])  # a real @, however it is worded
+                            mentioned=f"<@{my_id}>" in m["text"],  # a real @, however it is worded
+                            replied=bool(thread) and thread != m["ts"] and f"{cid}:{thread}" in mine,
+                            broadcast=bool(re.search(r"<!(here|channel|everyone)", m["text"])))
             if kind and (not muted or kind == "@你"):
                 sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
                 # ponytail: the permalink is the message id, so chat_review can link back without a schema change.
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
-                    permalink(base, cid, m["ts"], _thread(m)), cid, cname, mode, m["user"], sender, sent, text[:500],
+                    permalink(base, cid, m["ts"], thread), cid, cname, mode, m["user"], sender, sent, text[:500],
                     json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
                 kept += 1
             history.append(f"{sender}：{text[:120]}")
