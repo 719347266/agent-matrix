@@ -461,10 +461,14 @@ def publish_markdown(config, client, state, record_id, version, path, result, *,
     queue = WorkQueue(state)
     if not queue.get(record_id, version):
         raise MatrixError("该事项没有在 AI 员工的队列里。")
-    current(config, client, state, record_id, version, published=_saved_url(config, state, key))
     path = Path(path).resolve()
     rel = path.relative_to(client.root.resolve()).as_posix()
     data = path.read_bytes()
+    if client.feishu_free():  # no document service: the deliverable stays on this computer and opens in 心响
+        from . import localdoc
+        url = localdoc.save(client.root, record_id, data, config.app_port)
+        return _hand_over(config, client, state, record_id, version, url, rel, data, result, title)
+    current(config, client, state, record_id, version, published=_saved_url(config, state, key))
     argv = ["docs", "+create", "--content", "@./" + rel, "--doc-format", "markdown", "--title", str(title)[:60],
             "--parent-position", "my_library", "--as", "user"]
     def create():
@@ -486,6 +490,13 @@ def publish_markdown(config, client, state, record_id, version, path, result, *,
     probes = [x for x in lines if len(x) >= 6][:3]
     if not probes or not all(p in remote for p in probes):
         raise MatrixError("文档正文读回不一致，暂不标记待验收。")
+    return _hand_over(config, client, state, record_id, version, url, rel, data, result, title)
+
+
+def _hand_over(config, client, state, record_id, version, url, rel, data, result, title):
+    """The item says 待验收 and points at the deliverable; the write is confirmed by reading it back."""
+    from .workflow import Gateway
+    key, queue = key_for(record_id, version), WorkQueue(state)
     row = current(config, client, state, record_id, version, published=url)
     queue.prepared(record_id, version, rel, sha256(data).hexdigest(), datetime.now(TZ))
     gateway = Gateway(client, state)

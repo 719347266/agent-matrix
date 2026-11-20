@@ -152,6 +152,17 @@ function reset(item) {
   assert.match(pane("tool"),/现在读不到/); assert.match(evaluate("todayPage()"),/还差 1 步才能用/);
   assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/飞书（读不到）/);
   evaluate('D.system.record.feishu_broken=null'); assert.deepEqual(plain("setupProblems()"),[]); assert.doesNotMatch(pane("tool"),/现在读不到/);
+  // any AI the message was sent to: it says who it is, shows up by name, and is missed when it stops asking
+  evaluate('D.settings={engine:"driver:Antigravity",engine_sort:"driver:Antigravity",intake_mode:"all",me:{name:"王小明"},engine_tests:{},drivers:[{name:"Antigravity",app:"Antigravity",model:"gemini-3",seen:"11-20 16:40",online:true},{name:"Claude Code",app:"终端",model:"opus",seen:"11-20 09:00",online:false}]}; D.system={listener:"运行中",engines:{codex:false,claude:false,gemini:false},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"windows",client:true}}');
+  assert.deepEqual(plain("setupProblems()"),[]);
+  let any = pane("ai");
+  for (const label of ["发给谁，谁就来做","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","上次来 11-20 09:00"]) assert.ok(any.includes(label), label);
+  assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/谁来做事<\/span><span class="val">Antigravity</);
+  assert.match(pane("check"),/做事的 AI：Antigravity/); assert.match(pane("check"),/正在领活（gemini-3）/);
+  evaluate('D.settings.drivers[0].online=false');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["engine"]); assert.match(pane("check"),/现在不在（上次来是 11-20 16:40）/);
+  evaluate('D.settings={engine:"codex",intake_mode:"manual",me:{name:""},engine_tests:{},drivers:[]}');
+  assert.match(pane("check"),/不用装：把上面那段话发给你常用的 AI/);
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");
@@ -166,10 +177,12 @@ function reset(item) {
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
   assert.doesNotMatch(mem,/年卡要不要打折|在等的|会上的结论/);
-  evaluate('S.all="在等的"'); let waitView = evaluate("allPage()");
-  assert.match(waitView,/年卡要不要打折/); assert.match(waitView,/ruleOp\(\{waiting_done:7\}\)/); assert.match(waitView,/在等的 1</);
-  evaluate('S.all="会上的结论"'); assert.match(evaluate("allPage()"),/还没有记录/);
-  evaluate('S.all="进行中"'); assert.match(evaluate("allPage()"),/S\.all='在等的';S\.picking=false;render\(\)">在等的 1</);
+  evaluate('D.memory.recent=[{label:"还没定",text:"投流方案怎么定",source:"周会",at:"11-19"},{label:"定了",text:"先做周视图",source:"周会",at:"11-19"}]; S.all="以后要确认的"');
+  let later = evaluate("allPage()");
+  for (const label of ["年卡要不要打折","ruleOp({waiting_done:7})","投流方案怎么定","以后要确认的 2<"]) assert.ok(later.includes(label), label);
+  assert.doesNotMatch(later,/先做周视图/, "what is decided is not something to confirm later");
+  evaluate('S.all="进行中"'); assert.match(evaluate("allPage()"),/S\.all='以后要确认的';S\.picking=false;render\(\)">以后要确认的 2</);
+  assert.doesNotMatch(evaluate("allPage()"),/会上的结论/);
   evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
   // projects: the owner's own sorting; a guess is marked, and moving is one call
   const keep = evaluate("JSON.stringify(D.items)");

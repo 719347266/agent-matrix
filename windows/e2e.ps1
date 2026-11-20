@@ -119,6 +119,31 @@ $ib = $state.items | Where-Object { $_.n -eq $b.n }
 Check "页面数据对得上：项目、交付、串联" ($ib.project -eq $proj.id -and $ib.url -eq "https://example.com/docx/MINE" -and ($ib.before -contains $a.n)) ("project=$($ib.project) url=$($ib.url) before=$($ib.before)")
 Check "中文标题没乱码" ($ib.title -eq "写季度复盘")
 Check "规矩在" (@($state.memory.rules | Where-Object { $_.rule -eq "对外文案先给我两版" }).Count -eq 1)
+
+Write-Host "[4b] 换一个 AI 来驱动：报到、领活、交活"
+$xin = "$env:USERPROFILE\.agent-matrix\bin\xinxiang.cmd"
+Check "给 AI 领活的命令装好了" (Test-Path $xin)
+$hello = (& cmd /c "`"$xin`" hello --name Antigravity --app Antigravity --model `"Gemini 3 Pro`"" 2>&1 | Out-String)
+Check "AI 报到成功" ($hello -match '"you": "Antigravity"') $hello
+$state = Api "api/state"
+Check "心响记下了是谁在做事" ($state.settings.engine -eq "driver:Antigravity" -and @($state.settings.drivers | Where-Object { $_.name -eq "Antigravity" -and $_.model -eq "Gemini 3 Pro" }).Count -eq 1) "engine=$($state.settings.engine)"
+$c = Api "api/item/new" @{ title = "整理一份周会议程草稿"; who = "AI"; note = "三项议题，每项一句话" }
+$raw = (& cmd /c "`"$xin`" next --driver Antigravity --wait 90" 2>&1 | Out-String)
+$job = $null; try { $job = $raw | ConvertFrom-Json } catch { }
+Check "AI 领到了这件事，说明书是完整的" ($job -and $job.kind -eq "item" -and $job.n -eq $c.n -and $job.instructions -match "交付.md" -and $job.instructions.Length -gt 1500) ($raw.Substring(0, [Math]::Min(300, $raw.Length)))
+if ($job -and $job.folder) {
+  Check "工作台里有任务单和背景" ((Test-Path "$($job.folder)\任务单.md") -and (Test-Path "$($job.folder)\背景.md"))
+  $doc = "# 周会议程草稿`n`n- 周会定三项议题，总时长 30 分钟。`n- 先对齐上周进度，再定本周重点，最后留出风险讨论。`n- 会前不需要额外准备材料。`n`n## 议程`n`n| 顺序 | 议题 | 一句话 |`n|---|---|---|`n| 1 | 上周进度 | 每人说清完成了什么 |`n| 2 | 本周重点 | 定下最重要的三件事 |`n| 3 | 风险与求助 | 提出卡住的事 |`n`n## 需要决策`n`n本周最重要的三件事由谁拍板，会上定。`n`n## 背景数据`n`n任务单只要求三项议题，没有其他数据。`n`n## 用到的资料`n`n- 任务单.md`n`n## 我做的假设`n`n- 周会总时长按 30 分钟安排。`n"
+  [IO.File]::WriteAllText("$($job.folder)\交付.md", $doc, (New-Object Text.UTF8Encoding $false))
+  $res = '{"outcome": "done", "template": "会议材料", "summary": "拟好三项议题的周会议程", "confirmation": "", "sources": ["任务单.md"], "note": "按任务单拟了三项议题"}'
+  [IO.File]::WriteAllText("$($job.folder)\结果.json", $res, (New-Object Text.UTF8Encoding $false))
+  $sub = (& cmd /c "`"$xin`" submit --job $($job.job)" 2>&1 | Out-String)
+  Check "AI 交活成功（没接飞书也能交）" ($sub -match '"status": "done"') $sub
+  $state = Api "api/state"; $ic = $state.items | Where-Object { $_.n -eq $c.n }
+  Check "这件事变成等你验收，记在这个 AI 名下" ($ic.status -eq "待验收" -and @($ic.sessions | Where-Object { $_.driver -eq "Antigravity" }).Count -ge 1) "status=$($ic.status)"
+  $page = $null; try { $page = Invoke-WebRequest -UseBasicParsing -Uri $ic.url -TimeoutSec 20 } catch { }
+  Check "交付能在这台电脑上打开" ($page -and $page.StatusCode -eq 200 -and $page.Content -match "周会议程草稿") "$($ic.url)"
+}
 $up = Api "api/update" @{ check = $true }
 # the releases page limits how often one address may ask, and this machine shares its address with many others:
 # knowing its own version and either the newest one or a plain "could not reach it" is what must work

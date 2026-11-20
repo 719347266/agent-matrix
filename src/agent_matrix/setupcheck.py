@@ -25,7 +25,7 @@ SETTABLE = {"owner_name", "owner_aliases", "engine", "engine_sort", "intake_mode
             "chat_watch_enabled", "feishu_tasks_enabled", "want_feishu", "want_slack", "want_wechat", "wechat_enabled", "cindy_project", "prework_enabled", "onboarded"}
 
 
-from .setupshim import _cmd, install_shim, prompt, shim_path  # noqa: F401
+from .setupshim import _cmd, install_shim, prompt, shim_path, work_cmd  # noqa: F401
 
 
 def _local(name, job, found, tests, here, cmd):
@@ -89,11 +89,36 @@ def report(root):
         return {"ok": False, "say": f"Cindy 的定时任务还没接好，{job}。", "steps": [
             "如果你就是 Cindy 里的 AI：直接照下面这段话做。否则请本人把这段话粘贴到 Cindy 里发送：\n" + cindy_setup_text(root)]}
 
-    work = cindy("交给 AI 的事不会开工") if engine == "cindy" else _local(engine if engine in INSTALL else "codex", "交给 AI 的事没人做", found, tests, here, cmd)
-    out.append({"key": "engine", "title": f"做事的 AI：{NAMES.get(engine, engine)}", "need": True, **work})
+    from . import aidrivers
+    xin = work_cmd()
+    takeover = (f"最省事的办法：你自己来当心响的 AI，不用装别的。运行 `{xin} hello --name \"<你的名字>\" --app \"<你所在的客户端>\" --model \"<你用的模型>\"`，"
+                f"再运行 `{xin} next --driver \"<你的名字>\" --wait 600` 守着领活。做了这一步，这一项下面的步骤就不用做了。")
+
+    def outside(name, job):
+        """An AI that said hello: it does the work for as long as it keeps asking for it."""
+        info = next((d for d in aidrivers.known(root) if d["name"] == name), None)
+        if info and info["online"]:
+            return {"ok": True, "say": f"{name} 在这儿，正在领活。"}
+        return {"ok": False, "say": f"{name} 现在不在{('（上次来是 ' + info['seen'] + '）') if info and info['seen'] else ''}，{job}。", "steps": [
+            f"如果你就是 {name}：运行 `{xin} next --driver \"{name}\" --wait 600`，接着守着领活。",
+            f"如果你是另一个 AI：你来接手。运行 `{xin} hello --name \"<你的名字>\" --app \"<你所在的客户端>\" --model \"<你用的模型>\"`，再运行 `{xin} next --driver \"<你的名字>\" --wait 600`。"]}
+
+    def who(chosen, job):
+        name = aidrivers.name_in(chosen)
+        if name:
+            return outside(name, job), name
+        if chosen == "cindy":
+            return cindy(job), "Cindy"
+        one = _local(chosen if chosen in INSTALL else "codex", job, found, tests, here, cmd)
+        if not one["ok"]:
+            one["steps"] = [takeover, *one.get("steps", [])]
+        return one, NAMES.get(chosen, chosen)
+
+    work, label = who(engine, "交给 AI 的事没人做")
+    out.append({"key": "engine", "title": f"做事的 AI：{label}", "need": True, **work})
     if reading and sort != engine:
-        sorting = cindy("会议和聊天里的事提不出来") if sort == "cindy" else _local(sort if sort in INSTALL else "codex", "会议和聊天里的事提不出来", found, tests, here, cmd)
-        out.append({"key": "sort", "title": f"整理消息的 AI：{NAMES.get(sort, sort)}", "need": True, **sorting})
+        sorting, label = who(sort, "会议和聊天里的事提不出来")
+        out.append({"key": "sort", "title": f"整理消息的 AI：{label}", "need": True, **sorting})
 
     name = (config.owner_name if config else "") or ""
     out.append({"key": "me", "title": "怎么称呼本人", "need": bool(reading or want_feishu or want_slack or want_wechat), "ok": bool(name),

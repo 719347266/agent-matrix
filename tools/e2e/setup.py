@@ -47,7 +47,6 @@ for name in DBS:
 for extra in ("tasks.json",):
     if (live / "state" / extra).exists():
         shutil.copyfile(live / "state" / extra, sandbox / "state" / extra)
-shutil.copytree(live / "prompts", sandbox / "prompts")
 
 sys.path.insert(0, str(live / "src"))
 from agent_matrix.config import load, save  # noqa: E402

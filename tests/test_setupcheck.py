@@ -93,12 +93,31 @@ class SetupCheckTests(unittest.TestCase):
         self.assertIn("lark-cli auth login", "\n".join(item["steps"]))
         self.assertIn("【要处理】飞书", setupcheck.text(rep))
 
+    def test_any_ai_that_says_hello_does_the_work_and_is_missed_when_it_stops_asking(self):
+        from datetime import datetime, timedelta
+        from agent_matrix import aidrivers
+        from agent_matrix.timeutil import TZ
+        by = {x["key"]: x for x in self.report(BARE)["items"]}
+        self.assertIn("你自己来当心响的 AI", by["engine"]["steps"][0])            # no local AI: the simplest way out comes first
+        aidrivers.hello(self.root, "Antigravity", app="Antigravity", model="gemini-3")
+        self.assertEqual((thread.setting(self.root, "engine", ""), thread.setting(self.root, "engine_sort", "")), ("driver:Antigravity", "driver:Antigravity"))
+        by = {x["key"]: x for x in self.report(BARE)["items"]}
+        self.assertEqual((by["engine"]["ok"], by["engine"]["title"]), (True, "做事的 AI：Antigravity"))
+        self.assertIn("正在领活", by["engine"]["say"])
+        known = thread.setting(self.root, aidrivers.KEY, None)
+        known["Antigravity"]["seen"] = (datetime.now(TZ) - timedelta(minutes=30)).isoformat()
+        thread.set_setting(self.root, aidrivers.KEY, known)
+        item = {x["key"]: x for x in self.report(BARE)["items"]}["engine"]
+        self.assertFalse(item["ok"]); self.assertIn("现在不在", item["say"])
+        self.assertIn('next --driver "Antigravity" --wait 600', item["steps"][0])
+        self.assertIn("hello --name", item["steps"][1])                          # or another AI takes over
+
     def test_the_desktop_client_and_another_ai(self):
         thread.set_setting(self.root, "engine", "gemini")
         system = {**BARE, "here": {**BARE["here"], "platform": "windows", "client": True}}
         by = {x["key"]: x for x in self.report(system)["items"]}
         self.assertIn("重新打开「心响」", by["listener"]["steps"][0])
-        self.assertIn("winget install OpenJS.NodeJS.LTS", by["engine"]["steps"][0])
+        self.assertIn("winget install OpenJS.NodeJS.LTS", "\n".join(by["engine"]["steps"]))
         self.assertIn("@google/gemini-cli", "\n".join(by["engine"]["steps"]))
 
     def test_everything_in_place_is_ready(self):
@@ -114,7 +133,7 @@ class SetupCheckTests(unittest.TestCase):
 
     def test_the_message_for_the_owners_ai_and_what_it_may_set(self):
         said = setupcheck.prompt(self.root)
-        for words in ("/x/bin/xinxiang-setup doctor", "不要让我自己去敲", "不要在对话里问我要密码"):
+        for words in ("/x/bin/xinxiang-setup doctor", "不要让我自己去敲", "不要在对话里问我要密码", "hello --name", "next --driver", "--wait 600"):
             self.assertIn(words, said)
         self.assertEqual(setupcheck.parse(["owner_name=王小明", "owner_aliases=小王，明哥", "want_feishu=true", "engine=claude"]),
                          {"owner_name": "王小明", "owner_aliases": ["小王", "明哥"], "want_feishu": True, "engine": "claude"})

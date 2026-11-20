@@ -63,6 +63,39 @@ class CindyRunner(unittest.TestCase):
         with patch.object(drive, "install_shim"), patch.object(drive, "has_sorting_for", return_value=None), redirect_stdout(io.StringIO()):
             self.assertEqual(drive.main(args), 2)
 
+    def test_whichever_ai_says_hello_takes_the_work_and_the_next_one_takes_it_over(self):
+        from agent_matrix import aidrivers
+        seen = []
+        stub = lambda name: (lambda root, config, driver, **k: seen.append(name) or None)
+        with patch.object(drive, "_prepare_triage", stub("triage")), patch.object(drive, "_prepare_meeting", stub("meeting")), \
+             patch.object(drive, "_prepare_chat", stub("chat")), patch.object(drive, "_prepare_learn", stub("learn")), \
+             patch.object(drive, "_prepare_item", stub("item")):
+            drive.next_job(self.root, None, "某个老脚本")                   # never said hello: as before, it may take anything
+            self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
+            seen.clear()
+            aidrivers.hello(self.root, "Antigravity", app="Antigravity", model="gemini-3")
+            self.assertEqual((drive.item_runner(self.root), drive.sort_runner(self.root), drive.local_kinds(self.root)), ("driver", "driver", []))
+            self.assertEqual(drive.kinds_for(self.root, "Antigravity"), [*drive.SORTING, "item"])
+            drive.next_job(self.root, None, "Antigravity")
+            self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
+            seen.clear()
+            aidrivers.hello(self.root, "Claude Code", model="opus")          # the message went to another AI: it takes over
+            self.assertIsNone(drive.next_job(self.root, None, "Antigravity"))
+            self.assertEqual(seen, [])
+            drive.next_job(self.root, None, "Claude Code")
+            self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
+            self.assertEqual(drive.kinds_for(self.root, "Cindy"), [])
+        names = {d["name"]: d for d in aidrivers.known(self.root)}
+        self.assertEqual(set(names), {"Antigravity", "Claude Code"})
+        self.assertEqual((names["Antigravity"]["model"], names["Antigravity"]["online"]), ("gemini-3", True))
+        with self.assertRaises(ValueError):
+            aidrivers.hello(self.root, "  ")
+        (self.root / "config.yaml").write_text("{}", encoding="utf-8")
+        with patch.object(drive, "install_shim"), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(drive.main(["hello", "--name", "Gemini", "--app", "Gemini CLI", "--model", "gemini-2.5-pro", "--config", str(self.root / "config.yaml")]), 0)
+        self.assertIn('"you": "Gemini"', out.getvalue()); self.assertIn("--wait 600", out.getvalue())
+        self.assertEqual(drive.kinds_for(self.root, "Gemini"), [*drive.SORTING, "item"])
+
     def test_gemini_is_a_local_ai_like_the_others(self):
         import json
         from agent_matrix import engines

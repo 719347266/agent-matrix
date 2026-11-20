@@ -125,7 +125,8 @@ def _remember(workdir, row):
 
 def first_prompt(root, row):
     from .background import _one
-    template = (Path(root) / "prompts/worker.md").read_text(encoding="utf-8")
+    from .promptfile import read as prompt_text
+    template = prompt_text(root, "worker.md")
     hints = "；".join(f"{k}：{v}" for k, v in TEMPLATE_HINT.items())
     return template.format(item=f"#{row.get('编号')} {_one(row.get('标题'))}", templates=hints)
 

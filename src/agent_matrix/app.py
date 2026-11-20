@@ -203,6 +203,12 @@ def build_state(root):
             settings["cindy"]["setup_text"] = local_sessions.cindy_setup_text(root)
     except Exception:
         settings["cindy"] = {}
+    try:
+        from . import aidrivers
+        settings["drivers"] = aidrivers.known(root)   # every AI that came and said who it is
+    except Exception as exc:
+        activity.swallowed(root, "app.drivers", exc)
+        settings["drivers"] = []
     settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude", "gemini")}
     try:  # where conversations open and items are picked up (设置 → AI 对话)
         from . import local_sessions
@@ -428,6 +434,13 @@ class Handler(BaseHTTPRequestHandler):
             page = PAGE.read_text(encoding="utf-8")
             page = page.replace("/*__PAGE__*/\"\"", json.dumps(page_version())).replace("/*__TOKEN__*/\"\"", json.dumps(self.server.token))
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+        if path.startswith("/doc/"):  # a deliverable kept on this computer (no Feishu): readable like any document link
+            from . import localdoc
+            parts = path.split("/")
+            text = localdoc.read(self.server.root, *parts[2:4]) if len(parts) == 4 else None
+            if text is None:
+                return self._send(404, "这份交付已经不在这台电脑上了。".encode("utf-8"), "text/plain; charset=utf-8")
+            return self._send(200, localdoc.page(text).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/icon.png":  # the app icon doubles as the page logo
             icon = Path(__file__).resolve().parent / "app/icon.png"   # travels with the program, on every system
             if icon.is_file():
@@ -560,14 +573,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
             if path == "/api/settings":
                 from . import thread
-                if body.get("engine") in {"codex", "claude", "gemini", "cindy"}:
+                from . import aidrivers
+                ai_names = {aidrivers.setting_of(d["name"]) for d in aidrivers.known(root)}
+                if body.get("engine") in {"codex", "claude", "gemini", "cindy"} | ai_names:
                     thread.set_setting(root, "engine", body["engine"])
                 for want in ("want_feishu", "want_slack", "want_wechat"):   # the owner means to connect it: the setup check then says how
                     if want in body:
                         thread.set_setting(root, want, bool(body[want]))
                 if "cindy_project" in body:
                     thread.set_setting(root, "cindy_project", str(body["cindy_project"] or "")[:500])
-                if body.get("engine_sort") in {"codex", "claude", "gemini", "cindy"}:
+                if body.get("engine_sort") in {"codex", "claude", "gemini", "cindy"} | ai_names:
                     thread.set_setting(root, "engine_sort", body["engine_sort"])
                 if "worker_gemini_api_key" in body:  # kept in config.yaml on this computer, handed to the gemini command only
                     from .config import load as load_config, save as save_config
