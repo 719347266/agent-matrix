@@ -26,7 +26,14 @@ $app = "$env:LOCALAPPDATA\Programs\Xinxiang"
 $data = "$env:LOCALAPPDATA\Xinxiang"
 function Api([string]$path, $body = $null) {
     $h = @{ "X-Xinxiang-Token" = (Get-Content "$data\state\app-token" -Raw).Trim() }
-    if ($null -eq $body) { $raw = (Invoke-WebRequest "$url$path" -Headers $h -UseBasicParsing -TimeoutSec 90).RawContentStream.ToArray() }
+    if ($null -eq $body) {
+        $raw = $null
+        foreach ($try in 1..4) {   # right after a start the first read can be refused or slow: say why, try again
+            try { $raw = (Invoke-WebRequest "$url$path" -Headers $h -UseBasicParsing -TimeoutSec 120).RawContentStream.ToArray(); break }
+            catch { Write-Host "  (read $path, try ${try}: $($_.Exception.Message))"; Start-Sleep 5; $h = @{ "X-Xinxiang-Token" = (Get-Content "$data\state\app-token" -Raw).Trim() } }
+        }
+        if ($null -eq $raw) { throw "cannot read $path" }
+    }
     else {
         $json = if ($body -is [string]) { $body } else { $body | ConvertTo-Json -Compress -Depth 6 }
         try { $raw = (Invoke-WebRequest "$url$path" -Method Post -Headers $h -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) -UseBasicParsing -TimeoutSec 200).RawContentStream.ToArray() }
