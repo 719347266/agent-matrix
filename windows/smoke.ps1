@@ -30,8 +30,13 @@ try {
     if (-not $made.ok) { Fail "could not add an item" }
     $proj = Invoke-RestMethod "${url}api/projects" -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes('{"add":"安装检查"}')) -TimeoutSec 60
     Invoke-RestMethod "${url}api/item/project" -Method Post -Headers $headers -ContentType "application/json" -Body ('{"numbers":[' + $made.n + '],"project":' + $proj.id + '}') -TimeoutSec 60 | Out-Null
-    $raw = (Invoke-WebRequest "${url}api/state" -Headers $headers -UseBasicParsing -TimeoutSec 60).RawContentStream.ToArray()
-    $state = [System.Text.Encoding]::UTF8.GetString($raw) | ConvertFrom-Json
+    $state = $null
+    foreach ($i in 1..40) {   # the background program reports itself within a minute or two of starting
+        $raw = (Invoke-WebRequest "${url}api/state" -Headers $headers -UseBasicParsing -TimeoutSec 60).RawContentStream.ToArray()
+        $state = [System.Text.Encoding]::UTF8.GetString($raw) | ConvertFrom-Json
+        if ($state.system.listener -eq "运行中") { break }
+        Start-Sleep -Seconds 5
+    }
     $item = $state.items | Where-Object { $_.n -eq $made.n }
     if (-not $item) { Fail "the new item is not on the page" }
     if ($item.title -ne "试一件事：检查安装包") { Fail "Chinese text was damaged: $($item.title)" }
