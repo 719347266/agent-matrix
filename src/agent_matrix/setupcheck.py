@@ -153,7 +153,7 @@ def report(root):
             "带本人打开 https://api.slack.com/apps ，点 Create New App → From scratch，选他自己的工作区。",
             "在 OAuth & Permissions → User Token Scopes 里加上这些权限：search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read",
             "点 Install to Workspace，请本人点同意。页面上会出现一串 xoxp- 开头的 User OAuth Token。",
-            "请本人自己把这串 Token 粘贴到 心响 → 设置 → 办公工具 → Slack 里，点「连接」。不要让他把 Token 发到对话里。"]})
+            "请本人自己把这串 Token 粘贴到 心响 → 设置 → 接入 → Slack 里，点「连接」。不要让他把 Token 发到对话里。"]})
     renew = "运行 `wechat-cli init` 提取微信的读取钥匙。这一步要本人在场：会让他输入电脑的开机密码，可能还要重新签名微信（先把这一点告诉本人，他同意再做）。"
     status = wx.get("status") or {}
     if wechat_on and status.get("ok") is False:
@@ -172,6 +172,20 @@ def report(root):
                   f"打开这个来源：`{cmd} set wechat_enabled=true`"]
         out.append({"key": "wechat", "title": "微信", "need": True, "ok": False, "say": "本人想接微信，还没接好。", "steps": steps})
     return {"ready": all(x["ok"] for x in out if x["need"]), "items": out, "cmd": cmd}
+
+
+def only(rep, what):
+    """The report for one tool: that tool, plus what it cannot work without (the program running, the owner's name).
+    Asked for, it counts as needed even when the owner had not said so before."""
+    if not what:
+        return rep
+    items = []
+    for x in rep["items"]:
+        if x["key"] == what:
+            items.append({**x, "need": True} if not x["ok"] else x)
+        elif x["key"] in ("listener", "me") and x["need"]:
+            items.append(x)
+    return {**rep, "items": items, "ready": all(x["ok"] for x in items if x["need"])}
 
 
 def text(rep):
@@ -224,7 +238,8 @@ def parse(pairs):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="心响的配置检查（给 AI 用）")
-    p.add_argument("command", choices=["doctor", "set", "test", "prompt"])
+    p.add_argument("command", choices=["doctor", "status", "set", "test", "prompt"])
+    p.add_argument("--only", choices=["feishu", "slack", "wechat"], help="doctor/status：只看这一项（和它要用到的称呼）")
     p.add_argument("args", nargs="*")
     p.add_argument("--config", type=Path, default=Path("config.yaml"))
     p.add_argument("--json", action="store_true")
@@ -233,9 +248,13 @@ def main(argv=None):
     if a.command == "prompt":
         print(prompt(root))
         return 0
-    if a.command == "doctor":
-        rep = report(root)
-        print(json.dumps(rep, ensure_ascii=False, indent=2) if a.json else text(rep))
+    if a.command in ("doctor", "status"):
+        rep = only(report(root), a.only)
+        if a.command == "status":   # one line, for 心响 itself to check a setup job
+            print(json.dumps({"ready": rep["ready"], "left": [x["title"] for x in rep["items"] if x["need"] and not x["ok"]],
+                              "text": text(rep)}, ensure_ascii=False))
+        else:
+            print(json.dumps(rep, ensure_ascii=False, indent=2) if a.json else text(rep))
         return 0 if rep["ready"] else 2
     if a.command == "set":
         try:

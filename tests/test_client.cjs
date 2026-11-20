@@ -47,11 +47,12 @@ function reset(item) {
   const pane = tab => evaluate(`S.setTab="${tab}"; sysPage()`).split('class="set-pane"')[1];
   const settings = ["tool","mode","ai","talk","store","notify","look","guide","adv"].map(pane).join("");
   for (const label of ["Slack","Notion","只存本机","本机 AI","整理","打开引导","跟随系统","接着做"]) assert.ok(settings.includes(label), label);
-  assert.ok(!pane("ai").includes("Slack"), "one settings page at a time");
+  assert.ok(!pane("ai").includes("setupAsk('slack')") && !pane("ai").includes("Notion"), "one settings page at a time");
   // the menu says what is chosen now, and a page only shows what follows from the choices made
   evaluate('D.settings={engine:"cindy",engine_sort:"codex",intake_mode:"manual"}; D.system={record:{feishu_ready:false,mode:"device"},store:{local:true}}');
   const menu = evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0];
-  for (const label of ["都没接","手动模式","Cindy","只存本机","只在心响里"]) assert.ok(menu.includes(label), label);
+  for (const label of ["驱动心响的 AI","接入","数据与通知","问题反馈","版本与更新","更多","都没接","Cindy","只存本机"]) assert.ok(menu.includes(label), label);
+  assert.equal((menu.match(/class="cell /g)||[]).length, 6, "six places in the settings, no more");
   assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
   assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
   assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
@@ -60,43 +61,44 @@ function reset(item) {
   // setup check: every essential thing says whether it works, and what to do next when it does not
   evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"",aliases:[]},engine_tests:{}}; D.system={listener:"没在运行",engines:{codex:false,claude:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac",root:"/x/心响",python:"/x/py",lark_cli:true}}');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["listener","engine","me"]);
-  let check = pane("check");
+  let check = evaluate("checkList()");
   for (const label of ["还差 3 步才能用","复制给 AI 的话","copySetupPrompt()","不用自己动手","去填"]) assert.ok(check.includes(label), label);
   assert.doesNotMatch(check,/npm install|install-listen|class="cmd"/, "the owner is not handed commands: the AI gets them");
-  assert.match(evaluate('S.setTab="check"; sysPage()').split('class="set-pane"')[0],/配置检查<\/span><span class="val">还差 3 步/);
+  assert.match(evaluate('S.setTab="check"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">[^<]* · 还差 3 步/);
   assert.match(evaluate("todayPage()"),/还差 3 步才能用/);
-  evaluate('D.system.here.client=true'); assert.match(pane("check"),/从开始菜单重新打开/); evaluate('D.system.here.client=false');
+  evaluate('D.system.here.client=true'); assert.match(evaluate("checkList()"),/从开始菜单重新打开/); evaluate('D.system.here.client=false');
   evaluate('D.settings.me={name:"王小明",aliases:[]}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"11-20 10:00"}}; D.system.engines.codex=true; D.system.listener="运行中"');
-  assert.deepEqual(plain("setupProblems()"),[]); assert.match(pane("check"),/都配好了，可以用/); assert.doesNotMatch(evaluate("todayPage()"),/才能用/);
-  evaluate('D.settings.engine_tests={}'); assert.match(pane("check"),/testEngine\('codex'\)">测试连接/);
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(evaluate("checkList()"),/都配好了，可以用/); assert.doesNotMatch(evaluate("todayPage()"),/才能用/);
+  evaluate('D.settings.engine_tests={}'); assert.match(evaluate("checkList()"),/testEngine\('codex'\)">测试连接/);
   evaluate('D.settings.intake_mode="manual"; D.settings.me={name:""}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"x"}}; D.system.record.feishu_ready=false');
   assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
-  for (const label of ["没接，可以不接","去接"]) assert.ok(pane("check").includes(label), label);
-  for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)"]) assert.ok(pane("tool").includes(label), label);
+  for (const label of ["没接，可以不接","去接"]) assert.ok(evaluate("checkList()").includes(label), label);
+  for (const label of ["setupAsk('feishu')","setupAsk('slack')","setupAsk('wechat')"]) assert.ok(pane("tool").includes(label), label);
+  assert.doesNotMatch(pane("tool"),/want_feishu|want_slack|want_wechat/, "connecting is one click that goes to the AI, not a wish switch");
   // the guide's step for office tools: three plain choices when nothing is connected, no technical rows
   let step = evaluate('OB.find(o=>o.key==="tools").body(D.settings,D.system)');
   for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)","setSetting('want_wechat',true)",">飞书<",">Slack<",">微信<"]) assert.ok(step.includes(label), label);
   assert.doesNotMatch(step,/Token|后台程序|实时/, "nothing a newcomer cannot read");
   evaluate('D.settings.want_slack=true');
-  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接Slack/);
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(evaluate("checkList()"),/你想接Slack/);
   evaluate('D.settings.want_slack=false; D.system.record.feishu_ready=true; D.settings.sources={meetings:true,chats:true,tasks:false}');
   step = evaluate('OB.find(o=>o.key==="tools").body(D.settings,D.system)');
   for (const label of ["飞书 · 已接入","setSetting('want_slack',true)"]) assert.ok(step.includes(label), label);
   assert.doesNotMatch(step,/后台程序|实时|want_feishu/);
   evaluate('D.system.record.feishu_ready=false; D.settings.sources={}');
   // WeChat: wanted is a step for the AI; installed and on shows whether it can be read
-  evaluate('D.settings.want_wechat=true'); assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接微信/);
-  assert.match(pane("tool"),/setSetting\('want_wechat',false\)/);
+  evaluate('D.settings.want_wechat=true'); assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(evaluate("checkList()"),/你想接微信/);
+  assert.match(pane("tool"),/setupAsk\('wechat'\)/);
   evaluate('D.settings.want_wechat=false; D.settings.me={name:"王小明"}; D.system.wechat={installed:true,enabled:true,status:{ok:true,at:"11-20 14:00",behind:true}}');
   let wx = pane("tool");
   for (const label of ["读微信","setSetting('wechat_enabled',false)","上次读取 11-20 14:00","只看得到每个聊天的最后一条","wechatCheck()"]) assert.ok(wx.includes(label), label);
-  assert.deepEqual(plain("setupProblems()"),[]); assert.match(pane("check"),/已接入微信/);
-  assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/办公工具<\/span><span class="val">微信/);
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(evaluate("checkList()"),/已接入微信/);
+  assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/接入<\/span><span class="val">微信/);
   evaluate('D.system.wechat.status={ok:false,error:"微信没有打开",at:"11-20 14:02"}');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["tools"]); assert.match(pane("tool"),/微信没有打开/);
   evaluate('D.system.wechat=null; D.settings.me={name:""}');
   evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
-  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接飞书/);
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(evaluate("checkList()"),/你想接飞书/);
   evaluate('D.settings.want_feishu=false');
   assert.deepEqual(plain("OB.map(o=>o.key)"),["me","tools","ai"], "who you are, where work comes from, then one message to your AI");
   // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself
@@ -148,7 +150,7 @@ function reset(item) {
   // Feishu connected on paper but unreadable: it is a step, with the reason, wherever "connected" was shown
   evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"王小明"},engine_tests:{codex:{ok:true,at:"x"}}}; D.system={listener:"运行中",engines:{codex:true},record:{feishu_ready:true,mode:"feishu",feishu_broken:{why:"飞书登录过期了，要重新登录一次",since:"11-20 14:36"}},store:{local:true},here:{platform:"windows",client:true}}');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["feishu"]);
-  for (const label of ["还差 1 步才能用","飞书登录过期了","11-20 14:36","都收不进来"]) assert.ok(pane("check").includes(label), label);
+  for (const label of ["还差 1 步才能用","飞书登录过期了","11-20 14:36","都收不进来"]) assert.ok(evaluate("checkList()").includes(label), label);
   assert.match(pane("tool"),/现在读不到/); assert.match(evaluate("todayPage()"),/还差 1 步才能用/);
   assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/飞书（读不到）/);
   evaluate('D.system.record.feishu_broken=null'); assert.deepEqual(plain("setupProblems()"),[]); assert.doesNotMatch(pane("tool"),/现在读不到/);
@@ -160,19 +162,19 @@ function reset(item) {
   assert.match(any,/<details >/, "splitting the work between AIs stays folded away until it is used");
   let guide = evaluate('S.ob={step:2}; obView()');
   for (const label of ["Antigravity 已经接手","gemini-3","开始使用","copySetupPrompt()"]) assert.ok(guide.includes(label), label);
-  assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/谁来做事<\/span><span class="val">Antigravity</);
-  assert.match(pane("check"),/做事的 AI：Antigravity/); assert.match(pane("check"),/正在领活（gemini-3）/);
+  assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">Antigravity</);
+  assert.match(evaluate("checkList()"),/做事的 AI：Antigravity/); assert.match(evaluate("checkList()"),/正在领活（gemini-3）/);
   evaluate('D.settings.drivers[0].online=false');
-  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["engine"]); assert.match(pane("check"),/现在不在（上次来是 11-20 16:40）/);
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["engine"]); assert.match(evaluate("checkList()"),/现在不在（上次来是 11-20 16:40）/);
   evaluate('D.settings={engine:"codex",intake_mode:"manual",me:{name:""},engine_tests:{},drivers:[]}');
-  assert.match(pane("check"),/不用装：把上面那段话发给你常用的 AI/);
+  assert.match(evaluate("checkList()"),/不用装：把上面那段话发给你常用的 AI/);
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");
   for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活","整理：Cindy","<details open>"]) assert.ok(ai.includes(label), label);
   assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use");
   assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
-  evaluate('D.system.engines.gemini=false'); assert.match(pane("check"),/还没有装 本机 Gemini/);
+  evaluate('D.system.engines.gemini=false'); assert.match(evaluate("checkList()"),/还没有装 本机 Gemini/);
   // rules the AI learned wait on top for the owner's yes or no
   evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
   let mem = evaluate("memPage()");
@@ -312,7 +314,7 @@ function reset(item) {
   assert.match(src,/class="mode on" aria-pressed="true" onclick="setSetting\('intake_mode','accepted'\)"/);
   assert.match(pane("notify"),/早晚简报也发到飞书/);
   evaluate('D.system={record:{feishu_ready:false}}');   // nothing connected: no Feishu switches, notifications stay in the app
-  assert.match(pane("tool"),/没有接入/); assert.doesNotMatch(pane("tool"),/读会议/);
+  assert.match(pane("tool"),/setupAsk\('feishu'\)/); assert.doesNotMatch(pane("tool"),/读会议/);
   assert.match(pane("notify"),/所有通知都只在心响里/);
   await evaluate('setSetting("intake_mode","all")');
   assert.deepEqual(plain("[D.settings.intake_mode,D.settings.auto_assign,D.settings.prework_enabled]"),["all",true,true]);

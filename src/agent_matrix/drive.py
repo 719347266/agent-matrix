@@ -108,6 +108,9 @@ def protocol_tail(job):
     lines = ["", "## 交活（心响驱动协议）",
              f"- 进度：`{c} step --job {j} --text \"2/4 查文档\"`（15 字内，心响里实时显示）",
              f"- 做完：`{c} submit --job {j}`。返回 `\"status\": \"fix\"` 就按 problem 改好再交；返回 done 就结束。"]
+    if job["kind"] == "setup":
+        lines += [f"- 要本人亲手做的事（登录、点同意、扫码、输电脑密码）：`{c} say --job {j} --text \"一句话说清要他做什么\"`，"
+                  "心响里会显示给他看；在你自己的对话里也告诉他，等他做完再继续。"]
     if job["kind"] == "item":
         lines += [f"- 想对本人说的话：`{c} say --job {j} --text \"……\"`（会记进这件事的对话）",
                   f"- 卡住：`{c} ask --job {j} --question \"问本人的一个具体问题\" --tried \"已经试过什么\"`",
@@ -148,6 +151,39 @@ def _prepare_triage(root, config, driver):
 
 
 LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
+
+
+def _prepare_setup(root, config, driver):
+    """The owner clicked 接入飞书 / Slack / 微信 (or asked for the rest to be set up): the AI that drives 心响 does it."""
+    from . import setupasks
+    from .setupshim import _cmd as setup_cmd
+    from .workenv import scratch
+    if _busy(root, "setup"):
+        return None
+    asks = setupasks.pending(root)
+    if not asks:
+        return None
+    what = next(iter(asks))
+    name = setupasks.WHAT[what]
+    only = "" if what == "fix" else f" --only {what}"
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    title = "把心响剩下的配好" if what == "fix" else f"接入 {name}" if name.isascii() else f"接入{name}"
+    doctor = f"{setup_cmd(root)} doctor{only}"
+    return {"id": f"setup-{what}-{stamp}", "kind": "setup", "title": title, "folder": str(scratch(root, "setup", stamp)),
+            "ref": {"what": what}, "output": [], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": f"""# {title}
+
+本人在心响里点了「{title}」，要你来把它配好。你就是驱动心响的 AI，命令都由你来运行。
+
+1. 运行 `{doctor}`。它会列出还缺什么、每一步怎么做；照着逐项做，每做完一步再运行一次，直到这一项就绪。
+2. 只有人能做的事（在浏览器里登录、点同意、扫码、输电脑密码）才找本人：用下面的 say 命令说清要他做什么，然后等他做完再继续。
+3. 每到一个阶段报一下进度（step，15 字内），本人在心响设置里能看到。
+4. 做完运行 submit。心响会自己再查一遍：真接好了才算完成；没好会告诉你还差什么，照着继续。
+
+请遵守：
+- 不要在对话里问本人要密码、验证码、Token 或密钥。要填 Token 的（比如 Slack），请本人自己粘贴到心响的设置里。
+- 改系统设置、重新签名应用这类会影响别的软件的事，先说清楚影响，本人同意了再做。
+- 只做配置这一件事，不要改别的东西。"""}
 
 
 def _prepare_learn(root, config, driver):
@@ -411,8 +447,8 @@ def kinds_for(root, driver):
     """What this AI takes: the sorting if it was handed to it, and items (only its own: see item_filter)."""
     from .aidrivers import is_mine
     from .thread import setting
-    sort = setting(Path(root), "engine_sort", "")
-    return [*(SORTING if is_mine(sort, driver) else ()), "item"]
+    work, sort = setting(Path(root), "engine", "codex"), setting(Path(root), "engine_sort", "")
+    return [*(("setup",) if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
 
 
 def item_filter(root, driver, *, builtin=False):
@@ -469,6 +505,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         # Cindy's schedule and every AI that said hello take what was handed to them, whatever their prompt asks for
         kinds, allow = kinds_for(root, driver), item_filter(root, driver)
     wanted = set(kinds or (*SORTING, "item"))
+    if "setup" in wanted:   # the owner is waiting on this one: it goes before anything else
+        job = _prepare_setup(root, config, driver)
+        if job:
+            return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
             continue
@@ -584,6 +624,10 @@ def say(root, job_id, text, driver=None):
     job = get(root, job_id)
     if closed := _closed(job):
         return closed
+    if job["kind"] == "setup":   # shown where the owner clicked 接入, until the next thing is said
+        from . import setupasks
+        setupasks.note(root, job["ref"]["what"], said=str(text or "").strip()[:300], said_at=now().isoformat(timespec="seconds"))
+        return {"ok": True}
     if job["kind"] != "item":
         return {"ok": False, "error": "只有事项有对话。"}
     from . import thread as conversation
@@ -634,6 +678,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_triage(root, job)
     if kind == "learn":
         return _submit_learn(root, job)
+    if kind == "setup":
+        return _submit_setup(root, job)
     from . import activity
     from .workenv import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
@@ -689,6 +735,30 @@ def _record_of(root, n):
 def _row_of(root, record_id):
     from .snapshot import _snapshot
     return next((r for r in _snapshot(root).get("rows") or [] if r.get("record_id") == record_id), {})
+
+
+def _submit_setup(root, job):
+    """心响 checks for itself whether it is really set up; the ask goes away only then."""
+    from . import inbox, setupasks
+    from .workenv import _cli
+    what = job["ref"]["what"]
+    code, out = _cli(root, "agent_matrix.setupcheck", "status", *([] if what == "fix" else ["--only", what]), timeout=120)
+    if not out:
+        return {"ok": False, "status": "fix", "problem": "心响没查到配置情况，过一会儿再交一次。"}
+    if not out.get("ready"):
+        job["rounds"] += 1
+        if job["rounds"] > 40:
+            return fail(root, job, "改了很多轮还是没配好：" + "、".join(out.get("left") or []))
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "还没好：" + "、".join(out.get("left") or []) + "\n" + str(out.get("text") or "")[-1500:]}
+    setupasks.done(root, what)
+    _close(root, job, "done")
+    activity.log(root, "setup", f"{job['title']}：好了", detail=job.get("driver") or "")
+    try:
+        inbox.add(root, f"setup-done:{job['id']}", f"✓ {job['title']}，{job.get('driver') or 'AI'} 配好了。", kind="system")
+    except Exception as exc:
+        activity.swallowed(root, "drive._submit_setup", exc)
+    return {"ok": True, "status": "done"}
 
 
 def _submit_triage(root, job):
@@ -753,6 +823,13 @@ def release(root, config, job_id, reason="驱动方放回"):
         return {"ok": True, "status": job["status"]}
     if job["kind"] == "item":
         _item(root, config, job).release()
+    if job["kind"] == "setup":   # the AI could not do it: the owner sees why, and can ask again
+        from . import setupasks, thread as conversation
+        what = job["ref"]["what"]
+        said = (setupasks.pending(root).get(what) or {}).get("said") or ""
+        setupasks.done(root, what)
+        conversation.set_setting(Path(root), "setup:gave_up:" + what,
+                                 {"by": job.get("driver"), "why": said, "at": now().isoformat(timespec="seconds")})
     _close(root, job, "released")
     return {"ok": True, "status": "released"}
 
@@ -900,6 +977,12 @@ def main(argv=None):
         config = load(path)
         if args.command == "gate":
             # a schedule's pre-run check: exit 0 = there is an item to do, 2 = nothing (skip this round, no tokens)
+            from . import setupasks
+            from .aidrivers import is_mine
+            from .thread import setting
+            if setupasks.pending(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "setup"):
+                print(json.dumps({"ok": True, "work": "setup"}, ensure_ascii=False))
+                return 0
             if has_items_for(root, config, "Cindy"):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))
                 return 0

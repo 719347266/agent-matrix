@@ -228,6 +228,7 @@ def build_state(root):
         from . import setupshim
         settings["setup_prompt"] = setupshim.prompt(root)   # the one message the owner pastes to their own AI
         settings["part_prompts"] = {part: setupshim.part_prompt(part) for part in setupshim.PARTS}   # one part to a second AI
+        settings["setup"] = setup_view(root)   # what the owner asked the driving AI to set up, and how far it got
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
@@ -526,6 +527,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, update.start(root))
                 update.check(root, force=True)
                 return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/setup":  # 接入飞书 / Slack / 微信, or 剩下没配好的: the AI that drives 心响 does it
+                from . import setupasks, thread
+                what = str(body.get("what") or "")
+                if what not in setupasks.WHAT:
+                    return self._send(400, {"ok": False, "reply": "不知道要接什么。"})
+                if body.get("cancel"):
+                    setupasks.done(root, what)
+                    return self._send(200, {"ok": True})
+                if what != "fix":
+                    thread.set_setting(root, "want_" + what, True)
+                thread.set_setting(root, "setup:gave_up:" + what, None)
+                setupasks.ask(root, what)
+                return self._send(200, {"ok": True, **setup_view(root)["driver"]})
             if path == "/api/item/ai":  # hand this one item to another AI (or back to the one chosen in settings)
                 from . import aidrivers, drive
                 from .config import load
@@ -800,6 +814,22 @@ def make_server(root, port):
     info = Path(root) / "state/app.json"
     info.write_text(json.dumps({"port": port, "pid": os.getpid(), "url": f"http://127.0.0.1:{port}/"}))
     return server
+
+
+def setup_view(root):
+    """For the settings page: who will do the setting up, what waits for it, what it is doing and what it asked for."""
+    from . import aidrivers, drive, setupasks, thread
+    engine = thread.setting(root, "engine", "codex")
+    name = aidrivers.name_in(engine)
+    known = {d["name"]: d for d in aidrivers.known(root)}
+    driver = {"name": name or ("Cindy" if engine == "cindy" else ""),
+              "online": bool(known.get(name, {}).get("online")) if name else engine == "cindy"}
+    asks = setupasks.pending(root)
+    jobs = {j["ref"].get("what"): {"by": j.get("driver"), "step": j.get("step") or "", "title": j.get("title"),
+                                   "said": (asks.get(j["ref"].get("what")) or {}).get("said") or ""}
+            for j in drive.open_jobs(root) if j["kind"] == "setup"}
+    gave_up = {w: thread.setting(root, "setup:gave_up:" + w, None) for w in setupasks.WHAT}
+    return {"driver": driver, "asks": asks, "doing": jobs, "gave_up": {w: g for w, g in gave_up.items() if g}}
 
 
 def start_background(root, config):
