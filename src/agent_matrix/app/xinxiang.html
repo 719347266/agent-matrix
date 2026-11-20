@@ -1311,7 +1311,7 @@ function aiPage(st,s){
       :`<button class="chip ${!split&&work===v?"on":""}" onclick="setAll('${v}')">${l}</button>`).join("")}</div>`;
   const own=v=>v==="cindy"?cindyRows(cindy):LOCAL_ENGINES.includes(v)?engineRow(v,st,found[v]):"";   // what the chosen AI itself needs
   const main=split
-    ?setRow("做事和整理分给了两个 AI",`做事：${esc(engName(work))}；整理：${esc(engName(sort))}。想一个 AI 全包，点右边。`,`<button class="btn pri" onclick="setAll('${work}')">都交给 ${esc(engName(work))}</button>`,pick)
+    ?setRow("做事和整理分给了两个 AI",`做事：${esc(engName(work))}；整理：${esc(engName(sort))}。想一个 AI 全包，点右边。`,`<button class="btn pri" onclick="setAll('${work}')">都交给 ${esc(engName(work))}</button><button class="btn" onclick="copySetupPrompt()">换成别的 AI</button>`,pick)
     :setRow(esc(engName(work)),"心响里所有要 AI 做的事都交给它：做事项、整理会议和聊天、判断新进来的事。"+(who(work)?`<br>${who(work)}`:""),
       `<button class="btn" onclick="copySetupPrompt()">换成别的 AI</button>`,pick)+own(work);
   const probs=setupChecks().filter(x=>x.need&&x.state!=="ok"&&x.key!=="engine"), d=obDriver(st);
