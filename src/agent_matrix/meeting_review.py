@@ -347,7 +347,9 @@ def publish(config, client, state, review):
         raise MatrixError("该会议已有确定的提取版本，不自动替换后重复建事项。")
     state.set(prefix+":validated",canonical)
     coords=["--base-token",config.base_token]
-    for table,required in (("事项表",["标题","状态","原话引用","去重键"]),("会议处理记录表",["会议ID","提取状态","提取待办数"])):
+    from .itemstore import feishu_free
+    local=feishu_free(config)   # items kept on this computer: no Feishu table to check or record the meeting in
+    for table,required in [] if local else (("事项表",["标题","状态","原话引用","去重键"]),("会议处理记录表",["会议ID","提取状态","提取待办数"])):
         fields=items(client.call("+field-list",*coords,"--table-id",config.tables[table]))
         names={f.get("name",f.get("field_name")) for f in fields}
         if not set(required)<=names:
@@ -385,8 +387,9 @@ def publish(config, client, state, review):
     meta=row["metadata"]
     record={"会议ID":review.meeting_id,"标题":meta.get("topic"),"开始时间":parse_time(meta["start_time"]).isoformat(),
             "结束时间":parse_time(meta["end_time"]).isoformat(),"逐字稿状态":["已获取"],"提取状态":["已完成"],"提取待办数":len(task_ids)}
-    state.once(prefix+":meeting-record",lambda:client.call("+record-batch-create",*coords,"--table-id",config.tables["会议处理记录表"],
-                                                         "--json",js({"create_records":[record]}),write=True))
+    if not local:
+        state.once(prefix+":meeting-record",lambda:client.call("+record-batch-create",*coords,"--table-id",config.tables["会议处理记录表"],
+                                                             "--json",js({"create_records":[record]}),write=True))
     # Owner wants control: right after the meeting, one line with the new numbers.
     # A meeting with no new tasks sends nothing.
     try:

@@ -201,6 +201,12 @@ class CodexRun:
 MCP_CACHE_SECONDS = 6 * 3600
 
 
+# The owner's lark-cli is signed in as them: anything that talks to other people or acts on their behalf is
+# refused outright, not just asked against in the prompt. Reading (docs, search, chat history) stays allowed.
+# ponytail: a prefix list; a command spelled another way (full path, npx) is not caught. Only Claude honours it.
+LARK_DENY = " ".join(f"Bash(lark-cli {c}:*)" for c in (
+    "im +messages-send", "im +messages-reply", "im +messages-edit", "im +messages-forward", "im +chat-create",
+    "im +chat-update", "mail", "approval", "api"))
 MCP_DENY = " ".join(f"mcp__*{w}*" for w in ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply",
                                               "create", "update", "move", "restore", "resolve", "comment", "duplicate",
                                               "spawn", "cancel", "upload"))
@@ -265,7 +271,7 @@ class ClaudeRun(CodexRun):
         argv = [binary, "-p", *(["--setting-sources", "user,project"] if mcp else ["--safe-mode"]),
                 "--output-format", "stream-json", "--verbose", *permission, *allowed,
                 "--settings", json.dumps(settings),
-                *(["--disallowedTools", MCP_DENY] if mcp else [])]
+                "--disallowedTools", " ".join([LARK_DENY, *([MCP_DENY] if mcp else [])])]
         if self.config.worker_claude_model:
             argv += ["--model", self.config.worker_claude_model]
         if self.effort in {"low", "medium", "high", "xhigh", "max"}:

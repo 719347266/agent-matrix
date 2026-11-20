@@ -41,6 +41,7 @@ class LinkedSyncTests(unittest.TestCase):
 
     def test_task_link_must_be_exact_trusted_host_and_valid_guid(self):
         self.assertEqual(task_guid(URL), GUID)
+        self.assertEqual(task_guid(URL.replace("applink.feishu.cn", "applink.larksuite.com")), GUID)   # Lark (international)
         for url in (URL.replace("applink.feishu.cn", "applink.feishu.cn.evil.invalid"),
                     URL.replace("https:", "http:"), URL+"&guid="+GUID,
                     URL.replace(GUID, "not-a-guid"), "file:///etc/passwd"):

@@ -1,20 +1,16 @@
 """Chats → a small pile of candidate messages. Pure code, no model.
 
-Reads the owner's most active chats as the owner (user identity), and keeps only lines
-that can be about the owner's work:
-  - the owner commits to something ("我来" "明天给你" "我跟进"),
-  - someone talks to the owner: anything in a private chat, or a group line that @-s or names the owner,
-  - a reply to something the owner posted, or an @all / @here notice (the owner is one of "all").
-Whether that person actually wants something is the model's call, not a word list: "这个弹窗只展示一点"
-has no ask word and is still a request. Code only drops pure small talk ("好的" "哈哈" "👍").
-Everything else never leaves the machine. The model only reads the kept lines, in batches.
+Reads the owner's most active chats as the owner (user identity). Every line the owner's account can see goes
+to the model, which decides who it is for and whether it is work for the owner (like 数字分身's intake):
+code does not guess from names or ask words, which lose too much ("你们帮忙升级一下" right after the owner
+spoke names nobody). The kind only tells the model what code already knows: 我说的 / @你 / 找你的 (a private
+chat, or the owner named) / 回你的 (a reply to the owner's post) / 全员 (@all) / 群聊 (anything else in a group).
+Code drops only pure small talk ("好的" "哈哈" "👍"), and in a chat the owner muted keeps nothing but @你.
 """
 from datetime import datetime, timedelta
 import json
 import re
 
-COMMIT = re.compile(r"我来|我去|我会|我负责|我晚点|我稍后|我待会|我明天|我今天|我这边|回头(我)?(发|给|弄|看|整理)|"
-                    r"我跟进|我处理|我整理|我弄|我改|我补|我出|包在我|交给我|收到[，,。！!]?我")
 # Nothing but an acknowledgement, a laugh, emoji or punctuation: never a request.
 SMALL_TALK = re.compile(r"^(?:好的?|好嘞|好滴|行|收到|嗯+|哦+|噢+|ok(?:ay)?|谢谢|感谢|多谢|thx|thanks|哈+|呵+|嘿+|:[\w+-]+:|[\W_])*$", re.I)
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
@@ -61,15 +57,15 @@ def _text(message):
 def classify(text, *, from_owner, chat_mode, names, mentioned=False, replied=False, broadcast=False):
     """Which kind of candidate this line is, or None to drop it. A muted chat keeps only "@你"."""
     if from_owner:
-        return "我的承诺" if len(text) >= 6 and COMMIT.search(text) else None
+        return None if SMALL_TALK.match(text) else "我说的"
     if mentioned:  # @you in a group: always worth a look, however short ("@你 人生模拟器反馈")
         return "@你" if len(re.sub(r"@\S+", "", text).strip()) >= 2 else None
     if SMALL_TALK.match(text):
         return None
-    # Talking to the owner is enough; whether they want something is for the model to judge.
+    # Whether anyone wants something of the owner is for the model to judge; the kind is just what code knows.
     if chat_mode == "p2p" or any(w in text for w in names):
         return "找你的"
-    return "回你的" if replied else "全员" if broadcast else None
+    return "回你的" if replied else "全员" if broadcast else "群聊"
 
 
 MINE_KEEP = 300
@@ -98,7 +94,7 @@ def mentions_all(message):
 
 def poll(config, client, state, now, *, skip_chat_ids=()):
     table(state)
-    data = client._exec(["im", "+chat-list", "--as", "user", "--types", "p2p,group", "--exclude-muted",
+    data = client._exec(["im", "+chat-list", "--as", "user", "--types", "p2p,group",  # muted in Lark too: customer groups often are
                          "--sort", "active_time", "--page-size", str(MAX_CHATS), "--format", "json"])
     chats = (data.get("items") or data.get("chats") or []) if isinstance(data, dict) else data
     names = owner_words(config)

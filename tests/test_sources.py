@@ -21,10 +21,13 @@ class ChatFilterTests(unittest.TestCase):
 
     def test_keeps_only_lines_about_the_owner(self):
         keep = lambda t, **k: classify(t, names=self.names, **{"from_owner": False, "chat_mode": "group", **k})
-        self.assertEqual(keep("好的，这个我来整理，明天给你", from_owner=True), "我的承诺")
-        self.assertIsNone(keep("今天天气不错，大家辛苦了", from_owner=True))
+        # everything the owner's account sees goes to the model; the kind is only what code already knows
+        self.assertEqual(keep("好的，这个我来整理，明天给你", from_owner=True), "我说的")
+        self.assertEqual(keep("都升级成plus了", from_owner=True), "我说的")      # the model reads "done" from it
+        self.assertIsNone(keep("好的", from_owner=True))
         self.assertEqual(keep("小王，周五前帮忙看下这个需求"), "找你的")
-        self.assertIsNone(keep("周五前帮忙看下这个需求"))            # group line not addressed to the owner
+        self.assertEqual(keep("会员页积分显示不对，谁帮忙看下"), "群聊")      # a customer's unaddressed question
+        self.assertEqual(keep("那我先把app装上，你们帮忙升级一下？"), "群聊")
         self.assertEqual(keep("试了一下还是超时", replied=True), "回你的")   # a reply to the owner's post
         self.assertEqual(keep("今晚 10 点封版", broadcast=True), "全员")
         self.assertIsNone(keep("好的", replied=True))
@@ -60,6 +63,9 @@ class ChatReviewTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         fields = chat_fields(CONFIG, *kept[0])
         self.assertEqual((fields["执行方"], fields["状态"], fields["来源"]), (["我"], ["未开始"], ["聊天"]))
+        self.assertTrue(fields["来源链接"].startswith("https://applink.feishu.cn/"))
+        lark = chat_fields(CONFIG.model_copy(update={"lark_brand": "lark"}), *kept[0])
+        self.assertTrue(lark["来源链接"].startswith("https://applink.larksuite.com/client/chat/open?openChatId=oc_1"))
 
     def test_every_private_line_needs_a_decision_and_is_kept_at_any_confidence(self):
         from agent_matrix.chat_review import ChatSkip
@@ -122,6 +128,13 @@ class ChatReviewTests(unittest.TestCase):
 
 
 class FeishuTaskTests(unittest.TestCase):
+    def test_no_tasks_at_all_is_an_empty_list(self):
+        from agent_matrix.sources import feishu_tasks
+        empty = SimpleNamespace(_exec=lambda a: {"has_more": False, "items": None, "page_token": ""})
+        self.assertEqual(feishu_tasks._list(empty, complete=False, since=datetime(2026, 11, 6)), [])
+        with self.assertRaises(MatrixError):
+            feishu_tasks._list(SimpleNamespace(_exec=lambda a: {"weird": 1}), complete=False, since=datetime(2026, 11, 6))
+
     def test_task_becomes_owner_item_with_link(self):
         task = {"guid": "g1", "summary": "投放方案撰写", "url": "https://applink.feishu.cn/client/todo/detail?guid=g1",
                 "due": {"timestamp": "1795622400000"}}
@@ -276,8 +289,9 @@ class SlackSourceTests(unittest.TestCase):
             return {"messages": history[p["channel"]]} if method == "conversations.history" else replies[method]
         config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
         out = slack.poll(config, root, state, datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api)
-        self.assertEqual((out["candidates"], out["via"]), (2, "list"))
-        rows = {r["chat_name"]: r for r in pending(state)}
+        self.assertEqual((out["candidates"], out["via"]), (3, "list"))       # the bot line is the only one left out
+        self.assertEqual(sorted(r["kind"] for r in pending(state)), ["@你", "找你的", "群聊"])
+        rows = {r["chat_name"]: r for r in pending(state) if r["kind"] != "群聊"}
         self.assertEqual(rows["Slack · ops"]["message_id"], "https://acme.slack.com/archives/C1/p1795400000000100")
         self.assertIn("@王小明", rows["Slack · ops"]["text"])
         self.assertEqual(rows["Slack · 陈一凡"]["chat_mode"], "p2p")
@@ -312,10 +326,10 @@ class SlackSourceTests(unittest.TestCase):
             return {"messages": {"matches": found, "paging": {"pages": 1}}}
         config = CONFIG.model_copy(update={"slack_token": "xoxp-test"})
         out = slack.poll(config, root, state, now, api=api)
-        self.assertEqual((out["candidates"], out["via"]), (2, "search"))
+        self.assertEqual((out["candidates"], out["via"]), (3, "search"))
         self.assertNotIn("conversations.history", calls)
-        kinds = {r["chat_name"]: r["kind"] for r in pending(state)}
-        self.assertEqual(kinds, {"Slack · 王小明": "我的承诺", "Slack · sales": "@你"})
+        kinds = sorted((r["chat_name"], r["kind"]) for r in pending(state))
+        self.assertEqual(kinds, [("Slack · sales", "@你"), ("Slack · sales", "群聊"), ("Slack · 王小明", "我说的")])
         self.assertEqual(state.get("slack:search-cursor"), found[0]["ts"])
         self.assertEqual(slack.poll(config, root, state, now, api=api)["candidates"], 0)  # nothing new since the cursor
 
@@ -395,9 +409,8 @@ class SlackSourceTests(unittest.TestCase):
         try:
             out = slack.poll(Config(slack_token="xoxp-1", owner_name="YuHao Lin"), root, state,
                              datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
-            self.assertEqual(out["candidates"], 1)
-            kind, = state.db.execute("SELECT kind FROM chat_candidates").fetchone()
-            self.assertEqual(kind, "@你")
+            kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))
+            self.assertEqual(kinds, {"@YuHao Lin 业务是否有偏移": "@你", "业务是否有偏移，大家看看": "群聊"})
         finally:
             state.close()
 
@@ -485,7 +498,9 @@ class SlackSourceTests(unittest.TestCase):
             slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
             slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
             kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))
-            self.assertEqual(kinds, {"试了一下，还是超时": "回你的", "@here 今晚 10 点封版": "全员"})
+            # dev: everything goes to the model, labelled; the muted channel keeps nothing (no one @-ed the owner there)
+            self.assertEqual(kinds, {"导出功能今天上 dev 了": "我说的", "试了一下，还是超时": "回你的",
+                                     "@here 今晚 10 点封版": "全员", "午饭吃啥": "群聊"})
         finally:
             state.close()
 

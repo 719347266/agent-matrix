@@ -36,7 +36,7 @@ def now_ms():
 
 def task_guid(url):
     p = urlparse(url or "")
-    if p.scheme != "https" or p.netloc != "applink.feishu.cn" or p.path != "/client/todo/task":
+    if p.scheme != "https" or p.netloc not in ("applink.feishu.cn", "applink.larksuite.com") or p.path != "/client/todo/task":
         raise MatrixError("关联任务链接不是可识别的飞书任务链接，需确认来源。")
     values = parse_qs(p.query).get("guid", [])
     try:

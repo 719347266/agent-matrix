@@ -378,20 +378,23 @@ class Listener:
 
     def timers(self):
         jobs = []
-        from .itemstore import feishu_free
-        no_feishu = feishu_free(load(self.path))  # Feishu meetings, chats and tasks need Feishu; Slack does not
-        if self.every("minute", 60) and not no_feishu:
+        from .itemstore import feishu_free, reads_feishu
+        config_now = load(self.path)
+        no_feishu = feishu_free(config_now)        # no Feishu table: briefs, meeting prep cards, weekly review are off
+        no_source = not reads_feishu(config_now)   # Feishu meetings, chats and tasks need Feishu; Slack does not
+        if self.every("minute", 60) and not no_source:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
                 from . import monitor
                 now = datetime.now(TZ)
-                parts = [("prep", lambda: meeting_prep.run(config, client, state, now, horizon=31, lead=20))]
-                if state.get("brief-v1:migration-stage") == "v1_active":
+                parts = [] if no_feishu else [("prep", lambda: meeting_prep.run(config, client, state, now, horizon=31, lead=20))]
+                if state.get("brief-v1:migration-stage") == "v1_active" and not no_feishu:
                     parts += [("catch_up", lambda: catch_up_briefs(config, client, state, now)),
                               ("weekly", lambda: weekly_review.run(config, client, state, now))]
-                parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now)),
-                          ("meetings", lambda: self.meeting_check(config, client, state, now))]
+                if not no_feishu:
+                    parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now))]
+                parts += [("meetings", lambda: self.meeting_check(config, client, state, now))]
                 out, wrong = {}, []
                 for name, part in parts:   # each on its own: one that fails must not stop the others
                     try:
@@ -412,7 +415,7 @@ class Listener:
                 monitor.save_snapshot(self.root, rows)
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
-        if self.every("chats", 120) and not no_feishu:
+        if self.every("chats", 120) and not no_source:
             def chat_poll(config, client, state):
                 from .sources import chats
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
@@ -429,7 +432,7 @@ class Listener:
                     self.wake_worker(config)  # don't wait for the 2-minute kick; the worker decides if it's time
                 return out
             jobs.append(("slack", slack_poll))
-        if self.every("tasks", 900) and not no_feishu:
+        if self.every("tasks", 900) and not no_source:
             def tasks(config, client, state):
                 from .sources import feishu_tasks
                 on = config.feishu_tasks_enabled and config.intake_mode != "manual"

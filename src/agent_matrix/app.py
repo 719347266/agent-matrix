@@ -139,7 +139,8 @@ def build_state(root):
                 "reply_timing": timings.get(r["record_id"]), "closed": closures.get(r["record_id"]), "sessions": sessions_of.get(r["record_id"], []),
                 "before": before_of.get(r["record_id"], []), "after": after_of.get(r["record_id"], []),
                 "ai_linked": ai_of.get(r["record_id"], []),
-                "related": suggest(r["record_id"], r.get("标题") or "") if linked is not None else []}
+                "related": suggest(r["record_id"], r.get("标题") or "") if linked is not None else [],
+                "draft_reply": _draft_reply(root, r)}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -239,6 +240,15 @@ def build_state(root):
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
             "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}, "bugs": _bugs(root)}
+
+
+def _draft_reply(root, row):
+    """The reply the AI wrote for the person who asked, waiting for the owner's 发送 (or already sent / dropped)."""
+    from . import replies
+    entry = replies.get(root, row["record_id"])
+    if not entry or entry.get("status") == "dropped":
+        return None
+    return {**entry, "where": replies.where(replies.target(row))}
 
 
 def _bugs(root):
@@ -571,6 +581,25 @@ class Handler(BaseHTTPRequestHandler):
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 return self._send(200, {"ok": True})
+            if path in ("/api/reply/send", "/api/reply/drop"):   # only ever from the owner's own click
+                from . import replies
+                from .models import MatrixError
+                from .snapshot import _snapshot
+                rid = str(body.get("rid") or "")
+                if path.endswith("drop"):
+                    ok = replies.discard(root, rid)
+                    return self._send(200 if ok else 400, {"ok": ok, "reply": "" if ok else "这条回复已经发过或不发了。"})
+                row = next((r for r in _snapshot(root).get("rows") or [] if r.get("record_id") == rid), None)
+                if not row:
+                    return self._send(400, {"ok": False, "reply": "找不到这件事。"})
+                from .config import load as load_config
+                try:
+                    return self._send(200, replies.send(root, load_config(root / "config.yaml"), row, body.get("text")))
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except Exception as exc:   # Feishu / Slack refused: say so, the draft stays for another try
+                    activity.swallowed(root, "app.reply_send", exc)
+                    return self._send(400, {"ok": False, "reply": f"没发出去（{type(exc).__name__}: {str(exc)[:120]}），草稿还在，可以再点一次。"})
             if path == "/api/approval":
                 from . import approvals
                 ok = approvals.decide(root, str(body.get("id") or ""), bool(body.get("allow")), body.get("note"))

@@ -61,7 +61,7 @@ class WeChatTests(unittest.TestCase):
         self.assertEqual(got["@王小明 周五前把定价方案发群里"]["kind"], "@你")
         self.assertEqual(got["明天把报价发我一下"]["kind"], "找你的")                  # a private chat: asked of the owner
         mine = got["好的我来跟进这个事情"]                                             # in a private chat the other side is the owner
-        self.assertEqual((mine["kind"], mine["sender_name"]), ("我的承诺", "我"))
+        self.assertEqual((mine["kind"], mine["sender_name"]), ("我说的", "我"))
         self.assertEqual(self.state.get("wechat:me"), "小王")                        # the owner's WeChat name, learned there
         self.assertNotIn("[图片] (local_id=1)", got)
         for m in got.values():

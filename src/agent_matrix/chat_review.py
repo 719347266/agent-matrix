@@ -205,8 +205,10 @@ def validate(config, review, root):
             sender = config.owner_name if m["sender_name"] == "我" else m["sender_name"]
             extra = config.owner_aliases if a.owner_name == config.owner_name else ()
             named = any(x in m["text"] for x in aliases(a.owner_name, extra))
-            private_to_owner = m["chat_mode"] == "p2p" and a.owner_name == config.owner_name
-            if a.owner_name != sender and not named and not private_to_owner:
+            # The owner may take any line: a customer's unaddressed question in a group is for whoever sees it.
+            # Someone else is the owner only when they said it themselves or were named.
+            for_owner = a.owner_name == config.owner_name
+            if a.owner_name != sender and not named and not for_owner:
                 raise MatrixError(f"「{a.title}」的负责人{a.owner_name}既不是发消息的人，也没被点名；改为 null。")
         if a.due_date:
             # "下周", "月底": no exact day can be worked out from the words. The date is left empty (the item
@@ -250,6 +252,10 @@ def _every_private_line_decided(review, batch, by_id):
         raise MatrixError(f"这几条私聊没有结论：{lines}。私聊的每一条要么提取成待办，要么写进 skipped 并选一个类别。")
 
 
+def applink(config):
+    return "applink.larksuite.com" if getattr(config, "lark_brand", "feishu") == "lark" else "applink.feishu.cn"
+
+
 def task_fields(config, a, m):
     own = a.owner_name == config.owner_name
     executor = ("AI" if a.executor == "AI" else "我") if own else "别人"
@@ -260,7 +266,7 @@ def task_fields(config, a, m):
               "下一步动作": a.title, "来源": ["聊天"],
               "来源链接": m["message_id"] if m["message_id"].startswith("https://")  # Slack permalink
                           else None if m["message_id"].startswith("wechat:")       # WeChat has no link to a message
-                          else f"https://applink.feishu.cn/client/chat/open?openChatId={m['chat_id']}",
+                          else f"https://{applink(config)}/client/chat/open?openChatId={m['chat_id']}",
               "原话引用": f"[{m['chat_name']} {m.get('sent_at') or ''} {m['sender_name']}] {m['text'][:300]}"}
     if executor == "别人" and m["kind"] != "找你的":
         fields["排除本人提醒"] = True

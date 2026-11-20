@@ -239,6 +239,9 @@ class ConversationTests(unittest.TestCase):
                 every = ClaudeRun(Config(worker_claude=str(fake), worker_mcp_tools=["*"]), work).argv()
             self.assertIn("mcp__pencil__* mcp__plugin_chrome-devtools-mcp_chrome-devtools__*", every[every.index("--allowedTools") + 1])
             self.assertIn("mcp__*send*", every[every.index("--disallowedTools") + 1])  # never sends on its own
+            self.assertIn("Bash(lark-cli im +messages-send:*)", every[every.index("--disallowedTools") + 1])
+            plain = ClaudeRun(Config(worker_claude=str(fake)), work).argv()          # without MCP too
+            self.assertIn("Bash(lark-cli im +messages-reply:*)", plain[plain.index("--disallowedTools") + 1])
             self.assertNotIn("claude_ai_Notion", every[every.index("--allowedTools") + 1])  # plugins + local MCP only
             self.assertEqual(ClaudeRun(Config(worker_mcp_tools=["*"]), work).env()["ENABLE_CLAUDEAI_MCP_SERVERS"], "false")
             root = Path(tmp) / "root"

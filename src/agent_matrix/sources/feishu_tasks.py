@@ -18,6 +18,8 @@ def _list(client, *, complete, since):
     data = client._exec(["task", "+get-my-tasks", "--complete=" + ("true" if complete else "false"),
                          "--created_at", since.strftime("%Y-%m-%d"), "--page-all", "--as", "user", "--format", "json"])
     items = data.get("items") if isinstance(data, dict) else data
+    if items is None and isinstance(data, dict) and "items" in data:
+        items = []   # no tasks at all comes back as "items": null
     if not isinstance(items, list):
         raise MatrixError("飞书任务列表结构异常，本轮不同步。")
     return items
@@ -48,7 +50,8 @@ def fields_for(task, config, tz):
 
 def sync(config, client, state, now, *, notify=True):
     from ..workflow import Gateway, ensure_options
-    if not state.get("v1:source-options"):
+    from ..itemstore import feishu_free
+    if not state.get("v1:source-options") and not feishu_free(config):  # items kept here already carry every option
         ensure_options(client, state, "来源", ["飞书任务", "聊天"])
         state.set("v1:source-options", True)
     started = state.get("feishu-tasks:started")

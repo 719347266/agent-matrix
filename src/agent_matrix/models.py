@@ -15,6 +15,10 @@ class Config(BaseModel):
     base_url: str = ""
     tables: dict[str, str] = Field(default_factory=dict)
     lark_binary: str = "lark-cli"
+    lark_brand: Literal["feishu", "lark"] = "feishu"
+    # Items stay on this computer (item_store: device / notion) but Feishu/Lark is still read like Slack:
+    # meetings, chats and tasks come in; nothing is written to a Feishu table.
+    feishu_as_source: bool = False   # "lark": the international Lark (larksuite.com); same as lark-cli's --brand
     timeout_seconds: int = Field(default=60, ge=5, le=300)
     llm_backend: Literal["disabled", "cindy_current"] = "disabled"
     transcripts_to_llm_allowed: bool = False

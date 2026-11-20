@@ -35,8 +35,13 @@ def enabled(config):
 
 
 def feishu_free(config):
-    """Items in Notion or only on this computer: nothing here needs Feishu."""
+    """Items in Notion or only on this computer: no Feishu table is used."""
     return getattr(config, "item_store", "feishu") in ("notion", "device")
+
+
+def reads_feishu(config):
+    """Feishu/Lark meetings, chats and tasks are read: with the Feishu table, or as a plain source (feishu_as_source)."""
+    return not feishu_free(config) or bool(getattr(config, "feishu_as_source", False))
 
 
 def is_items_table(config, args):

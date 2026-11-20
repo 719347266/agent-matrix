@@ -1647,12 +1647,34 @@ function itemView(i){
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
-    ${chainView(i)}${deliverView(i)}
+    ${chainView(i)}${deliverView(i)}${replyView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
     <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
 }
+/* ---------- 回复对方：AI 起草，本人看过、可以改，点「发送」才以本人身份回到原消息下面 ---------- */
+function replyView(i){
+  const r=i.draft_reply; if(!r) return "";
+  if(r.status==="sent") return `<div class="d-sec" style="padding-top:14px"><h3>已回复对方</h3><div class="inner-list"><div class="dv-row"><div style="min-width:0"><div class="t wrap">${linkify(r.text)}</div><div class="s">${esc(String(r.sent_at||"").slice(5,16).replace("T"," "))} 发出</div></div></div></div></div>`;
+  const can=!!r.where;
+  return `<div class="d-sec" style="padding-top:14px"><h3>要回给对方的话<span class="hint" style="margin:0 0 0 8px;font-weight:400">${can?`AI 起草，你点「发送」才会以你的身份在${esc(r.where)}`:"这件事不是从 Lark / 飞书或 Slack 的消息来的，复制过去自己发"}</span></h3>
+    <textarea id="reply-${i.n}" data-draft="reply-${i.n}" rows="5" style="width:100%" aria-label="要回给对方的话">${esc(r.text)}</textarea>
+    <div class="acts" style="margin-top:6px">${can?`<button class="btn pri" onclick="sendReply(${i.n})">发送</button>`:""}<button class="btn" onclick="copyReply(${i.n})">复制</button><button class="btn ghost" onclick="dropReply(${i.n})">不发</button></div></div>`;
+}
+function replyText(n){ const el=$("#reply-"+n); return String(el?el.value:(byN(n).draft_reply||{}).text||"").trim(); }
+async function sendReply(n){
+  const i=byN(n), text=replyText(n); if(!text) return toast("回复是空的");
+  if(!LIVE) return toast("原型：不会真的发出去");
+  try{ await api("/api/reply/send",{rid:i.rid,text},40000); drafts.delete("reply-"+n); toast("已发出"); }catch(e){ toast(e.message||"没发出去"); }
+  load();
+}
+async function dropReply(n){
+  const i=byN(n);
+  if(LIVE){ try{ await api("/api/reply/drop",{rid:i.rid}); }catch(e){ return toast(e.message||"没改成"); } } else i.draft_reply=null;
+  drafts.delete("reply-"+n); toast("这条不发了"); LIVE?load():render();
+}
+function copyReply(n){ navigator.clipboard?.writeText(replyText(n)).then(()=>toast("已复制"),()=>toast("复制不了，手动选中复制吧")); }
 /* ---------- 交付：每一版的链接和说明都能改、能删，也能自己加一版 ---------- */
 function deliverView(i){
   const list=D.deliverables[i.n]||[], e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;
