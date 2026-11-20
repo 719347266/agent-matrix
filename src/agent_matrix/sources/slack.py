@@ -13,9 +13,11 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..models import MatrixError
-from .chats import MAX_CHATS, classify, muted_chat, owner_words, skipped_chat, skipped_text, table
+from .chats import MAX_CHATS, classify, muted_chat, owner_words, recent_lines, skipped_chat, skipped_text, table
 
 API = "https://slack.com/api/"
+# Subtypes that are still a person talking: a picture or file with its caption, a thread reply also sent to the channel.
+USER_SUBTYPES = {None, "file_share", "thread_broadcast"}
 
 
 def token(config):
@@ -102,7 +104,7 @@ def history(config, channel, oldest, latest=None, *, thread=None, api=call, limi
                 msgs += api(tok, "conversations.replies", channel=channel, ts=m["ts"], **window).get("messages") or []
         out, seen = [], set()
         for m in sorted(msgs, key=lambda m: float(m["ts"])):
-            if m["ts"] in seen or m.get("subtype") or not m.get("user") or not m.get("text") or float(m["ts"]) <= float(oldest):
+            if m["ts"] in seen or m.get("subtype") not in USER_SUBTYPES or not m.get("user") or not m.get("text") or float(m["ts"]) <= float(oldest):
                 continue
             seen.add(m["ts"])
             text = " ".join(re.sub(r"<@(U\w+)>", lambda x: "@" + who(x.group(1)), m["text"]).split())
@@ -190,9 +192,10 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
         if cid in exclude or skipped_chat(config, c["name"]):
             continue
         muted = muted_chat(config, c["name"])
-        history = []
+        history_key = "slack:recent:" + cid
+        history = recent_lines(state, history_key)
         for m in msgs:
-            if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
+            if m.get("subtype") not in USER_SUBTYPES or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
                 continue
             from_owner = m["user"] == my_id
             # Owner mentions become the owner's name so the "被点名" rule in chat_review sees them.
@@ -210,6 +213,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
                     json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
                 kept += 1
             history.append(f"{sender}：{text[:120]}")
+        state.set(history_key, history[-2:])
         state.db.commit()
     if how == "search":
         state.set("slack:search-cursor", newest_all)

@@ -398,6 +398,35 @@ class SlackSourceTests(unittest.TestCase):
         finally:
             state.close()
 
+    def test_private_report_with_screenshots_is_kept_and_context_survives_polls(self):
+        from agent_matrix.sources import slack
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        dm = {"id": "D1", "name": "cara", "is_im": True}
+        rounds = [[{"ts": "1795000000.000100", "user": "UX", "subtype": "file_share", "text": "截图在这", "channel": dm},
+                   {"ts": "1795000000.000200", "user": "UX", "text": "网页比例100%时，这个会员弹窗只能展示一点出来", "channel": dm}],
+                  [{"ts": "1795000060.000100", "user": "UX", "text": "<http://dreame-us.myshopify.com|dreame-us.myshopify.com>", "channel": dm}]]
+        def api(tok, method, **p):
+            if method == "auth.test":
+                return {"user_id": "UME", "url": "https://acme.slack.com/"}
+            if method == "users.info":
+                return {"user": {"profile": {"display_name": "cara"}}}
+            return {"messages": {"matches": rounds.pop(0) if rounds else [], "paging": {"pages": 1}}}
+        state = State(root / "state.db")
+        try:
+            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin")
+            slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
+            slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
+            rows = {t: json.loads(c) for t, c in state.db.execute("SELECT text, context FROM chat_candidates")}
+            # a bug report in a DM has no ask words but is kept; the picture's caption is read
+            self.assertIn("网页比例100%时，这个会员弹窗只能展示一点出来", rows)
+            self.assertEqual(rows["网页比例100%时，这个会员弹窗只能展示一点出来"], ["cara：截图在这"])
+            # the next poll still sees what came just before
+            self.assertEqual(rows["<http://dreame-us.myshopify.com|dreame-us.myshopify.com>"],
+                             ["cara：截图在这", "cara：网页比例100%时，这个会员弹窗只能展示一点出来"])
+        finally:
+            state.close()
+
     def test_connect_saves_token_and_shows_identity_without_the_token(self):
         from agent_matrix import app
         from agent_matrix.config import load

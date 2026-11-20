@@ -67,9 +67,18 @@ def classify(text, *, from_owner, chat_mode, names, mentioned=False):
     if len(text) < 6:
         return None
     to_owner = chat_mode == "p2p" or any(w in text for w in names)
-    if to_owner and (ASK.search(text) or WHEN.search(text) or (chat_mode == "p2p" and P2P_ASK.search(text))):
+    # A private message long enough to say something (a bug report, a screenshot's caption) goes to the model:
+    # "这个弹窗只展示一点" carries no ask word but is clearly for the owner. Short chit-chat stays out.
+    private = chat_mode == "p2p" and (len(text) >= 12 or P2P_ASK.search(text))
+    if to_owner and (ASK.search(text) or WHEN.search(text) or private):
         return "找你的"
     return None
+
+
+def recent_lines(state, key):
+    """The last lines seen in a chat, kept across polls: with a poll every minute, the line before is often
+    in the previous poll, and a kept line without it ("just a link") means nothing to the model."""
+    return list(state.get(key, []))[-2:]
 
 
 def mentions_owner(message, owner_open_id):
@@ -94,7 +103,8 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         got = client._exec(["im", "+chat-messages-list", "--chat-id", cid, "--start", since, "--end", now.isoformat(),
                             "--order", "asc", "--no-reactions", "--as", "user", "--format", "json"])
         messages = got.get("messages") or got.get("items") or []
-        history = []
+        history_key = "chats:recent:" + cid
+        history = recent_lines(state, history_key)
         for m in messages:
             sender = m.get("sender") or {}
             text = _text(m)
@@ -113,6 +123,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
                 kept += 1
             history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
         state.db.commit()
+        state.set(history_key, history[-2:])
         state.set(cursor_key, now.isoformat())
     if kept:
         from .. import activity
