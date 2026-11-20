@@ -332,7 +332,7 @@ def open_local(root,config,key):
 CINDY_APP = Path("/Applications/Cindy.app")
 CLAUDE_APP = Path("/Applications/Claude.app")
 CHATGPT_APP = Path("/Applications/ChatGPT.app")
-PICKUP = ("cindy", "claude", "terminal-claude", "terminal-codex")   # where the owner picks an item up
+PICKUP = ("cindy", "claude", "terminal-claude", "terminal-codex", "terminal-gemini")   # where the owner picks an item up
 GPT_OPEN = ("here", "chatgpt", "terminal")                         # where a built-in GPT conversation opens
 
 
@@ -341,7 +341,8 @@ def apps(config=None):
     from . import workenv
     return {"cindy": CINDY_APP.is_dir(), "claude": CLAUDE_APP.is_dir(), "chatgpt": CHATGPT_APP.is_dir(),
             "terminal-claude": bool(workenv.claude_binary(config)) if config else bool(__import__("shutil").which("claude")),
-            "terminal-codex": bool(workenv.codex_binary(config)) if config else bool(__import__("shutil").which("codex"))}
+            "terminal-codex": bool(workenv.codex_binary(config)) if config else bool(__import__("shutil").which("codex")),
+            "terminal-gemini": bool(workenv.gemini_binary(config)) if config else bool(__import__("shutil").which("gemini"))}
 
 
 def pickup_choice(root, found=None):
@@ -439,9 +440,13 @@ def start_in_cindy(root, config, item, history=""):
     return {"opened": "cindy", "folder": str(folder)}
 
 
-def pick_up(root, config, item, history=""):
-    """Pick an item up in the app the owner chose (设置 → AI 对话), with the whole context in the item's folder."""
-    where = pickup_choice(root, apps(config))
+def pick_up(root, config, item, history="", where=None):
+    """Pick an item up with the whole context in the item's folder: in the app chosen for this one item (`where`),
+    else in the owner's usual one (设置 → 打开对话). Choosing for one item changes nothing else."""
+    found = apps(config)
+    if where is not None and (where not in PICKUP or not found.get(where)):
+        raise MatrixError("这台电脑上没有这个 App。")
+    where = where or pickup_choice(root, found)
     if where == "cindy":
         return start_in_cindy(root, config, item, history)
     if where == "claude":
@@ -454,7 +459,7 @@ def start_in_terminal(root, config, item, history="", cli="claude"):
     from . import sessions, workenv
     import shlex
     folder = write_context(root, item, history)
-    binary = (workenv.claude_binary if cli == "claude" else workenv.codex_binary)(config)
+    binary = {"claude": workenv.claude_binary, "gemini": workenv.gemini_binary}.get(cli, workenv.codex_binary)(config)
     if not binary:
         raise MatrixError(f"没有找到 {cli} 命令行。")
     prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"

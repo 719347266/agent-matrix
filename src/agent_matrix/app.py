@@ -481,6 +481,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, update.start(root))
                 update.check(root, force=True)
                 return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/item/deliverable":  # the owner adds, corrects or removes a deliverable version
+                from . import deliverables
+                from .models import MatrixBusy, MatrixError
+                try:
+                    return self._send(200, {"ok": True, **deliverables.change(
+                        root, int(body.get("n") or 0), str(body.get("op") or ""), version=body.get("v"),
+                        url=body.get("url"), summary=body.get("summary"))})
+                except MatrixBusy:
+                    return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/projects":  # the owner's projects: add one, rename one, take one away
                 from . import projects
                 from .models import MatrixError
@@ -683,8 +694,9 @@ class Handler(BaseHTTPRequestHandler):
                         "rejected": _clean(row.get("退回意见"))}
                 try:
                     start = {"/api/session/cindy": local_sessions.start_in_cindy, "/api/session/start": local_sessions.start_for_item}.get(path, local_sessions.pick_up)
+                    extra = {"where": str(body["app"])} if path == "/api/session/pickup" and body.get("app") else {}   # this item, this once
                     return self._send(200, {"ok": True, **start(root, load(root / "config.yaml"), item,
-                                                               history=_history_text(root, row["record_id"], 40))})
+                                                               history=_history_text(root, row["record_id"], 40), **extra)})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/session/open":

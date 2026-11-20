@@ -405,6 +405,10 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .cmd .btn{height:24px;padding:0 10px;font-size:12px;flex:none}
 .sum{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:16px;margin:0 0 14px;background:var(--green-soft)}
 .sum.bad{background:var(--red-soft)}.sum.todo{background:var(--amber-soft)}.sum b{font-size:15px}.sum span{color:var(--ink2);font-size:12.5px}.sum .btn{margin-left:auto}
+.inner-list{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--field)}
+.dv-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border-top:1px solid var(--line2)}
+.dv-row:first-child,.dv-form:first-child{border-top:0}.dv-row b.cur{color:var(--brand)}.dv-row .acts{flex-wrap:nowrap}
+.dv-form{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line2)}.dv-form input{width:100%}
 .mem-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}.mem-bar .seg{margin:0}
 
 @media (max-width:820px){
@@ -469,7 +473,7 @@ async function api(path, body, ms=12000){
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
-function midEdit(){ return !!S.ob||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
+function midEdit(){ return !!S.ob||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||!!S.dvEdit||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
@@ -1236,8 +1240,8 @@ function cindyRows(c){
 function talkSection(st){
   const f=st.apps||{};
   return setSec("talk","","",
-    setRow("接着做","在事项里点「接着做」时，用哪个软件打开新对话。",
-      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]]]))
+    setRow("接着做","在事项里点「接着做」时，默认用哪个软件打开新对话。单件事想换别的，在那件事的「AI 会话」里点「换一个 App」，不影响这里。",
+      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]],["terminal-gemini","终端 · Gemini",f["terminal-gemini"]]]))
     +setRow("看本机 GPT 的对话","点开一段本机 GPT 对话时，在哪里显示。",
       choice("gpt_open",st.gpt_open||"here",[["here","心响里",true],["chatgpt","ChatGPT 桌面版",f.chatgpt],["terminal","终端",f["terminal-codex"]]])));
 }
@@ -1505,7 +1509,7 @@ function sessionsTab(i){
   const list=i.sessions||[];
   const buddy=D.settings?.pickup_app==="cindy" && D.settings?.pickup_buddy;
   const label={queued:"等待 Cindy 投递",delivered:"已交给豚豚",error:"未收到送达回执，请打开豚豚对话核对"}[i.cindy_pickup];
-  const start=buddy?`<div class="callout"><div class="what">${esc(label||"带上原对话和已有交付，由豚豚接着做。")}</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在豚豚对话里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`:`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`;
+  const start=buddy?`<div class="callout"><div class="what">${esc(label||"带上原对话和已有交付，由豚豚接着做。")}</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在豚豚对话里接着做</button>${appPicker(i.n)}</div></div>`:`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button>${appPicker(i.n)}</div></div>`;
   if(!list.length) return start+`<div class="hint" style="margin:0">还没有 AI 会话绑定这件事。左侧「AI 会话」里正在进行的对话，也可以点「关联到事项…」绑过来。</div>`;
   return start+`<div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
     <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':""}</div>
@@ -1541,19 +1545,48 @@ function itemView(i){
     ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="quiet-link" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
     ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
     [i.status==="取消"?"关闭":"完成",closedText(i)],
-    ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="act(${i.n},'link','粘贴新的交付链接',this);return false">${i.url?"换链接":"填链接"}</a>`}`],
+    ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="dvOpen(${i.n},${dvs?(D.deliverables[i.n].at(-1).v):0});return false">${i.url?"换链接":"填链接"}</a>`}`],
     ["来源",`${esc(i.source||"手动")}${i.source_url?`<a href="${esc(i.source_url)}" target="_blank" rel="noopener">原处 ↗</a>`:""}`],
     ["更新",esc(ago(i.updated))]];
   return `<div class="d-head"><div class="d-top"><span class="num">#${i.n}</span>${pill(i)}
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
-    ${chainView(i)}
+    ${chainView(i)}${deliverView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
     <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
 }
+/* ---------- 交付：每一版的链接和说明都能改、能删，也能自己加一版 ---------- */
+function deliverView(i){
+  const list=D.deliverables[i.n]||[], e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;
+  if(!list.length&&!e) return "";
+  const form=(v,cur)=>`<div class="dv-form"><input id="dv-url" data-draft="dv-url-${i.n}-${v}" value="${esc(cur.url||"")}" placeholder="粘贴文档链接（http 开头）" aria-label="交付链接" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
+      <input id="dv-sum" data-draft="dv-sum-${i.n}-${v}" value="${esc(cur.summary||"")}" placeholder="一句话说明这是什么（可不填）" maxlength="300" aria-label="交付说明" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
+      <div class="acts"><button class="btn pri" onclick="dvSave(${i.n},${v})">保存</button><button class="btn" onclick="dvClose()">取消</button></div></div>`;
+  const rows=[...list].reverse().map((v,k)=>e&&e.v===v.v?form(v.v,v):`<div class="dv-row"><b class="${k?"":"cur"}">v${v.v}</b><div style="min-width:0"><div class="t wrap">${linkify(v.summary||"交付")}</div><div class="s">${esc(v.at||"")}${v.url?`　${esc(linkLabel(v.url))}`:"　没有链接"}</div></div>
+      <div class="acts">${v.url?`<a class="btn" href="${esc(v.url)}" target="_blank" rel="noopener">打开</a>`:""}<button class="btn ghost" onclick="dvOpen(${i.n},${v.v})">编辑</button><button class="btn ghost" onclick="toast('删掉 v${v.v} 这一版交付？','删掉',()=>dvRemove(${i.n},${v.v}))">删掉</button></div></div>`).join("");
+  return `<div class="d-sec" style="padding-top:14px"><h3>交付<span class="n">${list.length||""}</span>${e&&e.v===0?"":`<button class="btn ghost" style="margin-left:auto;height:24px;padding:0 8px" onclick="dvOpen(${i.n},0)">＋ 加一版</button>`}</h3>
+    <div class="inner-list">${e&&e.v===0?form(0,{}):""}${rows}</div></div>`;
+}
+function dvOpen(n,v){ S.dvEdit={n,v}; render(); setTimeout(()=>$("#dv-url")?.focus(),30); }
+function dvClose(){ const e=S.dvEdit; if(e){ drafts.delete(`dv-url-${e.n}-${e.v}`); drafts.delete(`dv-sum-${e.n}-${e.v}`); } S.dvEdit=null; render(); }
+async function dvSend(n,body,done){
+  if(LIVE){ try{ await api("/api/item/deliverable",{n,...body},40000); }catch(e){ return toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); } }
+  else{ const list=(D.deliverables[n] ||= []), i=byN(n);
+    if(body.op==="add") list.push({v:Math.max(0,...list.map(x=>x.v))+1,at:TODAY.slice(5)+" "+clock(),summary:body.summary||"你加的交付",url:body.url});
+    else if(body.op==="edit") Object.assign(list.find(x=>x.v===body.v)||{},body.url!==undefined?{url:body.url}:{},{summary:body.summary});
+    else D.deliverables[n]=list.filter(x=>x.v!==body.v);
+    i.url=(D.deliverables[n].at(-1)||{}).url||null; }
+  dvClose(); toast(done); if(LIVE) load();
+}
+function dvSave(n,v){
+  const url=String($("#dv-url")?.value||"").trim(), summary=String($("#dv-sum")?.value||"").trim();
+  if(!/^https?:\/\/\S+$/.test(url)) { toast("链接要以 http 开头"); return $("#dv-url")?.focus(); }
+  return dvSend(n,v?{op:"edit",v,url,summary}:{op:"add",url,summary},v?"改好了":"加上了");
+}
+function dvRemove(n,v){ return dvSend(n,{op:"remove",v},"删掉了"); }
 /* ---------- 串起来的事：这件事前面接着哪件、后面还有哪件 ---------- */
 function chainView(i){
   const tag=(n,dir)=>{ const x=byN(n); if(!x) return ""; const [e,l]=dir==="before"?[n,i.n]:[i.n,n];
@@ -1654,15 +1687,21 @@ async function unbind(key){
   try{ await api("/api/session/unbind",{key}); await load(); toast("已解除，这段对话不会再自动绑到这件事"); }
   catch(e){ toast(e.message||"没有解除成功"); }
 }
-const PICKUP_NAME={"cindy":"Cindy","claude":"Claude","terminal-claude":"终端（Claude 命令行）","terminal-codex":"终端（Codex 命令行）"};
+const PICKUP_NAME={"cindy":"Cindy","claude":"Claude","terminal-claude":"终端（Claude 命令行）","terminal-codex":"终端（Codex 命令行）","terminal-gemini":"终端（Gemini 命令行）"};
+/* another app for this one item, this once: the usual choice in 设置 stays as it is */
+function appPicker(n){
+  const apps=(D.settings||{}).apps||{}, usual=(D.settings||{}).pickup_app, others=Object.keys(PICKUP_NAME).filter(k=>apps[k]&&k!==usual);
+  if(S.pickApp!==n) return `<button class="btn ghost" onclick="S.pickApp=${n};render()">换一个 App</button>`;
+  return `<div class="chips" style="margin:8px 0 0;flex-basis:100%;align-items:center"><span class="hint" style="margin:0 4px 0 0">只这件事换，默认不变：</span>${others.map(k=>`<button class="chip on" onclick="S.pickApp=null;pickUp(${n},'${k}')">${PICKUP_NAME[k]}</button>`).join("")||'<span class="hint" style="margin:0">这台电脑上没有别的可用 App</span>'}<button class="chip" onclick="S.pickApp=null;render()">取消</button></div>`;
+}
 const pickupName = () => PICKUP_NAME[(D.settings||{}).pickup_app]||"Cindy";
-async function pickUp(n){
+async function pickUp(n,app){
   if(!LIVE) return toast("原型里不能打开");
-  const where=pickupName();
-  try{ const r=await api("/api/session/pickup",{n},30000);
+  const where=app?PICKUP_NAME[app]:pickupName(), chosen=app||(D.settings||{}).pickup_app;
+  try{ const r=await api("/api/session/pickup",app?{n,app}:{n},30000);
     if(r.pickup){ const status={queued:"已排队，等待 Cindy 投递",delivered:"Cindy 已确认送达豚豚",error:"未收到送达回执，请在豚豚对话里核对"}[r.pickup];
       toast(status+(r.navigation_failed?"；未能打开对话":"")); await load(); return; }
-    toast((D.settings||{}).pickup_app==="cindy"?"已在 Cindy 里新建任务，就在这件事的文件夹里。发第一句话（比如「继续」），它会先读这件事的来龙去脉":`已在 ${where} 里接手这件事，它会先读这件事的来龙去脉`); setTimeout(load,5000); }
+    toast(chosen==="cindy"?"已在 Cindy 里新建任务，就在这件事的文件夹里。发第一句话（比如「继续」），它会先读这件事的来龙去脉":`已在 ${where} 里接手这件事，它会先读这件事的来龙去脉`); setTimeout(load,5000); }
   catch(e){ toast(e.message||`没能打开 ${where}`); }
 }
 async function startClaude(n){

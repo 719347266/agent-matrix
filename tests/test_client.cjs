@@ -110,6 +110,26 @@ function reset(item) {
   assert.doesNotMatch(evaluate("sideHTML()"),/>更新</);
   evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,doing:"正在下载 0.4.1…"}'); assert.match(pane("update"),/正在下载 0\.4\.1…/);
   evaluate('D.system.update=null');
+  // deliverables: each version can be corrected or removed, one can be added; the item follows the newest
+  const keepD = evaluate("JSON.stringify([D.items,D.deliverables,D.threads])");
+  evaluate('D.items=[{n:9,title:"写方案",status:"待验收",who:"AI",url:"https://x/docx/AI"}]; D.deliverables={9:[{v:1,at:"11-20 10:00",summary:"AI 写的",url:"https://x/docx/AI"}]}; D.threads={9:[]}; S.dvEdit=null');
+  let dv = evaluate("deliverView(byN(9))");
+  for (const label of ["交付","v1","AI 写的","dvOpen(9,1)","编辑","删掉","＋ 加一版"]) assert.ok(dv.includes(label), label);
+  evaluate('S.dvEdit={n:9,v:1}'); assert.match(evaluate("deliverView(byN(9))"),/id="dv-url"[^>]*value="https:\/\/x\/docx\/AI"/);
+  await evaluate('dvSend(9,{op:"edit",v:1,url:"https://x/docx/MINE",summary:"我自己建的"},"改好了")');
+  assert.deepEqual(plain("[D.deliverables[9][0].url,D.deliverables[9][0].summary,byN(9).url,S.dvEdit]"),["https://x/docx/MINE","我自己建的","https://x/docx/MINE",null]);
+  await evaluate('dvSend(9,{op:"add",url:"https://x/docx/V2",summary:""},"加上了")');
+  assert.deepEqual(plain("[D.deliverables[9].map(v=>v.v),byN(9).url]"),[[1,2],"https://x/docx/V2"]);
+  await evaluate('dvSend(9,{op:"remove",v:2},"删掉了")'); await evaluate('dvSend(9,{op:"remove",v:1},"删掉了")');
+  assert.deepEqual(plain("[D.deliverables[9],byN(9).url]"),[[],null]); assert.equal(evaluate("deliverView(byN(9))"),"");
+  assert.match(evaluate("itemView(byN(9))"),/dvOpen\(9,0\);return false">填链接/);
+  // another app for one item: offered there, and the usual one in settings is not what changes
+  evaluate('D.settings={pickup_app:"cindy",apps:{cindy:true,claude:true,"terminal-codex":true,"terminal-claude":false}}; S.pickApp=null');
+  assert.match(evaluate("sessionsTab(byN(9))"),/S\.pickApp=9;render\(\)">换一个 App/); assert.doesNotMatch(evaluate("sessionsTab(byN(9))"),/go\('sys'\)/);
+  evaluate('S.pickApp=9'); let apps = evaluate("sessionsTab(byN(9))");
+  for (const label of ["只这件事换，默认不变","pickUp(9,'claude')","pickUp(9,'terminal-codex')"]) assert.ok(apps.includes(label), label);
+  assert.doesNotMatch(apps,/pickUp\(9,'cindy'\)|terminal-claude/); assert.equal(evaluate("D.settings.pickup_app"),"cindy");
+  evaluate(`[D.items,D.deliverables,D.threads]=${keepD}; D.settings={}; S.pickApp=null`);
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");
