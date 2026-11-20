@@ -1160,7 +1160,7 @@ function bugView(){
   return `<div class="ob-mask" onclick="if(event.target===this)bugClose()"><div class="ob" role="dialog" aria-modal="true" aria-label="反馈问题" style="width:min(520px,100%)">
     <h2 style="margin-top:0">反馈问题</h2><p class="ob-sub">哪里不对？当时在做什么？一两句话就行。</p>
     <textarea id="bug-text" data-draft="bug-text" rows="4" style="width:100%" maxlength="2000" placeholder="比如：点「更新」后一直显示正在更新，等了十分钟没变" onkeydown="if(event.key==='Escape')bugClose();if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))bugSave()"></textarea>
-    <p class="hint" style="margin:8px 2px 0">会自动带上版本、系统和心响自己记下的出错，不带事项和消息内容。先存在这台电脑上${n?`，已记 ${n} 条`:""}。</p>
+    <p class="hint" style="margin:8px 2px 0">点「记下」只是先存起来，不会马上发给任何人${n?`（已经存了 ${n} 条）`:""}。之后提交时，会顺带附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。</p>
     <div class="ob-foot">${n?`<button class="btn ghost" onclick="bugClose();S.setTab='bugs';go('sys')">看已记的 ${n} 条</button>`:""}<span style="flex:1"></span><button class="btn" onclick="bugClose()">取消</button><button class="btn pri" onclick="bugSave()">记下</button></div></div></div>`;
 }
 async function bugSave(){
@@ -1218,7 +1218,7 @@ const SET_PAGES={
   talk:(st,s,w)=>["打开对话","",talkSection(st)],
   store:(st,s,w)=>["事项存在哪","事项一直存在这台电脑上，点了立刻生效。下面选的是另外同步到哪。",dataSection(s)],
   notify:(st,s,w)=>["通知","AI 做完了、卡住了、有新的事，都会提醒你。",`<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`],
-  bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条；攒几条一起交上去。每条会自动带上版本和心响自己记下的出错，不带事项和消息内容。",bugsPage()],
+  bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条，攒几条再一起提交。提交时会附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。",bugsPage()],
   update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
   look:(st,s,w)=>["外观","",`<div class="list">${setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)}</div>`],
   guide:(st,s,w)=>["新手引导","重新走一遍首次设置：称呼、办公工具、接收模式、谁来做事、通知。",`<button class="btn pri" onclick="obOpen()">打开引导</button>`],
