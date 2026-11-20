@@ -26,8 +26,9 @@ class CodexRun:
     THREAD_FILE = ".thread"
     NAME = "本机 GPT"
 
-    def __init__(self, config, workdir, *, thread=None, effort=None, timeout_minutes=None, ephemeral=False):
+    def __init__(self, config, workdir, *, thread=None, effort=None, timeout_minutes=None, ephemeral=False, guard=None):
         self.config, self.workdir, self.thread = config, Path(workdir), thread
+        self.guard = guard  # 开发模式 {"root", "mode", "record_id"}: only ClaudeRun can wait for the owner
         self.effort = effort or config.worker_effort
         self.timeout = 60 * (timeout_minutes or config.worker_timeout_minutes)
         self.ephemeral = ephemeral
@@ -120,10 +121,10 @@ class CodexRun:
         reader.start()
         if watcher:
             watcher.start()
+        self.proc = proc
         try:
             try:
-                proc.stdin.write(prompt)
-                proc.stdin.close()
+                self._send_prompt(proc, prompt)
             except BrokenPipeError:
                 pass
             self._loop(proc, lines, time.monotonic() + self.timeout, on_event, on_tick, should_stop)
@@ -131,6 +132,7 @@ class CodexRun:
             done.set()
             if watcher:
                 watcher.join(timeout=2)
+            self._finish()
             if self.stopped or proc.poll() is None:
                 self._kill_tree(proc)
             try:
@@ -156,12 +158,23 @@ class CodexRun:
                 finished = True
             elif line:
                 self._event(line, on_event)
+            self._poll()
             if on_tick:
                 on_tick()
             if time.monotonic() > deadline:
                 self.timed_out = True
                 self._kill_tree(proc)
                 finished = True
+
+    def _send_prompt(self, proc, prompt):
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+
+    def _poll(self):
+        pass
+
+    def _finish(self):
+        pass
 
     def _event(self, line, on_event):
         try:
@@ -235,11 +248,23 @@ class ClaudeRun(CodexRun):
                if "*" in wanted else [t for t in wanted if t.startswith("mcp__")])
         # --safe-mode turns every MCP server off. With MCP wanted: load the owner's user settings (that is where the
         # MCP servers live) but switch all hooks off, and allow only MCP tools (dontAsk denies everything unlisted).
-        settings = json.dumps({**json.loads(self.SANDBOX), "disableAllHooks": True}) if mcp else self.SANDBOX
+        settings = {**json.loads(self.SANDBOX), **({"disableAllHooks": True} if mcp else {})}
+        allowed = ["--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch", *mcp])]
+        if self.guard:
+            # 开发模式: whatever would prompt comes to us over stdin/stdout (control_request can_use_tool) and waits
+            # for the owner in 心响. "risky": the RISKY commands prompt; "every": nothing is pre-allowed.
+            from .approvals import RISKY
+            settings["sandbox"] = {**settings["sandbox"], "autoAllowBashIfSandboxed": False}
+            if self.guard["mode"] == "every":
+                allowed = []
+            else:
+                settings["permissions"] = {"ask": RISKY}
+            permission = ["--permission-mode", "default", "--input-format", "stream-json", "--permission-prompt-tool", "stdio"]
+        else:
+            permission = ["--permission-mode", "dontAsk"]
         argv = [binary, "-p", *(["--setting-sources", "user,project"] if mcp else ["--safe-mode"]),
-                "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "dontAsk", "--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch", *mcp]),
-                "--settings", settings,
+                "--output-format", "stream-json", "--verbose", *permission, *allowed,
+                "--settings", json.dumps(settings),
                 *(["--disallowedTools", MCP_DENY] if mcp else [])]
         if self.config.worker_claude_model:
             argv += ["--model", self.config.worker_claude_model]
@@ -259,12 +284,72 @@ class ClaudeRun(CodexRun):
             env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
         return env
 
+    def _send_prompt(self, proc, prompt):
+        if not self.guard:
+            return super()._send_prompt(proc, prompt)
+        # stdin stays open: the answers to permission requests go back this way; closed once the turn ends
+        self.waiting = {}
+        proc.stdin.write(json.dumps({"type": "user", "message": {"role": "user", "content": prompt}}, ensure_ascii=False) + "\n")
+        proc.stdin.flush()
+
+    def _reply(self, request_id, response):
+        try:
+            self.proc.stdin.write(json.dumps({"type": "control_response", "response": {
+                "subtype": "success", "request_id": request_id, "response": response}}, ensure_ascii=False) + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+
+    def _ask_owner(self, event):
+        from . import approvals
+        request = event.get("request") or {}
+        if request.get("subtype") != "can_use_tool":
+            return self._reply(event.get("request_id"), {})
+        root = self.guard["root"]
+        approval_id = approvals.ask(root, self.guard.get("record_id"), request.get("tool_name"), request.get("input"),
+                                    request.get("description"))
+        self.waiting[approval_id] = (event.get("request_id"), request.get("input") or {})
+        try:
+            from . import thread as conversation
+            conversation.add(root, self.guard.get("record_id"), "ai", "say",
+                             f"【开发模式】等你批准：{request.get('tool_name')} {approvals.summary(request.get('tool_name'), request.get('input'))[:200]}",
+                             driver=self.NAME)
+        except Exception as exc:
+            from . import activity
+            activity.swallowed(root, "开发模式：在对话里提示等你批准", exc)
+
+    def _poll(self):
+        from . import approvals
+        for approval_id, (request_id, tool_input) in list(getattr(self, "waiting", {}).items()):
+            entry = approvals.get(self.guard["root"], approval_id)
+            if not entry or entry["status"] == "pending":
+                continue
+            del self.waiting[approval_id]
+            if entry["status"] == "allowed":
+                self._reply(request_id, {"behavior": "allow", "updatedInput": tool_input})
+            else:
+                self._reply(request_id, {"behavior": "deny", "message": "本人没有批准这一步" + (f"：{entry['note']}" if entry.get("note") else "。")
+                                         + "不要换个办法绕过去做同样的事；做不了就在结果里写明需要本人做什么。"})
+
+    def _finish(self):
+        from . import approvals
+        for approval_id in getattr(self, "waiting", {}):
+            approvals.expire(self.guard["root"], approval_id)
+        self.waiting = {}
+
     def _event(self, line, on_event):
         try:
             event = json.loads(line)
         except ValueError:
             return
         kind = event.get("type")
+        if kind == "control_request" and self.guard:
+            return self._ask_owner(event)
+        if kind == "result" and self.guard:
+            try:
+                self.proc.stdin.close()  # the turn is over: let claude exit
+            except (BrokenPipeError, OSError):
+                pass
         if kind == "system" and event.get("subtype") == "init" and event.get("session_id"):
             self.thread = event["session_id"]
             if not self.ephemeral:

@@ -371,7 +371,7 @@ class SlackSourceTests(unittest.TestCase):
         finally:
             state.close()
 
-    def test_skipped_chats_and_words_are_not_read(self):
+    def test_muted_chats_keep_only_mentions_and_words_are_skipped(self):
         from agent_matrix.sources import slack
         from agent_matrix.state import State
         root = Path(tempfile.mkdtemp())
@@ -382,16 +382,19 @@ class SlackSourceTests(unittest.TestCase):
                 return {"user": {"profile": {"display_name": "大山"}}}
             return {"messages": {"matches": [
                 {"ts": "1795000000.000100", "user": "UX", "text": "<@UME> 帮忙看下", "channel": {"id": "C1", "name": "bot-loyalty-alerts"}},
+                {"ts": "1795000000.000200", "user": "UX", "text": "<@UME> 优化一下这个", "channel": {"id": "C3", "name": "team-rd5-dev"}},
+                {"ts": "1795000000.000300", "user": "UX", "text": "YuHao Lin 今天能看下这个吗", "channel": {"id": "C3", "name": "team-rd5-dev"}},
                 {"ts": "1795000001.000100", "user": "UX", "text": "<@UME> Issue created 帮忙看下", "channel": {"id": "C2", "name": "team-dev"}},
                 {"ts": "1795000002.000100", "user": "UX", "text": "<@UME> 帮忙看下这个需求", "channel": {"id": "C2", "name": "team-dev"}}],
                 "paging": {"pages": 1}}}
         state = State(root / "state.db")
         try:
-            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["Loyalty"], chat_skip_words=["issue created"])
+            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["RD5"], chat_skip_words=["issue created"])
             out = slack.poll(config, root, state, datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
-            self.assertEqual(out["candidates"], 1)   # the muted channel and the muted words are skipped, case-insensitive
-            text, = state.db.execute("SELECT text FROM chat_candidates").fetchone()
-            self.assertIn("这个需求", text)
+            # bot channels are never read; a muted channel keeps only real @-mentions; muted words skip, case-insensitive
+            texts = sorted(t for t, in state.db.execute("SELECT text FROM chat_candidates"))
+            self.assertEqual(out["candidates"], 2)
+            self.assertEqual(texts, ["@YuHao Lin 优化一下这个", "@YuHao Lin 帮忙看下这个需求"])
         finally:
             state.close()
 

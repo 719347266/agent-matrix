@@ -26,8 +26,13 @@ def table(state):
 
 
 def skipped_chat(config, name):
-    """Built-in noise (bots, notices) or a chat the owner chose to ignore on the 系统 page."""
-    return bool(SKIP_CHAT.search(name)) or any(w and w.lower() in name.lower() for w in config.chat_skip_chats)
+    """Built-in noise (bots, notices): never read."""
+    return bool(SKIP_CHAT.search(name))
+
+
+def muted_chat(config, name):
+    """A chat the owner chose to ignore on the 系统 page: only someone @-ing the owner still gets through."""
+    return any(w and w.lower() in name.lower() for w in config.chat_skip_chats)
 
 
 def skipped_text(config, text):
@@ -83,6 +88,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
         cid, cname = chat.get("chat_id"), str(chat.get("name") or "")
         if not cid or cid in exclude or skipped_chat(config, cname):
             continue
+        muted = muted_chat(config, cname)
         cursor_key = "chats:cursor:" + cid
         since = state.get(cursor_key) or (now - timedelta(hours=2)).isoformat()
         got = client._exec(["im", "+chat-messages-list", "--chat-id", cid, "--start", since, "--end", now.isoformat(),
@@ -99,7 +105,7 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
             from_owner = sender.get("id") == config.owner_open_id
             kind = classify(text, from_owner=from_owner, chat_mode=chat.get("chat_mode"), names=names,
                             mentioned=not from_owner and mentions_owner(m, config.owner_open_id))
-            if kind:
+            if kind and (not muted or kind == "@你"):
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
                     m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
                     "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],

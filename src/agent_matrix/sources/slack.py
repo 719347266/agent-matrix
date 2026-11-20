@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..models import MatrixError
-from .chats import MAX_CHATS, classify, owner_words, skipped_chat, skipped_text, table
+from .chats import MAX_CHATS, classify, muted_chat, owner_words, skipped_chat, skipped_text, table
 
 API = "https://slack.com/api/"
 
@@ -189,6 +189,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
             state.set("slack:cursor:" + cid, newest)
         if cid in exclude or skipped_chat(config, c["name"]):
             continue
+        muted = muted_chat(config, c["name"])
         history = []
         for m in msgs:
             if m.get("subtype") or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
@@ -201,7 +202,7 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
             sender = "我" if from_owner else who(m["user"])
             kind = classify(text, from_owner=from_owner, chat_mode=mode, names=names,
                             mentioned=f"<@{my_id}>" in m["text"])  # a real @, however it is worded
-            if kind:
+            if kind and (not muted or kind == "@你"):
                 sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
                 # ponytail: the permalink is the message id, so chat_review can link back without a schema change.
                 state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
