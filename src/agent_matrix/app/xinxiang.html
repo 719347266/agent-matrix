@@ -277,6 +277,11 @@ button:disabled{opacity:.5;cursor:wait}
 .ob-card span{font-size:12.5px;color:var(--ink2)}
 .ob-field{display:block;margin:0 0 12px}.ob-field span{display:block;font-size:12.5px;color:var(--ink2);margin:0 0 4px}.ob-field input{width:100%;height:34px;padding:4px 10px}
 .ob-foot{display:flex;gap:8px;align-items:center;margin-top:18px}
+.ob-tools{gap:8px}.ob-tools .chip{height:36px;padding:0 18px;font-size:14px}
+.ob-copy{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.ob-copy .btn{height:38px;padding:0 18px}.ob-copy span{font-size:12.5px;color:var(--ink2)}
+.ob-peek{margin:12px 0 0}.ob-peek summary{cursor:pointer;font-size:12.5px;color:var(--ink2)}.ob-peek pre{margin:8px 0 0;max-height:180px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.ob-wait{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
+.ob-wait span{font-size:12.5px;color:var(--ink2)}.ob-wait .live{width:7px;height:7px;border-radius:50%;background:var(--brand);animation:blink 1.4s infinite}.ob-wait.ok b{color:var(--green)}
 @media (max-width:560px){.ob-cards,.modes{grid-template-columns:1fr}}
 .set-sec{scroll-margin-top:70px}
 .set-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);gap:6px 28px;align-items:center;padding:14px 16px;border-top:1px solid var(--line2)}
@@ -293,6 +298,7 @@ button:disabled{opacity:.5;cursor:wait}
 .eng-state.bad{color:var(--red)}.eng-state.bad:before{background:var(--red)}
 .eng-state.busy:before{background:var(--blue);animation:blink 1.2s infinite}
 .set-row details summary{cursor:pointer;color:var(--brand);font-size:12.5px}
+.set-sum{cursor:pointer;padding:12px 16px;font-size:13.5px;color:var(--ink2)}details[open]>.set-sum{border-bottom:1px solid var(--line)}
 @container (max-width:640px){.set-row{grid-template-columns:1fr}.set-row .ctl{justify-content:flex-start}}
 .modal{position:fixed;inset:0;z-index:50;background:rgba(16,16,24,.38);display:flex;align-items:center;justify-content:center;padding:24px}
 .modal .box{background:var(--panel);border-radius:14px;box-shadow:var(--shadow);width:min(760px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden}
@@ -516,7 +522,7 @@ async function load(){
   catch(e){ if(seq!==loadSequence)return; failing=true; }
   if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item or the inbox
   clearTimeout(refreshTimer);
-  refreshTimer=setTimeout(load,commands().some(waiting)||(D&&D.approvals||[]).length?1500:8000);
+  refreshTimer=setTimeout(load,commands().some(waiting)||(D&&D.approvals||[]).length?1500:S.ob&&OB[S.ob.step]?.key==="ai"?2500:8000);   // waiting for the AI to say hello: look often
 }
 /* while the window is open, new things say so instead of waiting to be found */
 function announce(){
@@ -1073,36 +1079,29 @@ async function obSaveMe(){
 }
 async function obGo(d){ if(OB[S.ob.step].key==="me") await obSaveMe(); S.ob.step=Math.max(0,Math.min(OB.length-1,S.ob.step+d)); render(); }
 async function obDone(){ if(OB[S.ob.step].key==="me") await obSaveMe(); S.ob=null; await setSetting("onboarded",true); }
-const obCard=(n,title,text)=>`<div class="ob-card"><i>${n}</i><b>${title}</b><span>${text}</span></div>`;
+/* 三步：你是谁 → 在哪收到工作 → 把一段话交给你常用的 AI，它来报到后接手全部。别的（哪个 AI 做哪块）以后在设置里再分 */
+const obDriver=st=>{ const name=String(st.engine||"").startsWith("driver:")?st.engine.slice(7):""; return (st.drivers||[]).find(d=>d.name===name&&d.online)||null; };
+const obTool=(key,on,done,name)=>done?`<button class="chip on" disabled>${name} · 已接入</button>`:`<button class="chip ${on?"on":""}" onclick="setSetting('${key}',${!on})">${name}</button>`;
 const OB=[
-  {key:"welcome",title:"欢迎使用心响",sub:"它帮你把要做的事收进来，让 AI 先做，做完交给你验收。",body:()=>
-    `<div class="ob-cards">${obCard(1,"收进来","会议、群聊、飞书任务里和你有关的事，自动变成事项。")}${obCard(2,"AI 先做","能独立完成的，AI 找背景、写成果；要你拍板的，它先备好材料。")}${obCard(3,"你来验收","做完的事出现在「等我处理」。点通过，或者说一句哪里要改。")}</div>`},
-  {key:"me",title:"怎么称呼你",sub:"会议和群聊里提到这些称呼时，才算是你的事。",body:st=>{ const me=st.me||{};
-    return `<label class="ob-field"><span>你的名字</span><input id="ob-name" data-draft="ob-name" value="${esc(me.name||"")}" placeholder="和飞书里的名字一致"></label>
-      <label class="ob-field"><span>同事还怎么叫你</span><input id="ob-alias" data-draft="ob-alias" value="${esc((me.aliases||[]).join("、"))}" placeholder="可以留空；多个用顿号隔开"></label>`; }},
-  {key:"source",title:"要接办公工具吗",sub:"接了，别人在会议和聊天里找你的事会自动收进来。",body:(st,s)=>{ const r=s.record||{}, on=st.sources||{};
-    const want=(key,on,name,why)=>setRow(`我要接${name}`,on?"好。最后一步会给你一段话，发给你的 AI，它带你接好。":why,switchCtl(!!on,`setSetting('${key}',${!on})`));
-    return `<div class="list">${r.feishu_ready
-        ?setRow("飞书","已接入。下面三样分别决定从哪里收进你的事。",`<span class="eng-state ok">已接入</span>`)+setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks))
-        :want("want_feishu",st.want_feishu,"飞书","想自动收进会议、聊天里别人找你的事，就打开。")}
-      ${s.slack?setRow("Slack",`已接入 ${esc(s.slack.team||"")}。`,`<span class="eng-state ok">已接入</span>`):want("want_slack",st.want_slack," Slack","团队用 Slack 沟通的话打开，会从里面找出别人找你的事。")}
-      ${wxOn(s)?setRow("微信","已接入。只在这台电脑上读，不上传。",toggle("wechat_enabled",true)):want("want_wechat",st.want_wechat,"微信","工作上的事常在微信里说的话打开。只在这台电脑上读，不上传。")}</div>
-      ${r.feishu_ready||s.slack||wxOn(s)||st.want_feishu||st.want_slack||st.want_wechat?"":`<p class="hint" style="margin:10px 2px 0">都不开也能用：要做的事自己新建，AI 照样帮你做。</p>`}`; }},
-  {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在设置里随时能换。",body:st=>modeCards(st)},
-  {key:"ai",title:"让哪个 AI 来做事",sub:"选一个并测一下能不能连通。以后可以随时换。",body:(st,s)=>{ const found=s.engines||{}, cindy=st.cindy||{};
-    return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]])]))}
-      ${st.engine==="cindy"?cindyRows(cindy):engineRow(LOCAL_ENGINES.includes(st.engine)?st.engine:"codex",st,found[LOCAL_ENGINES.includes(st.engine)?st.engine:"codex"])}</div>`; }},
-  {key:"notify",title:"通知发到哪",sub:"AI 做完了、卡住了、有新的事，都会在心响里提醒你。",body:(st,s)=>
-    `<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`},
-  {key:"check",title:"剩下的交给你的 AI",sub:"也可以先开始用，之后在 设置 → 配置检查 里随时看。",body:()=>checkList()},
+  {key:"me",title:"先认识一下你",sub:"心响把要做的事收进来，交给你的 AI 去做，做完你来验收。",body:st=>{ const me=st.me||{};
+    return `<label class="ob-field"><span>你的名字</span><input id="ob-name" data-draft="ob-name" value="${esc(me.name||"")}" placeholder="和同事平时看到的名字一致"></label>
+      <label class="ob-field"><span>同事还怎么叫你</span><input id="ob-alias" data-draft="ob-alias" value="${esc((me.aliases||[]).join("、"))}" placeholder="可以留空；多个用顿号隔开"></label>
+      <p class="hint" style="margin:2px 2px 0">会议和聊天里提到这些称呼，才算是你的事。</p>`; }},
+  {key:"tools",title:"平时在哪收到工作",sub:"点选你用的，下一步你的 AI 会带你接好。都不选也能用，要做的事自己加。",body:(st,s)=>{ const r=s.record||{};
+    return `<div class="chips ob-tools">${obTool("want_feishu",st.want_feishu,r.feishu_ready,"飞书")}${obTool("want_slack",st.want_slack,!!s.slack,"Slack")}${obTool("want_wechat",st.want_wechat,wxOn(s),"微信")}</div>`; }},
+  {key:"ai",title:"交给你常用的 AI",sub:"复制这段话，发给你平时用的 AI。它会把心响配好，之后所有的事都由它来做。",body:st=>{ const d=obDriver(st), left=d?setupProblems().filter(x=>x.key!=="engine"):[];
+    return `<div class="ob-copy"><button class="btn pri" onclick="copySetupPrompt()">复制给 AI 的话</button><span>Claude Code、Codex、Cursor、Antigravity、Gemini、Cindy… 能运行命令的都行</span></div>
+      <details class="ob-peek"><summary>看看这段话</summary><pre>${esc(st.setup_prompt||"")}</pre></details>
+      <div class="ob-wait ${d?"ok":""}">${d?`<b>✓ ${esc(d.name)} 已经接手</b><span>${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${left.length?`　它还在配：${left.map(x=>esc(x.title.replace(/：.*/,""))).join("、")}`:"　都配好了"}</span>`
+        :`<i class="live"></i><b>等你的 AI 来报到</b><span>发出去之后，这里会自动变成它的名字。</span>`}</div>`; }},
 ];
 function obView(){
-  const i=S.ob.step, step=OB[i], last=i===OB.length-1;
+  const i=S.ob.step, step=OB[i], last=i===OB.length-1, st=D.settings||{};
   return `<div class="ob-mask"><div class="ob" role="dialog" aria-modal="true" aria-label="开始使用心响">
     <div class="ob-steps" aria-label="第 ${i+1} 步，共 ${OB.length} 步">${OB.map((_,k)=>`<i class="${k<i?"done":k===i?"on":""}"></i>`).join("")}</div>
-    <h2>${step.title}</h2><p class="ob-sub">${step.sub}</p><div class="ob-body">${step.body(D.settings||{},D.system||{})}</div>
-    <div class="ob-foot"><button class="btn ghost" onclick="obDone()">${last?"":"跳过"}</button><span style="flex:1"></span>
-      ${i?`<button class="btn" onclick="obGo(-1)">上一步</button>`:""}<button class="btn pri" onclick="${last?"obDone()":"obGo(1)"}">${last?"开始使用":"下一步"}</button></div></div></div>`;
+    <h2>${step.title}</h2><p class="ob-sub">${step.sub}</p><div class="ob-body">${step.body(st,D.system||{})}</div>
+    <div class="ob-foot">${last?"":`<button class="btn ghost" onclick="obDone()">跳过</button>`}<span style="flex:1"></span>
+      ${i?`<button class="btn" onclick="obGo(-1)">上一步</button>`:""}<button class="btn ${last&&!obDriver(st)?"":"pri"}" onclick="${last?"obDone()":"obGo(1)"}">${last?(obDriver(st)?"开始使用":"先进去看看"):"下一步"}</button></div></div></div>`;
 }
 /* ---------- 设置: AI / 消息来源 / 数据 / 通用 ---------- */
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
@@ -1284,25 +1283,32 @@ async function saveGeminiKey(clear){
   render();
 }
 function aiPage(st,s){
-  const found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy";
-  const local=LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]), cindyOk=cindy.installed===false?false:true, sortCindy=st.engine_sort==="cindy";
-  const used=LOCAL_ENGINES.filter(e=>(st.engine||"codex")===e||(st.engine_sort||"codex")===e);   // only the engines in use need a connection
-  const ais=(st.drivers||[]).map(d=>["driver:"+d.name,d.name+(d.online?"":"（不在）"),true]);
-  const aiList=(st.drivers||[]).length?`<div style="margin-top:8px">${(st.drivers||[]).map(d=>`<div class="d"><span class="eng-state ${d.online?"ok":""}">${esc(d.name)}</span>　${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}　${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</div>`).join("")}</div>`:"";
-  return setSec("any","交给哪个 AI","",
-    setRow("发给谁，谁就来做","不用事先选。把这段话发给你常用的 AI（Antigravity、Gemini、Claude Code、Cursor、Cindy…），它会回来登记自己是谁、用的什么模型，然后接手做事。想换一个 AI，就把这段话发给那个 AI。",
-      `<button class="btn pri" onclick="copySetupPrompt()">复制给 AI 的话</button>`,aiList))
-   +setSec("run","做事","",
-    setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。来登记过的 AI 会出现在这里，也可以手动换。某一件想换，在那件事里改「哪个 AI」。",
-      choice("engine",st.engine||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
-    +(useCindy?cindyRows(cindy):"")
-    +setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
+  const found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy"||st.engine_sort==="cindy", cindyOk=cindy.installed===false?false:true;
+  const work=st.engine||"codex", sort=st.engine_sort||work, split=work!==sort;
+  const local=LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]), ais=(st.drivers||[]).map(d=>["driver:"+d.name,d.name+(d.online?"":"（不在）"),true]);
+  const used=LOCAL_ENGINES.filter(e=>work===e||sort===e);   // only the local AIs in use need a connection
+  const who=v=>{ const d=(st.drivers||[]).find(x=>"driver:"+x.name===v);
+    return d?`${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${d.app||d.model?"　":""}<span class="eng-state ${d.online?"ok":""}">${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</span>`:""; };
+  const main=String(work).startsWith("driver:")||!split
+    ?setRow(split?`做事：${esc(engName(work))}`:esc(engName(work)),(split?"":"心响里所有要 AI 做的事都交给它：做事项、整理会议和聊天、判断新进来的事。")+(who(work)?`<br>${who(work)}`:""),
+      `<button class="btn" onclick="copySetupPrompt()">换一个 AI</button>`)
+    :setRow(`做事：${esc(engName(work))}`,"","");
+  return setSec("any","驱动心响的 AI","",main
+      +(split?setRow(`整理：${esc(engName(sort))}`,who(sort),""):"")
+      +(!(st.drivers||[]).length?`<p class="hint" style="margin:10px 14px">想换成你常用的 AI：点「换一个 AI」复制一段话发给它，它来报到后就接手全部。</p>`:""))
+   +setSec("split","","",`<details ${split?"open":""}><summary class="set-sum">分给不同的 AI</summary>
+      ${setRow("做事","找背景、写成果、按你的意见改。复制一段话发给另一个 AI，只让它接这一块。",`<button class="btn" onclick="copyPart('work')">复制给 AI 的话</button>`,choice("engine",work,[...ais,["cindy","Cindy",cindyOk],...local]))}
+      ${setRow("整理","从会议和聊天里找出你的事、判断新进来的事。",`<button class="btn" onclick="copyPart('sort')">复制给 AI 的话</button>`,choice("engine_sort",sort,[...ais,["cindy","Cindy",cindyOk],...local]))}
+      ${setRow("单独某一件","在那件事里改「哪个 AI」。","")}
+      ${useCindy?cindyRows(cindy):""}${used.map(e=>engineRow(e,st,found[e])).join("")}</details>`)
+   +setSec("dev","","",setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
         every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
-      +(st.dev_mode&&st.dev_mode!=="off"&&st.engine!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
-      choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])))
-   +setSec("sort","整理","",setRow("谁来整理",`从会议和聊天里找待办、判断新进来的事。${sortCindy?"Cindy 每 5 分钟来领一次，所以会议和聊天会晚几分钟才整理出来。":""}`,choice("engine_sort",st.engine_sort||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
-    +(sortCindy&&!useCindy?cindyRows(cindy):""))
-   +setSec("conn","连接状态","",used.map(e=>engineRow(e,st,found[e])).join(""));
+      +(st.dev_mode&&st.dev_mode!=="off"&&work!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
+      choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])));
+}
+function copyPart(part){
+  const t=((D.settings||{}).part_prompts||{})[part]; if(!t) return toast("还读不到，稍后再试");
+  copyText(t,`已复制。发给另一个 AI，它只接「${part==="work"?"做事":"整理"}」，别的不变`);
 }
 function advancedSection(st,s,w){
   const builtin=st.builtin_driver!==false, useCindy=st.engine==="cindy";
@@ -1915,7 +1921,7 @@ function render(){
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
   if(!S.view) S.view="today";
-  if(S.ob===undefined) S.ob=(LIVE&&D.settings&&D.settings.onboarded===false)?{step:0}:null;
+  if(S.ob===undefined&&D.settings) S.ob=(LIVE&&!D.settings.onboarded)?{step:0}:null;   // decided once the settings are read
   if(S.item&&!byN(S.item)) S.item=null;
   const item=S.item&&byN(S.item), split=!!item&&wide(), solo=!!item&&!split;
   $("#app").classList.toggle("with-detail",split);

@@ -862,6 +862,7 @@ def main(argv=None):
     p.add_argument("--model", default="", help="hello：你现在用的模型")
     p.add_argument("--wait", type=int, default=0, help="next：没活时最多等这么多秒再回来（期间有活立刻给你）")
     p.add_argument("--helper", action="store_true", help="hello：只来做交给你的事，不接手其余的")
+    p.add_argument("--part", choices=["all", "work", "sort"], default="all", help="hello：接手全部，或只接「做事」/「整理」")
     p.add_argument("--n", type=int, help="next：领交给你的这一件（编号）")
     p.add_argument("--to", help="handoff：交给哪个 AI"); p.add_argument("--why", default="", help="handoff：为什么")
     p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn")
@@ -886,11 +887,13 @@ def main(argv=None):
         if args.command == "hello":
             # an AI says who it is: from now on it does the items and the sorting, until another one says hello
             try:
-                me = aidrivers.hello(root, args.name or args.driver, app=args.app, model=args.model, take=not args.helper)
+                take = False if args.helper else True if args.part == "all" else args.part
+                me = aidrivers.hello(root, args.name or args.driver, app=args.app, model=args.model, take=take)
             except ValueError as exc:
                 raise MatrixError(str(exc)) from None
             print(json.dumps({"ok": True, "you": me["name"],
-                              "now": "记下了，交给你的事你来做" if args.helper else "心响的事和整理都交给你了",
+                              "now": "记下了，交给你的事你来做" if args.helper else {"all": "心响的事和整理都交给你了", "work": "心响的「做事」交给你了",
+                                                                                   "sort": "心响的「整理」交给你了"}[args.part],
                               "next": f'{_cmd()} next --driver "{me["name"]}"' + ("" if args.helper else " --wait 600")}, ensure_ascii=False))
             return 0
         aidrivers.seen(root, args.driver)

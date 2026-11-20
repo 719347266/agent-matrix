@@ -83,6 +83,16 @@ class Handoff(unittest.TestCase):
         self.assertEqual(out["to"], "Antigravity")
         self.assertIn('hello --name "Antigravity"', out["message"])
 
+    def test_a_second_ai_can_take_one_part_only(self):
+        from agent_matrix import setupshim
+        from agent_matrix.thread import setting
+        aidrivers.hello(self.root, "Cursor", take="sort")
+        self.assertEqual((setting(self.root, "engine"), setting(self.root, "engine_sort")), ("driver:Antigravity", "driver:Cursor"))
+        aidrivers.hello(self.root, "Claude Code", take="work")
+        self.assertEqual((setting(self.root, "engine"), setting(self.root, "engine_sort")), ("driver:Claude Code", "driver:Cursor"))
+        text = setupshim.part_prompt("sort")
+        self.assertIn("--part sort", text); self.assertIn("「整理」", text); self.assertNotIn("doctor", text)
+
     def test_a_helper_says_hello_without_taking_the_rest(self):
         (self.root / "config.yaml").write_text("{}", encoding="utf-8")
         with patch.object(drive, "install_shim"), redirect_stdout(io.StringIO()) as out:

@@ -40,7 +40,8 @@ def name_in(value):
 
 
 def hello(root, name, *, app="", model="", take=True):
-    """An AI says who it is. With `take` (the usual case) it becomes the one that does the items and the sorting."""
+    """An AI says who it is. With `take` (the usual case) it becomes the one that does the items and the sorting;
+    take="work" or "sort" hands it only that part; take=False: it only comes for what is handed to it one by one."""
     name = clean(name)
     if not name:
         raise ValueError("要说你叫什么：--name")
@@ -49,8 +50,9 @@ def hello(root, name, *, app="", model="", take=True):
     known[name] = {"name": name, "app": clean(app) or was.get("app", ""), "model": clean(model) or was.get("model", ""),
                    "hello": was.get("hello") or now, "seen": now}
     conversation.set_setting(root, KEY, known)
-    if take:
+    if take in (True, "work"):
         conversation.set_setting(root, "engine", setting_of(name))
+    if take in (True, "sort"):
         conversation.set_setting(root, "engine_sort", setting_of(name))
     return known[name]
 

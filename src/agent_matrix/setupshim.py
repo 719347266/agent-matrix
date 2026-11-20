@@ -51,7 +51,7 @@ def prompt(root):
 
 {cmd} doctor
 
-第三步，开始干活。运行下面这条命令领活（名字和第一步一样）。没活时它会等着，有活立刻返回：
+第三步，开始干活。从现在起心响里所有要 AI 做的事都交给你：做事项、整理会议和聊天、判断新进来的事。心响自己的后台程序负责定时去收消息和会议，收到要动脑的活就排队等你来领。运行下面这条命令领活（名字和第一步一样）。没活时它会等着，有活立刻返回：
 
 {xin} next --driver "<你的名字>" --wait 600
 
@@ -65,3 +65,22 @@ def prompt(root):
 4. 不要在对话里问我要密码、验证码或密钥。
 5. 对外发送、审批、付款、删除这类事只准备材料，不要执行。
 6. 配好后用一句话告诉我可以用了；这段对话要结束、不能再守着时也告诉我一声，我把这段话再发你一次就能接着干。"""
+
+
+PARTS = {"work": ("做事", "交给 AI 的事项：找背景、写成果、按我的意见改"),
+         "sort": ("整理", "从会议和聊天里找出我的待办、判断新进来的事")}
+
+
+def part_prompt(part):
+    """A message for a second AI that takes over one part of the work; the rest stays with the AI that has it."""
+    xin, (name, what) = work_cmd(), PARTS[part]
+    return f"""请你来接手我电脑上「心响」里的「{name}」：{what}。心响是本机的待办工具，已经配好了；别的部分还由原来的 AI 做，你只管这一块。
+
+1. 告诉心响你是谁，并接下「{name}」（名字写你自己，比如 Antigravity、Gemini、Claude Code、Cursor）：
+{xin} hello --name "<你的名字>" --app "<你所在的客户端>" --model "<你现在用的模型>" --part {part}
+2. 开始干活。运行下面这条命令领活（名字和上面一样）。没活时它会等着，有活立刻返回：
+{xin} next --driver "<你的名字>" --wait 600
+- 返回 {{"idle": true}} 就再运行一次，一直守着。
+- 返回一件事（folder、instructions、job）：进入 folder，按 instructions 做，用里面写的命令报进度、交活，然后再领下一件。
+
+请遵守：命令都由你来运行，不要让我自己去敲；不要在对话里问我要密码、验证码或密钥；对外发送、审批、付款、删除只准备材料，不要执行；这段对话要结束、不能再守着时告诉我一声。"""

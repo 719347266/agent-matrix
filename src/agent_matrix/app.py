@@ -227,6 +227,7 @@ def build_state(root):
         settings["want_wechat"] = bool(thread.setting(root, "want_wechat", False))
         from . import setupshim
         settings["setup_prompt"] = setupshim.prompt(root)   # the one message the owner pastes to their own AI
+        settings["part_prompts"] = {part: setupshim.part_prompt(part) for part in setupshim.PARTS}   # one part to a second AI
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,

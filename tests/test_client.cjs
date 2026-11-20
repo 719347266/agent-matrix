@@ -73,16 +73,16 @@ function reset(item) {
   assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
   for (const label of ["没接，可以不接","去接"]) assert.ok(pane("check").includes(label), label);
   for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)"]) assert.ok(pane("tool").includes(label), label);
-  // the guide's step for office tools: two plain switches when nothing is connected, no technical rows
-  let step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
-  for (const label of ["我要接飞书","我要接 Slack","我要接微信","都不开也能用"]) assert.ok(step.includes(label), label);
+  // the guide's step for office tools: three plain choices when nothing is connected, no technical rows
+  let step = evaluate('OB.find(o=>o.key==="tools").body(D.settings,D.system)');
+  for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)","setSetting('want_wechat',true)",">飞书<",">Slack<",">微信<"]) assert.ok(step.includes(label), label);
   assert.doesNotMatch(step,/Token|后台程序|实时/, "nothing a newcomer cannot read");
   evaluate('D.settings.want_slack=true');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接Slack/);
   evaluate('D.settings.want_slack=false; D.system.record.feishu_ready=true; D.settings.sources={meetings:true,chats:true,tasks:false}');
-  step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
-  for (const label of ["已接入","读会议","读聊天","读飞书任务","我要接 Slack"]) assert.ok(step.includes(label), label);
-  assert.doesNotMatch(step,/后台程序|实时|我要接飞书/);
+  step = evaluate('OB.find(o=>o.key==="tools").body(D.settings,D.system)');
+  for (const label of ["飞书 · 已接入","setSetting('want_slack',true)"]) assert.ok(step.includes(label), label);
+  assert.doesNotMatch(step,/后台程序|实时|want_feishu/);
   evaluate('D.system.record.feishu_ready=false; D.settings.sources={}');
   // WeChat: wanted is a step for the AI; installed and on shows whether it can be read
   evaluate('D.settings.want_wechat=true'); assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接微信/);
@@ -98,7 +98,7 @@ function reset(item) {
   evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接飞书/);
   evaluate('D.settings.want_feishu=false');
-  assert.equal(evaluate("OB.at(-1).key"),"check");
+  assert.deepEqual(plain("OB.map(o=>o.key)"),["me","tools","ai"], "who you are, where work comes from, then one message to your AI");
   // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself
   evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,kind:"client",checked:"11-20 12:00"}');
   let up = pane("update");
@@ -156,7 +156,10 @@ function reset(item) {
   evaluate('D.settings={engine:"driver:Antigravity",engine_sort:"driver:Antigravity",intake_mode:"all",me:{name:"王小明"},engine_tests:{},drivers:[{name:"Antigravity",app:"Antigravity",model:"gemini-3",seen:"11-20 16:40",online:true},{name:"Claude Code",app:"终端",model:"opus",seen:"11-20 09:00",online:false}]}; D.system={listener:"运行中",engines:{codex:false,claude:false,gemini:false},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"windows",client:true}}');
   assert.deepEqual(plain("setupProblems()"),[]);
   let any = pane("ai");
-  for (const label of ["发给谁，谁就来做","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","上次来 11-20 09:00"]) assert.ok(any.includes(label), label);
+  for (const label of ["所有要 AI 做的事都交给它","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","copyPart('work')","copyPart('sort')"]) assert.ok(any.includes(label), label);
+  assert.match(any,/<details >/, "splitting the work between AIs stays folded away until it is used");
+  let guide = evaluate('S.ob={step:2}; obView()');
+  for (const label of ["Antigravity 已经接手","gemini-3","开始使用","copySetupPrompt()"]) assert.ok(guide.includes(label), label);
   assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/谁来做事<\/span><span class="val">Antigravity</);
   assert.match(pane("check"),/做事的 AI：Antigravity/); assert.match(pane("check"),/正在领活（gemini-3）/);
   evaluate('D.settings.drivers[0].online=false');
@@ -166,7 +169,7 @@ function reset(item) {
   // three local AIs and Cindy, for doing items and for sorting
   evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");
-  for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活","晚几分钟"]) assert.ok(ai.includes(label), label);
+  for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活","整理：Cindy","<details open>"]) assert.ok(ai.includes(label), label);
   assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use");
   assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
   evaluate('D.system.engines.gemini=false'); assert.match(pane("check"),/还没有装 本机 Gemini/);
@@ -224,7 +227,9 @@ function reset(item) {
     evaluate(`S.ob={step:${step}}`);
     assert.ok(evaluate("obView()").includes(evaluate(`OB[${step}].title`)));
   }
-  assert.match(evaluate("S.ob={step:OB.length-1}; obView()"),/开始使用/);
+  const last = evaluate('D.settings.drivers=[]; D.settings.engine="codex"; S.ob={step:OB.length-1}; obView()');
+  for (const label of ["等你的 AI 来报到","先进去看看","copySetupPrompt()"]) assert.ok(last.includes(label), label);
+  assert.doesNotMatch(last,/本机 GPT|本机 Claude|测试连接/, "the newcomer does not choose an engine");
   evaluate("S.ob=null");
   evaluate('S.item=45; byN(45).status="进行中"; document.querySelector("#saybox").value="电话确认了"; sendNote(true)');
   assert.equal(evaluate("byN(45).closed.by"),"你");

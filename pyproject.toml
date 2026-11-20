@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-matrix"
-version = "0.4.15"
+version = "0.4.16"
 description = "会议与待办中心：会议、聊天、飞书任务三入口，实时监听 + 卡片简报 + 回复指令"
 license = {text = "PolyForm-Noncommercial-1.0.0"}
 requires-python = ">=3.11"
