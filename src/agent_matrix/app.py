@@ -296,7 +296,14 @@ def system_info(root):
                   "skip_chats": config.chat_skip_chats, "skip_words": config.chat_skip_words, "recent_chats": _recent_chats(root)}
     except Exception:
         found, record = {}, {}
-    return {"engines": found, "slack": slack, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    try:  # what the setup check needs to say "do this next" in the owner's own words and paths
+        import shutil
+        lark = bool(shutil.which(getattr(config, "lark_binary", "") or "lark-cli"))
+    except Exception:
+        lark = False
+    here = {"platform": "windows" if sys.platform.startswith("win") else "mac" if sys.platform == "darwin" else "other",
+            "root": str(Path(root).resolve()), "python": sys.executable, "lark_cli": lark}
+    return {"engines": found, "slack": slack, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 

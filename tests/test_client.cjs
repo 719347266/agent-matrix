@@ -57,6 +57,22 @@ function reset(item) {
   assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
   evaluate('D.settings={intake_mode:"all"}; D.system={record:{feishu_ready:true,mode:"feishu"}}');
   assert.match(pane("mode"),/自动开工/); assert.match(pane("store"),/飞书多维表格/);
+  // setup check: every essential thing says whether it works, and what to do next when it does not
+  evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"",aliases:[]},engine_tests:{}}; D.system={listener:"没在运行",engines:{codex:false,claude:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac",root:"/x/心响",python:"/x/py",lark_cli:true}}');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["listener","engine","me"]);
+  let check = pane("check");
+  for (const label of ["还差 3 步才能用","launchd/install-listen.sh","npm install -g @openai/codex","codex login","去填","再查一遍"]) assert.ok(check.includes(label), label);
+  assert.match(evaluate('S.setTab="check"; sysPage()').split('class="set-pane"')[0],/配置检查<\/span><span class="val">还差 3 步/);
+  assert.match(evaluate("todayPage()"),/还差 3 步才能用/);
+  evaluate('D.system.here.platform="windows"; D.system.here.root="C:\\\\心响"');
+  assert.match(pane("check"),/windows\\install\.ps1/); assert.match(pane("check"),/PowerShell/);
+  evaluate('D.settings.me={name:"王小明",aliases:[]}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"11-20 10:00"}}; D.system.engines.codex=true; D.system.listener="运行中"');
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(pane("check"),/都配好了，可以用/); assert.doesNotMatch(evaluate("todayPage()"),/才能用/);
+  evaluate('D.settings.engine_tests={}'); assert.match(pane("check"),/testEngine\('codex'\)">测试连接/);
+  evaluate('D.settings.intake_mode="manual"; D.settings.me={name:""}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"x"}}; D.system.record.feishu_ready=false');
+  assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
+  for (const label of ["没接，可以不接","怎么接飞书","lark-cli auth login","agent_matrix setup"]) assert.ok(pane("check").includes(label), label);
+  assert.equal(evaluate("OB.at(-1).key"),"check");
   // rules the AI learned wait on top for the owner's yes or no
   evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
   let mem = evaluate("memPage()");
