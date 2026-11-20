@@ -162,8 +162,11 @@ def build_state(root):
     external = local_sessions.view(root, sessions_of, running_sessions, items)
     from . import cindy_pickup
     pickups = cindy_pickup.latest(root)
+    from . import aidrivers
+    handed = aidrivers.assignments(root)
     for item in items:
         item["cindy_pickup"] = pickups.get(item["rid"])
+        item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
     from . import drive
     ws, running = read_status(root), is_running(root)
@@ -519,6 +522,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, update.start(root))
                 update.check(root, force=True)
                 return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/item/ai":  # hand this one item to another AI (or back to the one chosen in settings)
+                from . import aidrivers, drive
+                from .config import load
+                from .models import MatrixBusy, MatrixError
+                from .snapshot import _snapshot
+                row = next((r for r in _snapshot(root).get("rows") or [] if str(r.get("编号")) == str(body.get("n"))), None)
+                to = str(body.get("to") or "")
+                names = {"driver:" + d["name"] for d in aidrivers.known(root)}
+                if not row:
+                    return self._send(400, {"ok": False, "reply": "找不到这件事。"})
+                if to not in {"", aidrivers.HANDOFF, "cindy", *aidrivers.LOCAL} | names:
+                    return self._send(400, {"ok": False, "reply": "没有这个 AI。"})
+                try:
+                    return self._send(200, drive.hand_over(root, load(root / "config.yaml"), row["record_id"], to, by="本人",
+                                                           n=row.get("编号"), title=str(row.get("标题") or "")))
+                except MatrixBusy:
+                    return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/item/deliverable":  # the owner adds, corrects or removes a deliverable version
                 from . import deliverables
                 from .models import MatrixBusy, MatrixError

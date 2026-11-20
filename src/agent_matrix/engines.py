@@ -346,6 +346,13 @@ def run_class(name):
     return globals()[ENGINES.get(name, "CodexRun")]
 
 
+def item_engine(root, record_id):
+    """The local AI for one item: the one it was handed to, else the one chosen in settings."""
+    from .thread import setting
+    chosen = (setting(Path(root), "ai:for", None) or {}).get(record_id) if record_id else None
+    return run_class(chosen) if chosen in ENGINES else engine(root)
+
+
 def engine(root, purpose="work"):
     """Which local AI the built-in driver uses (设置 → AI 执行): one for doing items ("work"), one for sorting
     meetings and chats, judging new items and learning rules ("sort"; same as "work" unless chosen)."""

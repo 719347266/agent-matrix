@@ -160,11 +160,12 @@ def _pending_new(rows, judged):
     return out
 
 
-def pick_next(root, config, skip=()):
-    """Next AI item: the owner's "先做" first, then by due date (prework.check already orders by due date)."""
+def pick_next(root, config, skip=(), allow=None):
+    """Next AI item: the owner's "先做" first, then by due date (prework.check already orders by due date).
+    allow: only items this AI may take (an item handed to one AI is that AI's alone)."""
     code, checked = _check(root, "agent_matrix.prework")
     ready = [r for r in checked.get("ready") or [] if r.get("status") in {"queued", "running", "prepared"}
-             and r["record_id"] not in skip]
+             and r["record_id"] not in skip and (allow is None or allow(r["record_id"]))]
     with project(root, config, client=False, wait=60) as (_, state):
         first = state.get("work:first", [])
     ready.sort(key=lambda r: (r["record_id"] not in first, first.index(r["record_id"]) if r["record_id"] in first else 0))

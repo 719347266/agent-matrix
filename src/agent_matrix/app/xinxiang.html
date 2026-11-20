@@ -1293,7 +1293,7 @@ function aiPage(st,s){
     setRow("发给谁，谁就来做","不用事先选。把这段话发给你常用的 AI（Antigravity、Gemini、Claude Code、Cursor、Cindy…），它会回来登记自己是谁、用的什么模型，然后接手做事。想换一个 AI，就把这段话发给那个 AI。",
       `<button class="btn pri" onclick="copySetupPrompt()">复制给 AI 的话</button>`,aiList))
    +setSec("run","做事","",
-    setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。来登记过的 AI 会出现在这里，也可以手动换。",
+    setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。来登记过的 AI 会出现在这里，也可以手动换。某一件想换，在那件事里改「哪个 AI」。",
       choice("engine",st.engine||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
     +(useCindy?cindyRows(cindy):""))
    +setSec("sort","整理","",setRow("谁来整理",`从会议和聊天里找待办、判断新进来的事。${sortCindy?"Cindy 每 5 分钟来领一次，所以会议和聊天会晚几分钟才整理出来。":""}`,choice("engine_sort",st.engine_sort||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
@@ -1633,6 +1633,7 @@ function itemView(i){
   const talk=(D.threads[i.n]||[]).filter(m=>m.from!=="system"&&m.kind!=="step").length, sess=(i.sessions||[]).length;
   const pj=projOf(i.project), guessed=pj&&i.project_by==="猜";
   const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
+    ...(i.who==="AI"&&!["完成","取消"].includes(i.status)?[["哪个 AI",aiOfItem(i)]]:[]),
     ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="quiet-link" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
     ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
     [i.status==="取消"?"关闭":"完成",closedText(i)],
@@ -1643,11 +1644,37 @@ function itemView(i){
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
-    ${chainView(i)}${deliverView(i)}
+    ${aiPickView(i)}${chainView(i)}${deliverView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
     <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
+}
+/* ---------- 这一件交给哪个 AI：默认是设置里选的那个，单独换只影响这一件 ---------- */
+const HANDOFF="handoff";
+function aiOfItem(i){
+  const st=D.settings||{}, mine=i.ai_for;
+  const name=mine===HANDOFF?"等另一个 AI 来接":mine?engName(mine):engName(st.engine||"codex");
+  return `<button class="proj-chip" onclick="S.aiPick=S.aiPick===${i.n}?null:${i.n};S.handoff=null;render()" title="只换这一件">${esc(name)}</button>${mine&&mine!==HANDOFF?`<span class="quiet-link" style="margin:0">只这一件</span>`:""}`;
+}
+function aiPickView(i){
+  const st=D.settings||{}, h=S.handoff&&S.handoff.n===i.n?S.handoff:null;
+  if(h) return `<div class="callout" style="margin:12px 0 0"><div class="what"><b>把这段话发给${h.to?" "+esc(h.to):"另一个 AI"}</b><br>它会登记自己是谁，领这一件接着做；别的事还是原来的 AI 做。</div>
+    <div class="acts"><button class="btn pri" onclick="copyText(S.handoff.text,'已复制，发给那个 AI')">复制这段话</button><button class="btn ghost" onclick="S.handoff=null;render()">好了</button></div></div>`;
+  if(S.aiPick!==i.n) return "";
+  const found=(D.system||{}).engines||{}, usual=st.engine||"codex", now=i.ai_for||"";
+  const opts=[["",`跟着设置（${engName(usual)}）`],...(st.drivers||[]).map(d=>["driver:"+d.name,d.name+(d.online?"":"（不在）")]),["cindy","Cindy"],
+    ...LOCAL_ENGINES.filter(e=>found[e]!==false).map(e=>[e,ENGINE_NAME[e]]),[HANDOFF,"另一个 AI…"]].filter(([v])=>v===""||v!==usual);
+  return `<div class="chips" style="margin:12px 0 0;align-items:center"><span class="hint" style="margin:0 4px 0 0">只这一件换，别的不变：</span>${opts.map(([v,l])=>`<button class="chip ${v===now?"on":""}" data-v="${esc(v)}" onclick="handTo(${i.n},this.dataset.v)">${esc(l)}</button>`).join("")}</div>`;
+}
+async function handTo(n,to){
+  S.aiPick=null;
+  if(!LIVE){ const i=byN(n); i.ai_for=to||null; if(to===HANDOFF) S.handoff={n,text:"（原型）发给另一个 AI 的话",to:""}; render(); return; }
+  try{ const r=await api("/api/item/ai",{n,to},30000);
+    if(r.message){ S.handoff={n,text:r.message,to:to===HANDOFF?"":r.to}; if(r.note) toast(r.note); }
+    else toast(r.note||(to?`#${n} 交给 ${r.to} 了`:`#${n} 回到 ${r.to}`));
+    await load(); }
+  catch(e){ toast(e.message||"没换成，连不上本机服务"); render(); }
 }
 /* ---------- 交付：每一版的链接和说明都能改、能删，也能自己加一版 ---------- */
 function deliverView(i){

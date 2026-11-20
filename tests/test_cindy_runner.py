@@ -41,7 +41,7 @@ class CindyRunner(unittest.TestCase):
         set_setting(self.root, "engine_sort", "cindy")                      # Cindy sorts, a local AI does the items
         self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING], ["item"]))
         set_setting(self.root, "engine", "cindy")                           # Cindy does everything
-        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING, "item"], []))
+        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING, "item"], ["item"]))  # items handed to a local AI one by one
         seen = []
         stub = lambda name: (lambda root, config, driver, **k: seen.append(name) or None)
         with patch.object(drive, "_prepare_triage", stub("triage")), patch.object(drive, "_prepare_meeting", stub("meeting")), \
@@ -52,8 +52,8 @@ class CindyRunner(unittest.TestCase):
             seen.clear()
             set_setting(self.root, "engine", "gemini")
             set_setting(self.root, "engine_sort", "gemini")
-            self.assertIsNone(drive.next_job(self.root, None, "Cindy"))     # nothing was handed to Cindy
-            self.assertEqual(seen, [])
+            self.assertIsNone(drive.next_job(self.root, None, "Cindy"))     # nothing was handed to Cindy: no sorting,
+            self.assertEqual(seen, ["item"])                                 # only items handed to it one by one
         args = ["gate", "--config", str(self.root / "config.yaml")]
         (self.root / "config.yaml").write_text("{}", encoding="utf-8")
         set_setting(self.root, "engine_sort", "cindy")
@@ -74,17 +74,18 @@ class CindyRunner(unittest.TestCase):
             self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
             seen.clear()
             aidrivers.hello(self.root, "Antigravity", app="Antigravity", model="gemini-3")
-            self.assertEqual((drive.item_runner(self.root), drive.sort_runner(self.root), drive.local_kinds(self.root)), ("driver", "driver", []))
+            self.assertEqual((drive.item_runner(self.root), drive.sort_runner(self.root), drive.local_kinds(self.root)), ("driver", "driver", ["item"]))
             self.assertEqual(drive.kinds_for(self.root, "Antigravity"), [*drive.SORTING, "item"])
             drive.next_job(self.root, None, "Antigravity")
             self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
             seen.clear()
             aidrivers.hello(self.root, "Claude Code", model="opus")          # the message went to another AI: it takes over
             self.assertIsNone(drive.next_job(self.root, None, "Antigravity"))
-            self.assertEqual(seen, [])
+            self.assertEqual(seen, ["item"])                                 # Antigravity: only items handed to it one by one
+            seen.clear()
             drive.next_job(self.root, None, "Claude Code")
             self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
-            self.assertEqual(drive.kinds_for(self.root, "Cindy"), [])
+            self.assertEqual(drive.kinds_for(self.root, "Cindy"), ["item"])
         names = {d["name"]: d for d in aidrivers.known(self.root)}
         self.assertEqual(set(names), {"Antigravity", "Claude Code"})
         self.assertEqual((names["Antigravity"]["model"], names["Antigravity"]["online"]), ("gemini-3", True))
@@ -130,11 +131,16 @@ class CindyRunner(unittest.TestCase):
     def test_the_schedule_check_says_go_only_when_cindy_does_items_and_one_waits(self):
         args = ["gate", "--config", str(self.root / "config.yaml")]
         (self.root / "config.yaml").write_text("{}", encoding="utf-8")
-        with patch.object(drive, "install_shim"), patch.object(drive, "has_items_for", return_value=True), redirect_stdout(io.StringIO()):
+        from agent_matrix import aidrivers
+        waiting = (0, {"ready": [{"record_id": "rA", "status": "queued"}, {"record_id": "rB", "status": "queued"}]})
+        with patch.object(drive, "install_shim"), patch("agent_matrix.workenv._check", return_value=waiting), redirect_stdout(io.StringIO()):
             self.assertEqual(drive.main(args), 2)              # items are done locally: nothing for Cindy
+            aidrivers.assign(self.root, "rB", "cindy")
+            self.assertEqual(drive.main(args), 0)              # but this one was handed to Cindy
+            aidrivers.assign(self.root, "rB", "")
             set_setting(self.root, "engine", "cindy")
             self.assertEqual(drive.main(args), 0)
-        with patch.object(drive, "install_shim"), patch.object(drive, "has_items_for", return_value=False), redirect_stdout(io.StringIO()):
+        with patch.object(drive, "install_shim"), patch("agent_matrix.workenv._check", return_value=(0, {"ready": []})), redirect_stdout(io.StringIO()):
             self.assertEqual(drive.main(args), 2)              # nothing waiting: skip the round, no tokens
 
     def test_cindy_is_told_which_project_it_works_in(self):

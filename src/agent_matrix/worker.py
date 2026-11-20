@@ -32,7 +32,7 @@ import time
 from . import activity
 from .models import MatrixBusy, MatrixError
 from .workenv import (now, status_path, read_status, _STATUS_LOCK, write_status, _alive, is_running, _version_key, codex_binary, owner_codex_home, worker_codex_home, _env, work_base, scratch, provider_overrides, project, _cli, _check, claude_binary, kick)  # noqa: F401
-from .engines import (CodexRun, MCP_CACHE_SECONDS, MCP_DENY, mcp_servers, ClaudeRun, ENGINES, engine, test_engine)  # noqa: F401
+from .engines import (CodexRun, MCP_CACHE_SECONDS, MCP_DENY, mcp_servers, ClaudeRun, ENGINES, engine, item_engine, test_engine)  # noqa: F401
 from .itemwork import (SECTIONS_ALWAYS, TEMPLATE_HINT, _plain, _section_names, check_result, workdir_for, record_copy, _changes, _remember, first_prompt, resume_prompt, TRIAGE_LABEL, _pending_new, pick_next, Item)  # noqa: F401
 from .state import State, exclusive_lock
 from .timeutil import TZ
@@ -153,7 +153,7 @@ def run_item_job(root, config, job):
     write_status(root, kind="item", record_id=item.rid, n=job.get("n"), title=(job.get("title") or "")[:26],
                  stage="找背景", step="读任务单和背景", item_started=now().isoformat(timespec="seconds"),
                  stage_at=now().isoformat(timespec="seconds"))
-    Run = engine(root)
+    Run = item_engine(root, item.rid)
     thread_file, timed = item.workdir / Run.THREAD_FILE, item.workdir / ".timed_out"
     thread = thread_file.read_text().strip() if thread_file.is_file() else None
     prompt, seen, result = (job["builtin_prompt"] if thread else job["instructions"]), {}, {}
@@ -237,7 +237,7 @@ def run_loop(root, config, *, max_jobs=200):
                 try:
                     # items go to Cindy when the owner chose it (设置 → AI 执行); this driver then only sorts
                     kinds = drive.local_kinds(root)   # what was handed to Cindy is Cindy's
-                    job = drive.next_job(root, config, name, skip=set(failed), kinds=kinds) if kinds else None
+                    job = drive.next_job(root, config, name, skip=set(failed), kinds=kinds, builtin=True) if kinds else None
                 except (MatrixError, MatrixBusy, OSError) as exc:
                     activity.log(root, "error", f"{name}领活出错", detail=str(exc)[:300], status="failed")
                     job = None

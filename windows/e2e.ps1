@@ -144,6 +144,18 @@ if ($job -and $job.folder) {
   $page = $null; try { $page = Invoke-WebRequest -UseBasicParsing -Uri $ic.url -TimeoutSec 20 } catch { }
   Check "交付能在这台电脑上打开" ($page -and $page.StatusCode -eq 200 -and $page.Content -match "周会议程草稿") "$($ic.url)"
 }
+$d = Api "api/item/new" @{ title = "改一下首页的按钮文案"; who = "AI"; note = "三处按钮" }
+$h = Api "api/item/ai" @{ n = $d.n; to = "handoff" }
+Check "这一件单独交给另一个 AI，拿到给它的话" ($h.ok -and $h.message -match "--n $($d.n)" -and $h.message -match "--helper") "$($h.reply)"
+$idle = (& cmd /c "`"$xin`" next --driver Antigravity" 2>&1 | Out-String)
+Check "原来的 AI 不会领走这一件" ($idle -match '"idle": true') $idle
+$hello2 = (& cmd /c "`"$xin`" hello --name Cursor --app Cursor --model gpt-5 --helper" 2>&1 | Out-String)
+$raw2 = (& cmd /c "`"$xin`" next --driver Cursor --n $($d.n)" 2>&1 | Out-String)
+$job2 = $null; try { $job2 = $raw2 | ConvertFrom-Json } catch { }
+Check "收到那段话的 AI 领到了这一件" ($hello2 -match '"you": "Cursor"' -and $job2 -and $job2.n -eq $d.n) ($raw2.Substring(0, [Math]::Min(300, $raw2.Length)))
+$state = Api "api/state"
+Check "其余的事还归原来的 AI，这一件记在新 AI 名下" ($state.settings.engine -eq "driver:Antigravity" -and ($state.items | Where-Object { $_.n -eq $d.n }).ai_for -eq "driver:Cursor") "engine=$($state.settings.engine)"
+if ($job2) { & cmd /c "`"$xin`" release --job $($job2.job)" | Out-Null }
 $up = Api "api/update" @{ check = $true }
 # the releases page limits how often one address may ask, and this machine shares its address with many others:
 # knowing its own version and either the newest one or a plain "could not reach it" is what must work
