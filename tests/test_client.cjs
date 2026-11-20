@@ -56,6 +56,13 @@ function reset(item) {
   assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
   assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
   assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
+  // Cindy chosen but the sorting was left on GPT: say so plainly, one click hands it all to Cindy
+  assert.match(pane("ai"),/做事和整理分给了两个 AI/); assert.match(pane("ai"),/setAll\('cindy'\)">都交给 Cindy/);
+  evaluate('D.settings.engine_sort="cindy"');
+  let one = pane("ai");
+  assert.doesNotMatch(one,/codex 命令行|分给了两个/, "one AI does it all: no GPT row left over");
+  assert.match(one,/所有要 AI 做的事都交给它/); assert.match(one,/class="chip on" onclick="setAll\('cindy'\)"/);
+  evaluate('D.settings.engine_sort="codex"');
   evaluate('D.settings={intake_mode:"all"}; D.system={record:{feishu_ready:true,mode:"feishu"}}');
   assert.match(pane("mode"),/自动开工/); assert.match(pane("store"),/飞书多维表格/);
   // setup check: every essential thing says whether it works, and what to do next when it does not
