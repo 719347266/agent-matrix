@@ -17,10 +17,25 @@ FIRST_IMPORT_DAYS = 14
 def _list(client, *, complete, since):
     data = client._exec(["task", "+get-my-tasks", "--complete=" + ("true" if complete else "false"),
                          "--created_at", since.strftime("%Y-%m-%d"), "--page-all", "--as", "user", "--format", "json"])
-    items = data.get("items") if isinstance(data, dict) else data
-    if not isinstance(items, list):
-        raise MatrixError("飞书任务列表结构异常，本轮不同步。")
-    return items
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        raise MatrixError(f"飞书任务列表结构异常（{type(data).__name__}），本轮不同步。")
+    for key in ("items", "tasks", "data"):   # the CLI's versions name the list differently
+        if isinstance(data.get(key), list):
+            return data[key]
+        if isinstance(data.get(key), dict):
+            return _items(data[key])
+    if not any(isinstance(v, list) for v in data.values()):
+        return []   # nothing at all: no tasks (an empty answer leaves the list out)
+    raise MatrixError(f"飞书任务列表结构异常（{'、'.join(sorted(data))[:80]}），本轮不同步。")
+
+
+def _items(inner):
+    for key in ("items", "tasks"):
+        if isinstance(inner.get(key), list):
+            return inner[key]
+    return []
 
 
 def _assigned_to(task, owner):

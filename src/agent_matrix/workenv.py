@@ -52,11 +52,8 @@ def write_status(root, **fields):
 
 
 def _alive(pid):
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError, TypeError):
-        return False
+    from .procs import alive
+    return alive(pid)   # not a signal-0 probe: on Windows that ends the process
 
 
 def is_running(root):

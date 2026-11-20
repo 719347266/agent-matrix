@@ -67,13 +67,8 @@ def _cindy(home, now):
 
 
 def _alive(pid):
-    if type(pid) is not int or pid<=1:
-        return False
-    try:
-        os.kill(pid,0)
-        return True
-    except OSError:
-        return False
+    from .procs import alive
+    return type(pid) is int and alive(pid)   # not a signal-0 probe: on Windows that ends the process
 
 
 def _plain_request(text):

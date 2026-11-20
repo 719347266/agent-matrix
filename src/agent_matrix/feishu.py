@@ -40,12 +40,32 @@ def permission_scope(args):
 
 
 class FeishuError(MatrixError):
-    def __init__(self, code="unknown", authorization=False, *, scope=None):
+    def __init__(self, code="unknown", authorization=False, *, scope=None, detail=""):
         self.authorization = authorization
         self.code = str(code)
         self.not_sent = False
         self.scope = scope
-        super().__init__(f"飞书调用失败（{self.code}）；已停止，不自动重放写操作。")
+        # What the command itself said stays on the error (it may quote content); the message only carries what is
+        # safe to show: which permissions are missing, or which local proxy is down.
+        self.detail = " ".join(str(detail or "").split())[:400]
+        proxy, scopes = proxy_down(self.detail), missing_scopes(self)
+        hint = f"（代理 {proxy} 没开）" if proxy else f"（少了权限：{'、'.join(scopes)}）" if self.code == "missing_scope" and scopes else ""
+        super().__init__(f"飞书调用失败（{self.code}）{hint}；已停止，不自动重放写操作。")
+
+
+SCOPE = re.compile(r"\b[a-z][a-z_]*(?::[a-z_.]+){1,3}\b")
+
+
+def missing_scopes(exc):
+    """The permissions a missing_scope error names (e.g. vc:meeting:readonly), as far as the command said them."""
+    text = f"{getattr(exc, 'detail', '')}"
+    return sorted({s for s in SCOPE.findall(text) if not s.startswith(("http", "https"))})[:8]
+
+
+def proxy_down(text):
+    """This computer sends traffic through a local proxy (127.0.0.1:7890 and the like) that is not running."""
+    m = re.search(r"proxyconnect tcp: dial tcp ((?:127\.0\.0\.1|localhost):\d+)", str(text or ""))
+    return m.group(1) if m else None
 
 
 def why_not(exc):
@@ -53,9 +73,16 @@ def why_not(exc):
     code = getattr(exc, "code", None)
     if code is None:
         return str(exc)[:160]   # already a sentence: bot not available, another app, another account
+    proxy = proxy_down(getattr(exc, "detail", ""))
+    if proxy:
+        return f"这台电脑设了网络代理（{proxy}），但代理软件现在没开，所以连不上飞书"
+    if str(code) == "missing_scope":
+        scopes = missing_scopes(exc)
+        return "飞书应用少了权限" + (f"：{'、'.join(scopes)}" if scopes else "")
     return {"user_needs_refresh": "飞书登录过期了，要重新登录一次",
             "cli_unavailable": "找不到飞书命令行（lark-cli）",
             "timeout": "飞书命令行太久没有响应",
+            "network": "连不上飞书（网络不通）",
             "invalid_json": "飞书命令行返回的内容读不懂（可能版本太旧或没登录）"}.get(str(code), f"飞书命令行报错（{code}）")
 
 
@@ -111,13 +138,15 @@ class Feishu:
         try:
             d = json.loads(r.stdout if r.returncode == 0 else r.stderr or r.stdout)
         except (ValueError, TypeError) as exc:
-            raise FeishuError("invalid_json") from exc
+            said = (r.stderr or "") + " " + (r.stdout or "")
+            raise FeishuError("network" if proxy_down(said) else "invalid_json", detail=said[:400]) from exc
         if not isinstance(d, dict):
             raise FeishuError("invalid_envelope")
         if r.returncode != 0 or d.get("ok") is False:
-            e = d.get("error", {})
+            e = d.get("error", {}) if isinstance(d.get("error"), dict) else {}
             code = "high-risk-write-refused" if r.returncode == 10 else e.get("code", e.get("subtype", r.returncode))
-            raise FeishuError(code, e.get("type") in {"authorization", "authentication"}, scope=scope)
+            said = " ".join(str(e.get(k) or "") for k in ("message", "hint", "detail", "permission_violations", "required_scopes", "missing_scopes"))
+            raise FeishuError(code, e.get("type") in {"authorization", "authentication"}, scope=scope, detail=said)
         if manifest:
             if d.get("manifest_version") != "v1" or d.get("format") != "ndjson":
                 raise FeishuError("invalid_manifest")

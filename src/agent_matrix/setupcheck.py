@@ -69,6 +69,12 @@ def report(root):
     wechat_on = bool(wx.get("enabled") and wx.get("installed"))
     reading = not manual and (feishu or slack or wechat_on)
     python = here.get("python") or sys.executable
+    # what the AI installs itself before anything else needs it (the owner is only told what is happening)
+    node_step = ("先装 Node.js（装飞书、微信命令行要用）：运行 `winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements`；"
+                 "装完关掉终端重新打开再继续。没有 winget 的话，带本人从 https://nodejs.org 下载 LTS 安装包，一路点「下一步」。"
+                 if here.get("platform") == "windows" else
+                 "先装 Node.js（装飞书、微信命令行要用）：有 Homebrew 就运行 `brew install node`；没有就带本人从 https://nodejs.org 下载 LTS 安装包。装完重新打开终端。")
+    npm_tip = "装命令行时如果提示没有权限：不要用 sudo，先运行 `npm config set prefix ~/.npm-global`，把 ~/.npm-global/bin 加进 PATH，再装一次。"
     out = []
 
     running = s.get("listener") == "运行中"
@@ -77,6 +83,15 @@ def report(root):
                 "steps": [] if running else (["请本人从开始菜单（或桌面图标）重新打开「心响」，等一分钟。"] if here.get("client")
                           else [f"运行 `powershell -ExecutionPolicy Bypass -File \"{root}\\windows\\install.ps1\"`，等一分钟。"] if here.get("platform") == "windows"
                           else [f"运行 `\"{root}/launchd/install-listen.sh\"`（装好并开机自启），等一分钟。"])})
+
+    problems = s.get("problems") or {}
+    if problems.get("proxy"):
+        proxy = problems["proxy"]
+        out.append({"key": "proxy", "title": "网络代理", "need": True, "ok": False,
+                    "say": f"这台电脑设了网络代理（{proxy}），但代理软件现在没开，所以飞书、安装命令都连不上外网。",
+                    "steps": [f"先跟本人说清楚：这是他电脑自己的网络设置（{proxy} 一般是 Clash 这类代理软件），不是心响坏了。",
+                              "请他二选一：打开平时用的代理软件；或者不用代理了，就在系统的网络设置里把代理关掉。不要替他改系统网络设置。",
+                              "他弄好后，等一分钟再运行 doctor，这一项会自己变好。"]})
 
     def cindy(job):
         from .local_sessions import cindy_setup_text, cindy_status
@@ -137,7 +152,7 @@ def report(root):
         out.append({"key": "feishu", "title": "飞书", "need": False, "ok": True, "say": "已接入。"})
     elif want_feishu:
         run = (f'$env:PYTHONUTF8=1; cd "{root}"; & "{python}" -m ' if here.get("platform") == "windows" else f'cd "{root}" && "{python}" -m ')
-        steps = [] if here.get("lark_cli") else [*([] if here.get("npm") else ["先装 Node.js（LTS 版），装完重新打开终端。"]), "安装飞书命令行：`npm install -g @larksuite/cli`"]
+        steps = [] if here.get("lark_cli") else [*([] if here.get("npm") else [node_step]), "安装飞书命令行：`npm install -g @larksuite/cli`" + ("" if here.get("platform") == "windows" else "。" + npm_tip)]
         steps += ["登录飞书：运行 `lark-cli auth login`，按它的提示做（会打开浏览器，请本人点同意；它要先配置应用的话照它的提示配）。",
                   f"建好存事项的表格（只做一次）：`{run}agent_matrix setup`",
                   f"补齐表格里的栏目：`{run}agent_matrix.brief_migration setup-fields`，然后 `{run}agent_matrix.brief_migration apply`",
@@ -146,6 +161,22 @@ def report(root):
     else:
         out.append({"key": "feishu", "title": "飞书", "need": False, "ok": True,
                     "say": "本人没打算接（事项在心响里自己新建）。以后想接，在心响的引导或设置里打开「我要接飞书」。"})
+    if feishu and "scopes" in problems:
+        scopes = " ".join(problems["scopes"])
+        out.append({"key": "feishu_scope", "title": "飞书权限", "need": True, "ok": False,
+                    "say": "飞书不让心响读一部分内容（会议纪要、聊天或任务），" + (f"少了这些权限：{scopes}。" if scopes else "少了权限。"),
+                    "steps": [f"补授权：运行 `lark-cli auth login --scope \"{scopes}\"`" if scopes else "补授权：运行 `lark-cli auth login --recommend`",
+                              "它会给一个链接：请本人在浏览器里打开并点「授权」。如果你只能在说完话之后才等得到本人，就加上 `--no-wait --json`，"
+                              "把链接发给本人，等他说好了，再用返回的 `--device-code` 完成。",
+                              "如果提示是应用本身没开这项权限：带本人打开 https://open.feishu.cn/app ，进到这个应用 → 权限管理，搜索上面的权限点开通，"
+                              "再「创建版本并发布」。公司应用要管理员审核的，告诉本人要找谁、怎么说。",
+                              "等两分钟再运行 doctor：心响下次读成功，这一项就会消失。"]})
+    if feishu and problems.get("fields"):
+        run = (f'$env:PYTHONUTF8=1; cd "{root}"; & "{python}" -m ' if here.get("platform") == "windows" else f'cd "{root}" && "{python}" -m ')
+        out.append({"key": "feishu_fields", "title": "飞书事项表", "need": True, "ok": False,
+                    "say": f"事项表少了心响要用的栏目（{problems['fields']}），AI 代做现在用不了。",
+                    "steps": [f"补齐栏目（只加栏目，不改已有内容）：`{run}agent_matrix.brief_migration setup-fields`，然后 `{run}agent_matrix.brief_migration apply`",
+                              "等两分钟再运行 doctor。"]})
     if slack:
         out.append({"key": "slack", "title": "Slack", "need": False, "ok": True, "say": "已接入。"})
     elif want_slack:
@@ -166,7 +197,7 @@ def report(root):
     elif wechat_on:
         out.append({"key": "wechat", "title": "微信", "need": False, "ok": True, "say": "已接入。"})
     elif want_wechat or wx.get("enabled"):
-        steps = [] if wx.get("installed") else [*([] if here.get("npm") else ["先装 Node.js（LTS 版），装完重新打开终端。"]),
+        steps = [] if wx.get("installed") else [*([] if here.get("npm") else [node_step]),
                                                   "安装微信命令行：`npm install -g @canghe_ai/wechat-cli`"]
         steps += ["确认微信已经在这台电脑上打开并登录。", renew, "验证：`wechat-cli sessions --limit 3` 能列出聊天。",
                   f"打开这个来源：`{cmd} set wechat_enabled=true`"]

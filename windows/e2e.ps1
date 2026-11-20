@@ -97,6 +97,12 @@ $set = (& cmd /c "`"$shim`" set owner_aliases=小王,明哥" 2>&1 | Out-String)
 Check "AI 能替用户改设置" ($set -match '"ok": true') $set
 Check "改的设置生效了" (((Api "api/state").settings.me.aliases -join ",") -eq "小王,明哥")
 
+Write-Host "[3b] 看面板不会把后台弄停"
+$before = @((Procs "*agent_matrix.listen*") | ForEach-Object { $_.ProcessId })
+foreach ($i in 1..5) { $null = Api "api/state"; Start-Sleep 1 }
+$after = @((Procs "*agent_matrix.listen*") | ForEach-Object { $_.ProcessId })
+Check "连看五次面板，后台还是同一个、没被重启" ($before.Count -ge 1 -and ($before -join ",") -eq ($after -join ",")) "before=$($before -join ',') after=$($after -join ',')"
+
 Write-Host "[4] 用一用"
 $a = Api "api/item/new" @{ title = "整理十二月活动排期"; who = "我"; due = "明天" }
 $b = Api "api/item/new" @{ title = "写季度复盘"; who = "我" }

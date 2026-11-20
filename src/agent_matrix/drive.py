@@ -156,7 +156,7 @@ LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
 def _prepare_setup(root, config, driver):
     """The owner clicked 接入飞书 / Slack / 微信 (or asked for the rest to be set up): the AI that drives 心响 does it."""
     from . import setupasks
-    from .setupshim import _cmd as setup_cmd
+    from .setupshim import TALK, _cmd as setup_cmd
     from .workenv import scratch
     if _busy(root, "setup"):
         return None
@@ -179,6 +179,8 @@ def _prepare_setup(root, config, driver):
 2. 只有人能做的事（在浏览器里登录、点同意、扫码、输电脑密码）才找本人：用下面的 say 命令说清要他做什么，然后等他做完再继续。
 3. 每到一个阶段报一下进度（step，15 字内），本人在心响设置里能看到。
 4. 做完运行 submit。心响会自己再查一遍：真接好了才算完成；没好会告诉你还差什么，照着继续。
+
+{TALK}
 
 请遵守：
 - 不要在对话里问本人要密码、验证码、Token 或密钥。要填 Token 的（比如 Slack），请本人自己粘贴到心响的设置里。

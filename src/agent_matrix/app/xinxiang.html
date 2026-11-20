@@ -1168,6 +1168,10 @@ function setupChecks(){
   const out=[];
   out.push({key:"listener",need:true,title:"后台程序",...(s.listener==="运行中"?{state:"ok",text:"在运行。收消息、叫 AI 开工、提醒都靠它。"}
     :{state:"bad",text:`没在运行，所以现在什么都不会自动发生。${here.client?"从开始菜单重新打开「心响」，等一分钟。":ASK_AI+"把它启动并设成开机自启。"}`})});
+  const pb=s.problems||{};   // what keeps failing right now, read from the recent errors
+  if(pb.proxy) out.push({key:"proxy",need:true,title:"网络代理",state:"bad",text:`这台电脑设了网络代理（${esc(pb.proxy)}），但代理软件现在没开，所以飞书连不上。打开你平时用的代理软件，或者在系统设置里把代理关掉，一分钟后就好。`});
+  if(r.feishu_ready&&pb.scopes) out.push({key:"feishu_scope",need:true,title:"飞书权限",state:"bad",text:`飞书不让心响读一部分内容${pb.scopes.length?`（少了 ${esc(pb.scopes.join("、"))}）`:""}，会议纪要或聊天可能收不进来。${ASK_AI}带你补一次授权，中途请你在浏览器里点「授权」。`});
+  if(r.feishu_ready&&pb.fields) out.push({key:"feishu_fields",need:true,title:"飞书事项表",state:"bad",text:`事项表少了几个栏目（${esc(pb.fields)}），AI 代做现在用不了。${ASK_AI}补上，不会动已有的内容。`});
   const eng=st.engine||"codex", c=st.cindy||{};
   const outside=(v,job)=>{ const name=engName(v), d=(st.drivers||[]).find(x=>x.name===name);
     return d&&d.online?{state:"ok",text:`${esc(name)} 在这儿，正在领活${d.model?`（${esc(d.model)}）`:""}。`}

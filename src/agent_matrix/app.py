@@ -354,7 +354,13 @@ def system_info(root):
     # connected on paper is not enough: a few failed sign-in checks in a row mean nothing is being read
     broken = bool(feishu_health and feishu_health.get("ok") is False and feishu_health.get("count", 0) >= 3)
     record["feishu_broken"] = {"why": feishu_health.get("why") or "", "since": feishu_health.get("since") or ""} if broken and record.get("feishu_ready") else None
-    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    try:   # what keeps failing right now (a proxy that is off, permissions Feishu refuses, columns missing)
+        problems = activity.problems(root)
+    except Exception:
+        problems = {}
+    if not problems.get("proxy") and (down := local_proxy_down()):
+        problems["proxy"] = down
+    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "problems": problems, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -814,6 +820,26 @@ def make_server(root, port):
     info = Path(root) / "state/app.json"
     info.write_text(json.dumps({"port": port, "pid": os.getpid(), "url": f"http://127.0.0.1:{port}/"}))
     return server
+
+
+def local_proxy_down():
+    """The computer is told to send web traffic through a proxy on this machine (Clash and the like) that is not
+    running: lark-cli, npm and the rest then cannot reach the internet. Returns that address, or None."""
+    import socket
+    from urllib.parse import urlparse
+    for key in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"):
+        value = os.environ.get(key)
+        if not value:
+            continue
+        url = urlparse(value if "://" in value else "http://" + value)
+        if url.hostname in ("127.0.0.1", "localhost") and url.port:
+            try:
+                socket.create_connection((url.hostname, url.port), timeout=0.5).close()
+                return None
+            except OSError:
+                return f"{url.hostname}:{url.port}"
+        return None
+    return None
 
 
 def setup_view(root):
