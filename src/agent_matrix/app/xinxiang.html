@@ -914,7 +914,10 @@ const projDot = p => `<span class="pdot" style="background:${p&&p.color?esc(p.co
 function allPage(){
   const F={"进行中":i=>!["完成","取消"].includes(i.status),"你来做":i=>i.who==="我"&&!["完成","取消"].includes(i.status),"AI 做":i=>i.who==="AI"&&!["完成","取消"].includes(i.status),"别人做":i=>i.who==="别人"&&!["完成","取消"].includes(i.status),"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
   const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking;
-  const shown=D.items.filter(i=>!i.hidden&&F[S.all](i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
+  const M=D.memory||{}, NOTES={"在等的":[(M.waiting||[]).length,waitingList],"会上的结论":[(M.recent||[]).length,saidList]}, note=NOTES[S.all];
+  const chips=`<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}<span style="width:1px;height:16px;background:var(--line);margin:0 6px;align-self:center"></span>${Object.entries(NOTES).map(([k,[n]])=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';S.picking=false;render()">${k}${n?` ${n}`:""}</button>`).join("")}</div>`;
+  if(note) return `<div class="proj-head">${chips}</div>${note[1]()}`;   // not sorted into projects: they have no number of their own
+  const shown=D.items.filter(i=>!i.hidden&&(F[S.all]||F["进行中"])(i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
   const count=k=>shown.filter(i=>inP(i,k)).length, need=k=>shown.filter(i=>inP(i,k)&&needsYou(i)).length;
   const drop=k=>`ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');moveItems([+event.dataTransfer.getData('text/plain')],${k})"`;
   const cell=(k,name,p)=>`<button class="cell ${cur===k?"on":""}" onclick="S.proj=${k==="all"?"'all'":k};S.renaming=false;render()" ${k==="all"?"":drop(k)}>${k==="all"?"":projDot(p)}<span class="lab">${esc(name)}</span><span class="val ${need(k)?"need":""}">${need(k)?`${need(k)} 件等你`:count(k)}</span></button>`;
@@ -927,7 +930,7 @@ function allPage(){
   const manage=!here?"":S.renaming?`<input id="proj-rename" data-draft="proj-rename" value="${esc(here.name)}" maxlength="20" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')renameProject(${here.id});if(event.key==='Escape'){S.renaming=false;render()}"><button class="btn pri" onclick="renameProject(${here.id})">保存</button>`
     :`<button class="btn ghost" onclick="S.renaming=true;render()">改名</button><button class="btn ghost" onclick="toast('删除后，里面的事回到未归类','删除项目',()=>removeProject(${here.id}))">删除项目</button>`;
   const add=S.newProj?`<input id="proj-name" data-draft="proj-name" maxlength="20" placeholder="项目名" aria-label="新项目的名字" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')newProject(null,'proj-name');if(event.key==='Escape'){S.newProj=false;render()}"><button class="btn pri" onclick="newProject(null,'proj-name')">建好</button>`:"";
-  const head=`<div class="proj-head"><div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>${manage}
+  const head=`<div class="proj-head">${chips}${manage}
         ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:add||`<button class="btn" onclick="openNewProject()">＋ 新建项目</button>`}</div>`;
   const right=`${head}${body}${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}`;
   if(!P.length) return right;   // no projects yet: just the list, and one button to make the first project
@@ -1011,23 +1014,31 @@ function copyGuide(){
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast("已复制，发给任何 AI 就能接入"))
     .catch(()=>{ const r=document.createRange(); r.selectNodeContents($("#guide")); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); toast("已选中，按 ⌘C 复制"); });
 }
-function memPage(){
-  const M=D.memory||{}, R=M.rules||[], W=M.waiting||[], C=M.recent||[];
-  const tab=["rules","wait","said"].includes(S.memTab)?S.memTab:"rules", mine=r=>r.source==="seed"||r.source==="本人";
-  const seg=`<div class="mem-bar"><div class="seg" role="tablist">${[["rules","规矩",R.length],["wait","在等的",W.length],["said","会上的结论",C.length]].map(([k,l,n])=>`<button class="${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.memTab='${k}';render()">${l} ${n}</button>`).join("")}</div></div>`;
-  const line=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${cls}" style="justify-self:start">${tag}</span><div style="min-width:0"><div class="t wrap">${esc(title)}</div>
+/* one line of a rule, or of something said in a meeting */
+const noteLine=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${cls}" style="justify-self:start">${tag}</span><div style="min-width:0"><div class="t wrap">${esc(title)}</div>
     <div class="s wrap">${sub}</div>${quote?`<q>${esc(quote)}</q>`:""}</div><div class="acts">${acts}</div></div>`;
-  if(tab==="wait") return seg+`<p class="hint">会上说了「等条件再定」的事。条件到了，或者话题再被提起时会提醒你。</p><div class="list">${W.map(m=>line("等条件","amber",m.text,
-      `等：${esc(m.wait_for||"")}${m.due?`，${esc(m.due.slice(5))} 到期`:""}　${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?"　已提醒过你":""}`,
-      `<button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button>`,m.quote)).join("")||'<div class="empty">现在没有在等条件的事。</div>'}</div>`;
-  if(tab==="said") return seg+`<p class="hint">AI 做相关的事时会带上这些，不用你再讲一遍。</p><div class="list">${C.map(m=>line(esc(m.label),m.label==="还没定"?"violet":m.label==="定了"?"green":"",m.text,`${esc(m.source)}　${esc(m.at)}`,"")).join("")||'<div class="empty">还没有记录</div>'}</div>`;
+/* 记忆 is how the system works: the owner's standing rules, read by every AI before any work. What a meeting left
+   open or decided is a matter like any other, and lives with the items (事项 → 在等的 / 会上的结论). */
+function memPage(){
+  const R=(D.memory||{}).rules||[], mine=r=>r.source==="seed"||r.source==="本人";
   const fresh=R.filter(r=>r.fresh), rest=R.filter(r=>!r.fresh);
-  return seg+`<p class="hint">所有 AI 干活前都会先读这些规矩。</p>`
-   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>line("AI 学的","brand",r.rule,esc(r.why||""),
+  return `<p class="hint">这里是心响做事的规矩：所有 AI 干活前都会先读。</p>`
+   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
-   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>line(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
+   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
       `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
     <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
+}
+/* what a meeting left waiting on a condition, and what it decided: shown with the items */
+function waitingList(){
+  const W=(D.memory||{}).waiting||[];
+  return `<p class="hint">会上说了「等条件再定」的事。条件到了，或者话题再被提起时，会在「今天」里提醒你。</p><div class="list">${W.map(m=>noteLine("等条件","amber",m.text,
+      `等：${esc(m.wait_for||"")}${m.due?`，${esc(m.due.slice(5))} 到期`:""}　${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?"　已提醒过你":""}`,
+      `<button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button>`,m.quote)).join("")||'<div class="empty">现在没有在等条件的事。</div>'}</div>`;
+}
+function saidList(){
+  const C=(D.memory||{}).recent||[];
+  return `<p class="hint">最近会上定下来的和还没定的。AI 做相关的事时会带上这些，不用你再讲一遍。</p><div class="list">${C.map(m=>noteLine(esc(m.label),m.label==="还没定"?"violet":m.label==="定了"?"green":"",m.text,`${esc(m.source)}　${esc(m.at)}`,"")).join("")||'<div class="empty">还没有记录</div>'}</div>`;
 }
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
 function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }

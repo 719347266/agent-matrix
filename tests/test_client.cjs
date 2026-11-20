@@ -164,7 +164,12 @@ function reset(item) {
   let mem = evaluate("memPage()");
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
-  assert.match(evaluate('S.memTab="wait"; memPage()'),/年卡要不要打折/);
+  // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
+  assert.doesNotMatch(mem,/年卡要不要打折|在等的|会上的结论/);
+  evaluate('S.all="在等的"'); let waitView = evaluate("allPage()");
+  assert.match(waitView,/年卡要不要打折/); assert.match(waitView,/ruleOp\(\{waiting_done:7\}\)/); assert.match(waitView,/在等的 1</);
+  evaluate('S.all="会上的结论"'); assert.match(evaluate("allPage()"),/还没有记录/);
+  evaluate('S.all="进行中"'); assert.match(evaluate("allPage()"),/S\.all='在等的';S\.picking=false;render\(\)">在等的 1</);
   evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
   // projects: the owner's own sorting; a guess is marked, and moving is one call
   const keep = evaluate("JSON.stringify(D.items)");
