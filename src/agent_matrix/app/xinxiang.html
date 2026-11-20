@@ -6,14 +6,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>心响</title>
 <link rel="icon" type="image/png" href="/icon.png">
-<meta name="theme-color" content="#e9ecf5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a0a12" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f3f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111216" media="(prefers-color-scheme: dark)">
 <style>
 /* 心响 · 工作台：左边导航，中间列表，右边详情。浅色为主，跟随系统深色。 */
 :root{color-scheme:light;
---bg:#e9ecf5;--blob1:#b9b4ff;--blob2:#9fd4ff;--blob3:#ffc6e0;
---side:rgba(255,255,255,.55);--panel:rgba(255,255,255,.62);--sheet:rgba(250,250,253,.88);--bar:rgba(238,240,248,.36);--raise:rgba(255,255,255,.92);--field:rgba(255,255,255,.6);--stroke:rgba(255,255,255,.75);
---hover:rgba(120,120,128,.1);--sel:rgba(88,86,214,.14);--line:rgba(60,60,67,.14);--line2:rgba(60,60,67,.09);
+--bg:#f2f3f7;--blob1:#e4e3ff;--blob2:#dcebfb;--blob3:#fbe8f0;
+--side:rgba(255,255,255,.58);--panel:rgba(255,255,255,.74);--sheet:rgba(251,251,253,.9);--bar:rgba(242,243,247,.4);--raise:rgba(255,255,255,.95);--field:rgba(255,255,255,.66);--stroke:rgba(255,255,255,.85);
+--navsel:rgba(60,60,67,.09);--hover:rgba(120,120,128,.09);--sel:rgba(88,86,214,.1);--line:rgba(60,60,67,.14);--line2:rgba(60,60,67,.09);
 --ink:#1c1c1e;--ink2:rgba(60,60,67,.8);--ink3:rgba(60,60,67,.56);
 --brand:#5856d6;--brand-soft:rgba(88,86,214,.14);--brand-glow:rgba(88,86,214,.32);--dot:#ff3b30;
 --blue:#0a6fe0;--blue-soft:rgba(0,122,255,.13);--amber:#a85800;--amber-soft:rgba(255,149,0,.18);--red:#d70015;--red-soft:rgba(255,59,48,.14);
@@ -21,18 +21,18 @@
 --soft:0 8px 28px rgba(31,38,80,.09);--shadow:0 1px 2px rgba(16,16,24,.05),0 8px 24px rgba(16,16,24,.08);
 --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;
---bg:#0a0a12;--blob1:#3d2f9e;--blob2:#0f4a7a;--blob3:#6a1f52;
---side:rgba(44,44,58,.46);--panel:rgba(44,44,58,.52);--sheet:rgba(36,36,46,.84);--bar:rgba(14,14,22,.4);--raise:rgba(120,120,128,.42);--field:rgba(118,118,128,.2);--stroke:rgba(255,255,255,.13);
---hover:rgba(255,255,255,.07);--sel:rgba(125,122,255,.22);--line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.07);
---ink:#fff;--ink2:rgba(235,235,245,.76);--ink3:rgba(235,235,245,.5);--brand:#7d7aff;--brand-soft:rgba(125,122,255,.22);--brand-glow:rgba(125,122,255,.3);--dot:#ff453a;
+--bg:#111216;--blob1:#1c1e3a;--blob2:#11242f;--blob3:#24182a;
+--side:rgba(28,29,35,.62);--panel:rgba(44,45,54,.5);--sheet:rgba(34,35,42,.9);--bar:rgba(17,18,22,.45);--raise:rgba(120,120,128,.36);--field:rgba(118,118,128,.18);--stroke:rgba(255,255,255,.08);
+--navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
+--ink:#f4f4f6;--ink2:rgba(235,235,245,.74);--ink3:rgba(235,235,245,.48);--brand:#8a88ff;--brand-soft:rgba(138,136,255,.18);--brand-glow:rgba(138,136,255,.22);--dot:#ff453a;
 --blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
 --green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
 --soft:0 10px 32px rgba(0,0,0,.35);--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}}
 :root[data-theme=dark]{color-scheme:dark;
---bg:#0a0a12;--blob1:#3d2f9e;--blob2:#0f4a7a;--blob3:#6a1f52;
---side:rgba(44,44,58,.46);--panel:rgba(44,44,58,.52);--sheet:rgba(36,36,46,.84);--bar:rgba(14,14,22,.4);--raise:rgba(120,120,128,.42);--field:rgba(118,118,128,.2);--stroke:rgba(255,255,255,.13);
---hover:rgba(255,255,255,.07);--sel:rgba(125,122,255,.22);--line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.07);
---ink:#fff;--ink2:rgba(235,235,245,.76);--ink3:rgba(235,235,245,.5);--brand:#7d7aff;--brand-soft:rgba(125,122,255,.22);--brand-glow:rgba(125,122,255,.3);--dot:#ff453a;
+--bg:#111216;--blob1:#1c1e3a;--blob2:#11242f;--blob3:#24182a;
+--side:rgba(28,29,35,.62);--panel:rgba(44,45,54,.5);--sheet:rgba(34,35,42,.9);--bar:rgba(17,18,22,.45);--raise:rgba(120,120,128,.36);--field:rgba(118,118,128,.18);--stroke:rgba(255,255,255,.08);
+--navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
+--ink:#f4f4f6;--ink2:rgba(235,235,245,.74);--ink3:rgba(235,235,245,.48);--brand:#8a88ff;--brand-soft:rgba(138,136,255,.18);--brand-glow:rgba(138,136,255,.22);--dot:#ff453a;
 --blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
 --green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
 --soft:0 10px 32px rgba(0,0,0,.35);--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}
@@ -346,10 +346,10 @@ body{background-color:var(--bg);background-image:radial-gradient(60vmax 60vmax a
 .topbar h1{font-size:22px;font-weight:750;letter-spacing:-.01em}
 .d-head,.composer{background:var(--sheet)}
 .nav{border-radius:11px;padding:8px 11px}
-.nav.on{background:var(--brand);color:#fff;box-shadow:0 6px 16px var(--brand-glow)}
-.nav.on .c,.nav.on .c.need{color:#fff}.nav.on .c.hot{background:#fff;color:var(--brand)}
+.nav.on{background:var(--navsel);color:var(--ink);box-shadow:none}
+.nav.on svg{color:var(--brand)}
 .btn{height:30px;padding:0 14px;border-radius:99px;border:0;background:var(--gray-soft);font-weight:600}
-.btn.pri{box-shadow:0 4px 12px var(--brand-glow)}
+.btn.pri{box-shadow:0 2px 8px var(--brand-glow)}
 .chip{border-radius:99px;padding:4px 12px}.chip.on{background:var(--raise);border-color:transparent;box-shadow:0 1px 4px rgba(0,0,0,.12)}
 .pill{border-radius:99px}
 .switch .tr{width:42px;height:26px;background:var(--gray-soft)}.switch .tr:after{width:22px;height:22px}
@@ -369,7 +369,7 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .set-menu{position:sticky;top:70px}
 .set-cap{margin:18px 14px 6px;font-size:12px;color:var(--ink3);font-weight:500}.set-cap:first-child{margin-top:0}
 .cell{display:flex;align-items:center;gap:11px;width:100%;border:0;border-top:1px solid var(--line2);background:none;text-align:left;padding:9px 12px;min-height:46px;color:var(--ink)}
-.cell:first-child{border-top:0}.cell:hover{background:var(--hover)}.cell.on{background:var(--sel)}
+.cell:first-child{border-top:0}.cell:hover{background:var(--hover)}.cell.on{background:var(--navsel)}
 .cell .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none}
 .cell .ic svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .cell .lab{flex:1;min-width:0;font-weight:500;white-space:nowrap}
@@ -422,7 +422,8 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .bug-link:hover{color:var(--ink);background:var(--hover)}
 .side .aicard{margin-top:0}
 /* inside the Mac app the page runs up under the window buttons: leave them room, and a band to drag the window by */
-.macapp .side{padding-top:40px}
+.macapp .side{padding-top:46px}
+@media (min-width:821px){.macapp .side{margin:0;border-radius:0;border-width:0 1px 0 0;border-color:var(--line2);box-shadow:none}}
 .macapp .topbar{padding-top:32px}
 .macapp .detail .d-head{padding-top:34px}
 .macapp .ob-mask,.macapp .modal{padding-top:36px}
