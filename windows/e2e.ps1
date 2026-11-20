@@ -120,7 +120,10 @@ Check "页面数据对得上：项目、交付、串联" ($ib.project -eq $proj.
 Check "中文标题没乱码" ($ib.title -eq "写季度复盘")
 Check "规矩在" (@($state.memory.rules | Where-Object { $_.rule -eq "对外文案先给我两版" }).Count -eq 1)
 $up = Api "api/update" @{ check = $true }
-Check "能查到新版本信息" ($up.current -and $up.latest) "current=$($up.current) latest=$($up.latest) err=$($up.error)"
+# the releases page limits how often one address may ask, and this machine shares its address with many others:
+# knowing its own version and either the newest one or a plain "could not reach it" is what must work
+Check "查新版本：知道自己的版本，查到最新版或说明连不上" ($up.current -and ($up.latest -or $up.error)) "current=$($up.current) latest=$($up.latest) err=$($up.error)"
+if (-not $up.latest) { Write-Host "  (没查到最新版：$($up.error))" }
 Shot "03-after-use"
 
 Write-Host "[5] 后台程序被关掉，自己回来"
