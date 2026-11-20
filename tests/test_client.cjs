@@ -44,9 +44,26 @@ function reset(item) {
   evaluate('S.working=true'); // a late job snapshot cannot resurrect a closed item
   assert.equal(evaluate("isWorking(byN(45))"), false);
   assert.match(evaluate("statusOf(byN(45))[0]"),/已完成/);
-  const settings = ["ai","src","data","general"].map(tab => evaluate(`S.setTab="${tab}"; sysPage()`)).join("");
-  for (const label of ["Slack","Notion","只存本机","本机 AI","整理","新手引导"]) assert.ok(settings.includes(label), label);
-  assert.ok(!evaluate('S.setTab="ai"; sysPage()').includes("Slack"), "one settings tab at a time");
+  const pane = tab => evaluate(`S.setTab="${tab}"; sysPage()`).split('class="set-pane"')[1];
+  const settings = ["tool","mode","ai","talk","store","notify","look","guide","adv"].map(pane).join("");
+  for (const label of ["Slack","Notion","只存本机","本机 AI","整理","打开引导","跟随系统","接着做"]) assert.ok(settings.includes(label), label);
+  assert.ok(!pane("ai").includes("Slack"), "one settings page at a time");
+  // the menu says what is chosen now, and a page only shows what follows from the choices made
+  evaluate('D.settings={engine:"cindy",engine_sort:"codex",intake_mode:"manual"}; D.system={record:{feishu_ready:false,mode:"device"},store:{local:true}}');
+  const menu = evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0];
+  for (const label of ["都没接","手动模式","Cindy","只存本机","只在心响里"]) assert.ok(menu.includes(label), label);
+  assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
+  assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
+  assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
+  evaluate('D.settings={intake_mode:"all"}; D.system={record:{feishu_ready:true,mode:"feishu"}}');
+  assert.match(pane("mode"),/自动开工/); assert.match(pane("store"),/飞书多维表格/);
+  // rules the AI learned wait on top for the owner's yes or no
+  evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
+  let mem = evaluate("memPage()");
+  assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
+  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
+  assert.match(evaluate('S.memTab="wait"; memPage()'),/年卡要不要打折/);
+  evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
   for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
     evaluate(`S.ob={step:${step}}`);
@@ -129,14 +146,14 @@ function reset(item) {
   assert.deepEqual(plain("[byN(1).after,byN(2).before]"),[[],[]]);
   assert.equal(evaluate('CMD.link(2,"https://x/docx/NEW")'),"2 交付链接 https://x/docx/NEW");
   // Every path is the owner's choice: what is taken in, which tools are read, where briefs go; and items can be added by hand.
-  evaluate('D.settings={intake_mode:"accepted",sources:{meetings:true,chats:false,tasks:true},brief_channel:"feishu"}; D.system={record:{feishu_ready:true}}; S.setTab="src"');
-  let src=evaluate("sysPage()");
+  evaluate('D.settings={intake_mode:"accepted",sources:{meetings:true,chats:false,tasks:true},brief_channel:"feishu"}; D.system={record:{feishu_ready:true}}; S.setTab="tool"');
+  let src=evaluate("sysPage()")+pane("mode");
   for (const label of ["全能模式","全自动模式","手动模式","读会议","读聊天","读飞书任务","Slack"]) assert.ok(src.includes(label), label);
   assert.match(src,/class="mode on" aria-pressed="true" onclick="setSetting\('intake_mode','accepted'\)"/);
-  assert.match(evaluate('S.setTab="general"; sysPage()'),/早晚简报也发到飞书/);
+  assert.match(pane("notify"),/早晚简报也发到飞书/);
   evaluate('D.system={record:{feishu_ready:false}}');   // nothing connected: no Feishu switches, notifications stay in the app
-  assert.match(evaluate('S.setTab="src"; sysPage()'),/没有接入/); assert.doesNotMatch(evaluate("sysPage()"),/读会议/);
-  assert.match(evaluate('S.setTab="general"; sysPage()'),/所有通知都只在心响里/);
+  assert.match(pane("tool"),/没有接入/); assert.doesNotMatch(evaluate("sysPage()"),/读会议/);
+  assert.match(pane("notify"),/所有通知都只在心响里/);
   await evaluate('setSetting("intake_mode","all")');
   assert.deepEqual(plain("[D.settings.intake_mode,D.settings.auto_assign,D.settings.prework_enabled]"),["all",true,true]);
   evaluate("addOpen()"); assert.match(evaluate("addView()"),/要做什么[\s\S]*谁来做[\s\S]*创建/); evaluate("S.adding=null");

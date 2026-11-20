@@ -8,25 +8,31 @@
 <style>
 /* 心响 · 工作台：左边导航，中间列表，右边详情。浅色为主，跟随系统深色。 */
 :root{color-scheme:light;
---bg:#f7f7f8;--side:#f2f2f4;--panel:#ffffff;--hover:#f4f4f6;--sel:#eeedfc;--line:#e5e5ea;--line2:#efeff2;
---ink:#1c1c21;--ink2:#5d5d68;--ink3:#9b9ba5;
---brand:#5b4fe6;--brand-soft:#efedfd;--dot:#e8467c;
---blue:#2f6fe4;--blue-soft:#e9f0fd;--amber:#a8660b;--amber-soft:#fcf1de;--red:#d23e3e;--red-soft:#fcebea;
---green:#1f8a59;--green-soft:#e4f5ec;--violet:#7748d6;--violet-soft:#f1ebfc;--gray-soft:#f0f0f3;
---shadow:0 1px 2px rgba(16,16,24,.05),0 8px 24px rgba(16,16,24,.08);
+--bg:#e9ecf5;--blob1:#b9b4ff;--blob2:#9fd4ff;--blob3:#ffc6e0;
+--side:rgba(255,255,255,.55);--panel:rgba(255,255,255,.62);--sheet:rgba(250,250,253,.88);--bar:rgba(238,240,248,.36);--raise:rgba(255,255,255,.92);--field:rgba(255,255,255,.6);--stroke:rgba(255,255,255,.75);
+--hover:rgba(120,120,128,.1);--sel:rgba(88,86,214,.14);--line:rgba(60,60,67,.14);--line2:rgba(60,60,67,.09);
+--ink:#1c1c1e;--ink2:rgba(60,60,67,.8);--ink3:rgba(60,60,67,.56);
+--brand:#5856d6;--brand-soft:rgba(88,86,214,.14);--brand-glow:rgba(88,86,214,.32);--dot:#ff3b30;
+--blue:#0a6fe0;--blue-soft:rgba(0,122,255,.13);--amber:#a85800;--amber-soft:rgba(255,149,0,.18);--red:#d70015;--red-soft:rgba(255,59,48,.14);
+--green:#1c8a3f;--green-soft:rgba(52,199,89,.18);--violet:#8944ab;--violet-soft:rgba(175,82,222,.15);--gray-soft:rgba(120,120,128,.13);
+--soft:0 8px 28px rgba(31,38,80,.09);--shadow:0 1px 2px rgba(16,16,24,.05),0 8px 24px rgba(16,16,24,.08);
 --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;
---bg:#141418;--side:#18181d;--panel:#1d1d23;--hover:#24242b;--sel:#2a2746;--line:#2d2d35;--line2:#26262d;
---ink:#ececf1;--ink2:#a4a4af;--ink3:#6e6e79;--brand:#8279ff;--brand-soft:#2a2746;--dot:#ff5c93;
---blue:#6c9dff;--blue-soft:#1c2a45;--amber:#e3a548;--amber-soft:#3a2c15;--red:#f07272;--red-soft:#3d2023;
---green:#4cc38a;--green-soft:#163326;--violet:#ab8cff;--violet-soft:#2b2346;--gray-soft:#27272e;
---shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}}
+--bg:#0a0a12;--blob1:#3d2f9e;--blob2:#0f4a7a;--blob3:#6a1f52;
+--side:rgba(44,44,58,.46);--panel:rgba(44,44,58,.52);--sheet:rgba(36,36,46,.84);--bar:rgba(14,14,22,.4);--raise:rgba(120,120,128,.42);--field:rgba(118,118,128,.2);--stroke:rgba(255,255,255,.13);
+--hover:rgba(255,255,255,.07);--sel:rgba(125,122,255,.22);--line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.07);
+--ink:#fff;--ink2:rgba(235,235,245,.76);--ink3:rgba(235,235,245,.5);--brand:#7d7aff;--brand-soft:rgba(125,122,255,.22);--brand-glow:rgba(125,122,255,.3);--dot:#ff453a;
+--blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
+--green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
+--soft:0 10px 32px rgba(0,0,0,.35);--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}}
 :root[data-theme=dark]{color-scheme:dark;
---bg:#141418;--side:#18181d;--panel:#1d1d23;--hover:#24242b;--sel:#2a2746;--line:#2d2d35;--line2:#26262d;
---ink:#ececf1;--ink2:#a4a4af;--ink3:#6e6e79;--brand:#8279ff;--brand-soft:#2a2746;--dot:#ff5c93;
---blue:#6c9dff;--blue-soft:#1c2a45;--amber:#e3a548;--amber-soft:#3a2c15;--red:#f07272;--red-soft:#3d2023;
---green:#4cc38a;--green-soft:#163326;--violet:#ab8cff;--violet-soft:#2b2346;--gray-soft:#27272e;
---shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}
+--bg:#0a0a12;--blob1:#3d2f9e;--blob2:#0f4a7a;--blob3:#6a1f52;
+--side:rgba(44,44,58,.46);--panel:rgba(44,44,58,.52);--sheet:rgba(36,36,46,.84);--bar:rgba(14,14,22,.4);--raise:rgba(120,120,128,.42);--field:rgba(118,118,128,.2);--stroke:rgba(255,255,255,.13);
+--hover:rgba(255,255,255,.07);--sel:rgba(125,122,255,.22);--line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.07);
+--ink:#fff;--ink2:rgba(235,235,245,.76);--ink3:rgba(235,235,245,.5);--brand:#7d7aff;--brand-soft:rgba(125,122,255,.22);--brand-glow:rgba(125,122,255,.3);--dot:#ff453a;
+--blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
+--green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
+--soft:0 10px 32px rgba(0,0,0,.35);--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.55 var(--font);-webkit-font-smoothing:antialiased}
@@ -321,6 +327,56 @@ button:disabled{opacity:.5;cursor:wait}
 .toast.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 .toast button{border:0;background:rgba(127,127,127,.25);color:inherit;border-radius:6px;padding:3px 10px;font-weight:600}
 .toast:not(.act){padding-right:16px}.toast:not(.act) button{display:none}
+
+/* glass: every surface is translucent over one soft colour field (iOS style) */
+body{background-color:var(--bg);background-image:radial-gradient(60vmax 60vmax at 6% 0%,var(--blob1),transparent 62%),radial-gradient(55vmax 55vmax at 100% 16%,var(--blob2),transparent 60%),radial-gradient(50vmax 50vmax at 62% 112%,var(--blob3),transparent 60%);background-attachment:fixed}
+.side,.list,.detail,.solo,.aicard,.mode,.modal .box,.ob,.command-result,.topbar,.d-head,.composer{-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
+.list,.solo,.mode,.aicard{background:var(--panel);border:1px solid var(--stroke);box-shadow:var(--soft)}
+.list{border-radius:16px}.solo{border-radius:18px}.aicard{border-radius:14px;box-shadow:none}
+.side{background:var(--side);border:1px solid var(--stroke)}
+.detail{background:var(--panel)}
+@media (min-width:821px){
+  .side{margin:10px 0 10px 10px;border-radius:22px;box-shadow:var(--soft)}
+  .app.with-detail .detail{margin:10px 10px 10px 0;border-radius:22px;border:1px solid var(--stroke);box-shadow:var(--soft)}
+}
+.topbar{background:var(--bar);border-bottom:0;padding-top:16px}
+.topbar h1{font-size:22px;font-weight:750;letter-spacing:-.01em}
+.d-head,.composer{background:var(--sheet)}
+.nav{border-radius:11px;padding:8px 11px}
+.nav.on{background:var(--brand);color:#fff;box-shadow:0 6px 16px var(--brand-glow)}
+.nav.on .c,.nav.on .c.need{color:#fff}.nav.on .c.hot{background:#fff;color:var(--brand)}
+.btn{height:30px;padding:0 14px;border-radius:99px;border:0;background:var(--gray-soft);font-weight:600}
+.btn.pri{box-shadow:0 4px 12px var(--brand-glow)}
+.chip{border-radius:99px;padding:4px 12px}.chip.on{background:var(--raise);border-color:transparent;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.pill{border-radius:99px}
+.switch .tr{width:42px;height:26px;background:var(--gray-soft)}.switch .tr:after{width:22px;height:22px}
+.switch.on .tr{background:#34c759}.switch.on .tr:after{left:18px}
+.seg{border-radius:10px;background:var(--gray-soft)}.seg button{border-radius:8px;padding:4px 12px}.seg button.on{background:var(--raise)}
+input,textarea,select{background:var(--field);border-radius:10px}
+.callout{border-radius:14px}.bub,.tr-ai{border-radius:16px 16px 16px 6px}.m.me .bub{border-radius:16px 16px 6px 16px}
+.modal,.ob-mask{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.modal .box,.ob{background:var(--sheet);border:1px solid var(--stroke);border-radius:22px}
+.command-result{background:var(--sheet);border-radius:14px}
+.who.me{color:var(--bg)}.toast{color:var(--bg);border-radius:99px}
+.mode{border-radius:16px}.mode.on{box-shadow:0 0 0 2px var(--brand) inset}
+.dv{background:var(--field);border-radius:14px}
+.row{padding-top:11px;padding-bottom:11px}
+/* settings: a grouped menu on the left (each line shows what is chosen), its options on the right */
+.set-grid{display:grid;grid-template-columns:268px minmax(0,1fr);gap:24px;align-items:start;max-width:1080px}
+.set-menu{position:sticky;top:70px}
+.set-cap{margin:18px 14px 6px;font-size:12px;color:var(--ink3);font-weight:500}.set-cap:first-child{margin-top:0}
+.cell{display:flex;align-items:center;gap:11px;width:100%;border:0;border-top:1px solid var(--line2);background:none;text-align:left;padding:9px 12px;min-height:46px;color:var(--ink)}
+.cell:first-child{border-top:0}.cell:hover{background:var(--hover)}.cell.on{background:var(--sel)}
+.cell .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none}
+.cell .ic svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cell .lab{flex:1;min-width:0;font-weight:500;white-space:nowrap}
+.cell .val{color:var(--ink3);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .chev{color:var(--ink3);font-size:17px;line-height:1;flex:none}
+.set-title{font-size:20px;font-weight:750;margin:0 2px 2px}.set-lead{color:var(--ink3);font-size:12.5px;margin:0 2px 14px;min-height:1px}
+.set-pane .modes{margin-bottom:6px}
+@container (max-width:720px){.set-grid{grid-template-columns:1fr}.set-menu{position:static}}
+.row.flat.mem{grid-template-columns:8px 68px minmax(0,1fr) auto}
+.mem-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}.mem-bar .seg{margin:0}
 
 @media (max-width:820px){
   .app,.app.with-detail{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto;min-height:100vh}
@@ -797,20 +853,22 @@ function copyGuide(){
     .catch(()=>{ const r=document.createRange(); r.selectNodeContents($("#guide")); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); toast("已选中，按 ⌘C 复制"); });
 }
 function memPage(){
-  const M=D.memory||{rules:[],waiting:[],recent:[]};
-  const mine=r=>r.source==="seed"||r.source==="本人";
-  const rules=(M.rules||[]).map(r=>`<div class="row flat ev"><span class="ud"></span><span class="pill ${mine(r)?"":"brand"}" style="justify-self:start">${mine(r)?"你定的":"AI 学的"}</span><div style="min-width:0"><div class="t wrap">${esc(r.rule)}</div>
-    <div class="s wrap">${esc(r.why||"")}</div></div><div></div><div class="acts"><button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button></div></div>`).join("");
-  const waiting=(M.waiting||[]).map(m=>`<div class="row flat ev"><span class="ud"></span><span class="pill amber" style="justify-self:start">等条件</span><div style="min-width:0"><div class="t wrap">${esc(m.text)}</div>
-    <div class="s wrap">等：${esc(m.wait_for||"")}${m.due?`，${esc(m.due.slice(5))} 到期`:""}　${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?"　已提醒过你":""}</div>${m.quote?`<q>${esc(m.quote)}</q>`:""}</div><div></div>
-    <div class="acts"><button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button></div></div>`).join("");
-  const recent=(M.recent||[]).map(m=>`<div class="row flat ev"><span class="ud"></span><span class="pill ${m.label==="还没定"?"violet":m.label==="定了"?"green":""}" style="justify-self:start">${esc(m.label)}</span><div style="min-width:0"><div class="t wrap">${esc(m.text)}</div>
-    <div class="s">${esc(m.source)}　${esc(m.at)}</div></div><div></div><div></div></div>`).join("");
-  return `<p class="hint">你的规矩，所有 AI 干活前都会先读。会上说"等条件再定"的事，条件到了或者话题再出现时会提醒你。</p>
-  <div class="sec-h">你的规矩<span class="n">${(M.rules||[]).length}</span></div><div class="list">${rules||'<div class="empty">还没有</div>'}
-    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>
-  <div class="sec-h">等条件再定的事<span class="n">${(M.waiting||[]).length}</span></div><div class="list">${waiting||'<div class="empty">现在没有在等条件的事。</div>'}</div>
-  <div class="sec-h">最近会上定的和没定的</div><div class="list">${recent||'<div class="empty">还没有记录</div>'}</div>`;
+  const M=D.memory||{}, R=M.rules||[], W=M.waiting||[], C=M.recent||[];
+  const tab=["rules","wait","said"].includes(S.memTab)?S.memTab:"rules", mine=r=>r.source==="seed"||r.source==="本人";
+  const seg=`<div class="mem-bar"><div class="seg" role="tablist">${[["rules","规矩",R.length],["wait","在等的",W.length],["said","会上的结论",C.length]].map(([k,l,n])=>`<button class="${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.memTab='${k}';render()">${l} ${n}</button>`).join("")}</div></div>`;
+  const line=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${cls}" style="justify-self:start">${tag}</span><div style="min-width:0"><div class="t wrap">${esc(title)}</div>
+    <div class="s wrap">${sub}</div>${quote?`<q>${esc(quote)}</q>`:""}</div><div class="acts">${acts}</div></div>`;
+  if(tab==="wait") return seg+`<p class="hint">会上说了「等条件再定」的事。条件到了，或者话题再被提起时会提醒你。</p><div class="list">${W.map(m=>line("等条件","amber",m.text,
+      `等：${esc(m.wait_for||"")}${m.due?`，${esc(m.due.slice(5))} 到期`:""}　${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?"　已提醒过你":""}`,
+      `<button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button>`,m.quote)).join("")||'<div class="empty">现在没有在等条件的事。</div>'}</div>`;
+  if(tab==="said") return seg+`<p class="hint">AI 做相关的事时会带上这些，不用你再讲一遍。</p><div class="list">${C.map(m=>line(esc(m.label),m.label==="还没定"?"violet":m.label==="定了"?"green":"",m.text,`${esc(m.source)}　${esc(m.at)}`,"")).join("")||'<div class="empty">还没有记录</div>'}</div>`;
+  const fresh=R.filter(r=>r.fresh), rest=R.filter(r=>!r.fresh);
+  return seg+`<p class="hint">所有 AI 干活前都会先读这些规矩。</p>`
+   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>line("AI 学的","brand",r.rule,esc(r.why||""),
+      `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
+   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>line(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
+      `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
+    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
 }
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
 function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }
@@ -857,9 +915,9 @@ const OB=[
     return `<div class="list">${r.feishu_ready
         ?setRow("飞书","已接入","",pushLine(s))+setRow("读会议","",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","",toggle("feishu_tasks_enabled",on.tasks))
         :setRow("飞书","没有接入。需要的话，按安装说明运行一次 setup。",`<span class="eng-state">未接入</span>`)}
-      ${setRow("Slack",s.slack?`已接入 ${esc(s.slack.team||"")}`:"需要时到 设置 → 消息来源 里粘贴 Token 连接。",`<span class="eng-state ${s.slack?"ok":""}">${s.slack?"已接入":"未接入"}</span>`)}
+      ${setRow("Slack",s.slack?`已接入 ${esc(s.slack.team||"")}`:"需要时到 设置 → 办公工具 里粘贴 Token 连接。",`<span class="eng-state ${s.slack?"ok":""}">${s.slack?"已接入":"未接入"}</span>`)}
       ${setRow("后台程序","收消息、整理、提醒都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)}</div>`; }},
-  {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在 设置 → 消息来源 里随时能换。",body:st=>modeCards(st)},
+  {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在设置里随时能换。",body:st=>modeCards(st)},
   {key:"ai",title:"让哪个 AI 来做事",sub:"选一个并测一下能不能连通。以后可以随时换。",body:(st,s)=>{ const found=s.engines||{}, cindy=st.cindy||{};
     return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]]))}
       ${st.engine==="cindy"?cindyRows(cindy):engineRow(st.engine==="claude"?"claude":"codex",st,found[st.engine==="claude"?"claude":"codex"])}</div>`; }},
@@ -876,14 +934,38 @@ function obView(){
 }
 /* ---------- 设置: AI / 消息来源 / 数据 / 通用 ---------- */
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
-const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}"><div class="sec-h">${title}</div>${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
+const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?`<div class="sec-h">${title}</div>`:""}${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
 const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
-function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
-  const nav=[["ai","AI"],["src","消息来源"],["data","数据"],["general","通用"]], tab=nav.some(x=>x[0]===S.setTab)?S.setTab:"ai";
-  const body={ai:()=>runSection(st,s,w)+talkSection(st)+advancedSection(st,s,w),src:()=>sourceSection(s),data:()=>dataSection(s),general:()=>generalSection(s)}[tab]();
-  return `<div class="set-page"><div class="tabs set-tabs" role="tablist">${nav.map(([k,l])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.setTab='${k}';render()">${l}</button>`).join("")}</div>${body}</div>`;
+const SET_IC={tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
+  bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
+const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
+/* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
+function setMenu(st,s){ const r=s.record||{};
+  return [["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean).join("、")||"都没接"],
+      ["mode","inbox","#ff9500","收到消息怎么处理",(MODES.find(m=>m[0]===(st.intake_mode||"all"))||MODES[0])[1]]]],
+    ["AI",[["ai","ai","#5856d6","谁来做事",ENGINE_NAME[st.engine||"codex"]||""],["talk","chat","#34c759","打开对话",pickupName()]]],
+    ["数据与通知",[["store","db","#00c7be","事项存在哪",STORE_NAME[r.mode||"feishu"]||""],["notify","bell","#ff3b30","通知",r.feishu_ready&&st.brief_channel!=="local"?"心响 + 飞书简报":"只在心响里"]]],
+    ["通用",[["look","eye","#8e8e93","外观",THEME_NAME[savedTheme()]||""],["guide","guide","#ffcc00","新手引导",""],["adv","adv","#636366","高级",""]]]];
 }
-const toggle=(key,on)=>`<div class="switch ${on?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!on}" tabindex="0" onclick="setSetting('${key}',${!on})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setSetting('${key}',${!on})}"><div class="tr"></div></div>`;
+const SET_PAGES={
+  tool:(st,s,w)=>["办公工具","接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",toolPage(st,s)],
+  mode:(st,s,w)=>["收到消息怎么处理","别人找你的事，要不要自动变成事项。",modePage(st,s)],
+  ai:(st,s,w)=>["谁来做事","",aiPage(st,s)],
+  talk:(st,s,w)=>["打开对话","",talkSection(st)],
+  store:(st,s,w)=>["事项存在哪","事项一直存在这台电脑上，点了立刻生效。下面选的是另外同步到哪。",dataSection(s)],
+  notify:(st,s,w)=>["通知","AI 做完了、卡住了、有新的事，都会提醒你。",`<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`],
+  look:(st,s,w)=>["外观","",`<div class="list">${setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)}</div>`],
+  guide:(st,s,w)=>["新手引导","重新走一遍首次设置：称呼、办公工具、接收模式、谁来做事、通知。",`<button class="btn pri" onclick="obOpen()">打开引导</button>`],
+  adv:(st,s,w)=>["高级","一般不用动。",advancedSection(st,s,w)],
+};
+function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{}, menu=setMenu(st,s);
+  const tab=SET_PAGES[S.setTab]?S.setTab:"tool", [title,lead,body]=SET_PAGES[tab](st,s,w);
+  return `<div class="set-grid"><div class="set-menu">${menu.map(([cap,rows])=>`<div class="set-cap">${cap}</div><div class="list">${rows.map(([k,ic,color,label,val])=>
+      `<button class="cell ${tab===k?"on":""}" aria-current="${tab===k}" onclick="S.setTab='${k}';render();document.querySelector('.main').scrollTop=0"><span class="ic" style="background:${color}"><svg viewBox="0 0 24 24" aria-hidden="true">${SET_IC[ic]}</svg></span><span class="lab">${label}</span><span class="val">${esc(val)}</span><span class="chev">›</span></button>`).join("")}</div>`).join("")}</div>
+    <div class="set-pane"><h2 class="set-title">${title}</h2><p class="set-lead">${lead}</p>${body}</div></div>`;
+}
+const switchCtl=(on,call)=>`<div class="switch ${on?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!on}" tabindex="0" onclick="${call}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${call}}"><div class="tr"></div></div>`;
+const toggle=(key,on)=>switchCtl(on,`setSetting('${key}',${!on})`);
 const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"]};
 function engineRow(name,st,found){
   const [label,cli,key]=ENG[name], t=(st.engine_tests||{})[name], busy=S.testing&&S.testing[name], model=(st.models||{})[name]||"";
@@ -895,26 +977,27 @@ function engineRow(name,st,found){
     `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="claude"?"留空用账号默认":"模型名"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
     `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err);
 }
-function runSection(st,s,w){
+function aiPage(st,s){
   const found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy";
   const local=[["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]];
-  return setSec("run","谁来做事","",
-    setRow("做事","交给 AI 的事由它来做：找背景、写成果、按你的意见改。",
+  const used=["codex","claude"].filter(e=>(st.engine||"codex")===e||(st.engine_sort||"codex")===e);   // only the engines in use need a connection
+  return setSec("run","做事","",
+    setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。",
       choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...local]))
-    +(useCindy?cindyRows(cindy):"")
-    +setRow("整理","从会议和聊天里找待办、判断新进来的事。",choice("engine_sort",st.engine_sort||"codex",local))
-    +setRow("自动开工", st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。对外发送、审批、付款不会碰。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled)))
-   +setSec("conn","连接状态","",engineRow("codex",st,found.codex)+engineRow("claude",st,found.claude));
+    +(useCindy?cindyRows(cindy):""))
+   +setSec("sort","整理","",setRow("谁来整理","从会议和聊天里找待办、判断新进来的事。",choice("engine_sort",st.engine_sort||"codex",local)))
+   +setSec("conn","连接状态","",used.map(e=>engineRow(e,st,found[e])).join(""));
 }
 function advancedSection(st,s,w){
   const builtin=st.builtin_driver!==false, useCindy=st.engine==="cindy";
   const seen=(w.drivers||[]).map(d=>`<div>${esc(d.driver)}：最近 ${esc(d.last)}，做完 ${d.done||0} 件${d.open?`，正在做 ${d.open} 件`:""}</div>`).join("");
-  return `<details class="set-adv" ${S.adv?"open":""} ontoggle="S.adv=this.open"><summary>高级</summary><div class="list">`
+  return `<div class="list">`
     +setRow("本机 AI 干活", builtin?`本机 AI 有活就做${useCindy?"（做事已交给 Cindy，本机只做整理）":"，最多同时 10 件"}。`:"已关：本机不干活，只等外部 AI 来领。",toggle("builtin_driver",builtin))
     +setRow("本机 Claude 用你的 MCP", st.worker_mcp?"可以用你在 Claude 里装好的插件查资料；发送、发布、删除、修改类工具一律禁止。":"已关：AI 只用本机文件、命令和网页。",toggle("worker_mcp",st.worker_mcp))
     +setRow("接入别的 AI","Claude Code、Cursor 等能运行命令的 AI，都可以来领心响的活。",`<button class="btn" onclick="copyGuide()">复制接入说明</button>`,
       `<details><summary>查看接入说明${seen?"和最近接入过的 AI":""}</summary><div class="guide" style="padding:10px 0 0"><pre id="guide">${esc(D.guide||"")}</pre>${seen?`<div class="hint" style="margin:0">${seen}</div>`:""}</div></details>`)
-    +`</div></details>`;
+    +setRow("后台程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)
+    +`</div>`;
 }
 function cindyRows(c){
   const projects=c.projects||[], sch=c.schedule;
@@ -934,14 +1017,14 @@ function cindyRows(c){
 }
 function talkSection(st){
   const f=st.apps||{};
-  return setSec("talk","打开对话","",
+  return setSec("talk","","",
     setRow("接着做","在事项里点「接着做」时，用哪个软件打开新对话。",
       choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]]]))
     +setRow("看本机 GPT 的对话","点开一段本机 GPT 对话时，在哪里显示。",
       choice("gpt_open",st.gpt_open||"here",[["here","心响里",true],["chatgpt","ChatGPT 桌面版",f.chatgpt],["terminal","终端",f["terminal-codex"]]])));
 }
-function sourceSection(s){
-  const r=s.record||{}, every=r.review_every??5, me=s.slack, t=S.slackTry;
+function slackRow(s){
+  const me=s.slack, t=S.slackTry;
   const slackCtl=me?`<button class="btn" onclick="slackTry()">试跑最近 24 小时</button><button class="btn ghost" onclick="slackOff()">断开</button>`
     :`<input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" style="width:200px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button>`;
   const slackDesc=me?`已连接 ${esc(me.team||"")}，@${esc(me.user||"")}。每分钟搜一次你能看到的新消息，只留跟你有关的话。`
@@ -949,19 +1032,30 @@ function sourceSection(s){
   const slackHelp=me?"":`<details><summary>怎么拿到这个 Token</summary><div class="d" style="margin-top:6px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头）。</div></details>`;
   const tried=!t?"":t.busy?`<div class="hint" style="margin:0">正在读 Slack，最多要一分钟</div>`:t.error?`<div class="hint" style="margin:0;color:var(--red)">${esc(t.error)}</div>`
     :`<div class="hint" style="margin:0 0 6px">最近 24 小时：看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑，不建事项）</div>${(t.lines||[]).map(m=>`<div class="d">· ${esc(m.text)}（${esc(m.chat_name)} ${esc(m.sender_name)}）</div>`).join("")}`;
-  const st=D.settings||{}, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready;
+  return setRow("Slack",slackDesc,slackCtl,slackHelp+tried);
+}
+function toolPage(st,s){
+  const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack;
   const feishu=!fs?setRow("飞书","没有接入。要接入，按安装说明运行一次 setup；不接也可以，事项自己新建就行。",`<span class="eng-state">未接入</span>`)
     :setRow("飞书","","",pushLine(s))
      +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
      +setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))
      +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));
-  return setSec("mode","收到消息怎么处理","",`<div class="set-row" style="display:block">${modeCards(st)}</div>`)
-   +setSec("src","从哪里收进新的事",manual?"现在是手动模式，下面这些来源都不会自动收。":"",
-    feishu
-    +setRow("Slack",slackDesc,slackCtl,slackHelp+tried)
-    +filterRow(r)
-    +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
-      `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`));
+  return setSec("feishu","飞书",any&&manual?"现在是手动模式，下面这些来源都不会自动收。":"",feishu)
+   +setSec("slack","Slack","",slackRow(s))
+   +(any?setSec("filter","过滤和节奏","",filterRow(r)
+      +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
+        `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`))
+     :`<p class="hint" style="margin:14px 2px 0">现在没有接任何工具。要做的事点右上角「＋ 新建事项」自己添加。</p>`);
+}
+function modePage(st,s){
+  const manual=st.intake_mode==="manual", any=(s.record||{}).feishu_ready||s.slack, auto=!!st.auto_assign;
+  return modeCards(st)
+   +(manual?"":setSec("after","接进来之后","",
+      setRow("AI 先判断能不能做",auto?"办完的关掉，不用做的放下，能做的接手，要你定的先备材料。":"已关：新进来的事等你来定谁做。",switchCtl(auto,`toggleAuto(${!auto})`))
+      +setRow("自动开工",st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled)))
+     +`<p class="hint" style="margin:8px 2px 0">对外发送、审批、付款，AI 永远不会碰。</p>`)
+   +(!any&&!manual?`<p class="hint" style="margin:8px 2px 0;color:var(--amber)">你还没有接任何办公工具，所以现在不会有事自动进来。</p>`:"");
 }
 const MODES=[["all","全能模式","别人找你的事都接进来，AI 直接开始做。"],["accepted","全自动模式","你答应了（回了「好的」「我来」）才接进来，然后 AI 开始做。"],["manual","手动模式","什么都不自动接，要做的事自己新建。"]];
 function modeCards(st){
@@ -986,9 +1080,10 @@ function dataSection(s){
   const say={feishu:"事项存在本机，点了立刻生效；飞书多维表格在后台备份，手机上也能看。",notion:"事项存在本机；Notion 的「心响事项」数据库在后台同步。在 Notion 里改的会被下一次同步覆盖。",device:"事项只存在这台电脑上，不同步到别处。"}[mode];
   const form=(S.pickNotion||(mode==="notion"&&!r.notion))?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><input id="notiontok" type="password" autocomplete="off" placeholder="Integration Secret（ntn_…）" style="height:28px;padding:3px 8px"><input id="notionpage" autocomplete="off" placeholder="共享给它的页面链接" style="height:28px;padding:3px 8px;flex:1;min-width:200px" onkeydown="if(event.key==='Enter')notionOn()"><button class="btn pri" onclick="notionOn()">连接 Notion</button></div>
     <div class="hint" style="margin:6px 0 0">在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> 新建 Internal integration，复制 Secret；再打开一个页面，··· → Connections 加上它，Share → Copy link 粘过来。</div>`:"";
-  return setSec("data","事项存在哪","",
-    setRow("事项记在哪",`${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}`,
-      `<div class="chips">${[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]].map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>`,form)
+  const stores=Object.entries(STORE_NAME).filter(([k])=>k!=="feishu"||r.feishu_ready!==false||mode==="feishu");
+  return setSec("data","","",
+    setRow("同步到哪",`${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}`,
+      `<div class="chips">${stores.map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>`,form)
     +setRow("备份状态",storeLine(s.store||{},mode),""));
 }
 function notifyRow(s){
@@ -996,14 +1091,6 @@ function notifyRow(s){
   return fs?setRow("早晚简报也发到飞书",st.brief_channel==="local"?"已关：08:30 早报和 21:00 晚报只在心响里。":"08:30 早报和 21:00 晚报同时发到你的飞书。其余通知都只在心响里。",
       `<div class="switch ${st.brief_channel!=="local"?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${st.brief_channel!=="local"}" tabindex="0" onclick="setSetting('brief_channel','${st.brief_channel==="local"?"feishu":"local"}')"><div class="tr"></div></div>`)
     :setRow("通知","所有通知都只在心响里。","");
-}
-function generalSection(s){
-  const t=savedTheme();
-  return setSec("general","通用","",
-    setRow("新手引导","重新走一遍首次设置。",`<button class="btn" onclick="obOpen()">打开引导</button>`)
-    +notifyRow(s)
-    +setRow("外观","",`<div class="chips">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)
-    +setRow("后台程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`));
 }
 function copyCindySetup(){
   const text=((D.settings||{}).cindy||{}).setup_text;
@@ -1297,7 +1384,7 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",0,""],["sys","设置",0,""]];
+  const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length,"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;

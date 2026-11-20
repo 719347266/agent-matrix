@@ -419,6 +419,8 @@ class Handler(BaseHTTPRequestHandler):
                     memory.add_rule(root, body["add"], "本人在心响里加的", source="本人")
                 if body.get("remove"):
                     memory.remove_rule(root, body["remove"])
+                if body.get("confirm"):
+                    memory.confirm_rule(root, body["confirm"])
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
                 return self._send(200, {"ok": True, "rules": memory.rules(root)})

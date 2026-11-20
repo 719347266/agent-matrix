@@ -93,6 +93,9 @@ SCHEMAS = {
         # items the owner strung together: `later` continues `earlier` (itemlinks.py)
         """CREATE TABLE IF NOT EXISTS item_links (earlier TEXT NOT NULL, later TEXT NOT NULL, created TEXT NOT NULL,
             by TEXT NOT NULL DEFAULT '本人', PRIMARY KEY (earlier, later))""",
+    ], [
+        # a rule the AI learned waits for the owner to say it is right (memory.py)
+        _add_columns("preferences", "confirmed INTEGER NOT NULL DEFAULT 0"),
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

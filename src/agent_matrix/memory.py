@@ -166,6 +166,9 @@ SEED_RULES = [
 ]
 
 
+OWNER_SOURCES = ("seed", "本人")
+
+
 def rules(root):
     db = _db(root)
     try:
@@ -173,8 +176,10 @@ def rules(root):
             with db:
                 for rule, why in SEED_RULES:
                     db.execute("INSERT OR IGNORE INTO preferences (rule, why, source, created) VALUES (?,?,?,?)", (rule, why, "seed", _now()))
-        return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " ")}
-                for i, r, w, s, c in db.execute("SELECT id, rule, why, source, created FROM preferences WHERE active=1 ORDER BY id")]
+        return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " "),
+                 "fresh": s not in OWNER_SOURCES and not ok}   # learned by the AI, the owner has not said it is right yet
+                for i, r, w, s, c, ok in db.execute(
+                    "SELECT id, rule, why, source, created, confirmed FROM preferences WHERE active=1 ORDER BY id")]
     finally:
         db.close()
 
@@ -189,6 +194,15 @@ def add_rule(root, rule, why="", source="本人"):
             db.execute("INSERT INTO preferences (rule, why, source, created) VALUES (?,?,?,?) "
                        "ON CONFLICT(rule) DO UPDATE SET active=1, why=excluded.why", (rule, str(why)[:200], source, _now()))
         return rule
+    finally:
+        db.close()
+
+
+def confirm_rule(root, rule_id):
+    db = _db(root)
+    try:
+        with db:
+            db.execute("UPDATE preferences SET confirmed=1 WHERE id=?", (int(rule_id),))
     finally:
         db.close()
 
