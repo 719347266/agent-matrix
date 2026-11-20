@@ -1,0 +1,17 @@
+name: Windows one-click update
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "Install this older release (tag), then let it update itself to the newest"
+        required: true
+
+jobs:
+  update:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the old version, click update, check what runs afterwards
+        shell: pwsh
+        run: ./windows/update-test.ps1 -From "${{ inputs.from }}"

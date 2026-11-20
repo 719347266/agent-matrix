@@ -244,8 +244,8 @@ def run_loop(root, config, *, max_jobs=200):
                     return
                 try:
                     # items go to Cindy when the owner chose it (设置 → AI 执行); this driver then only sorts
-                    kinds = drive.SORTING if drive.item_runner(root) == "cindy" else None
-                    job = drive.next_job(root, config, name, skip=set(failed), kinds=kinds)
+                    kinds = drive.local_kinds(root)   # what was handed to Cindy is Cindy's
+                    job = drive.next_job(root, config, name, skip=set(failed), kinds=kinds) if kinds else None
                 except (MatrixError, MatrixBusy, OSError) as exc:
                     activity.log(root, "error", f"{name}领活出错", detail=str(exc)[:300], status="failed")
                     job = None

@@ -90,6 +90,19 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(out["added"], ["规矩0", "规矩1", "规矩2"])
         self.assertTrue(any(r["id"] == mine for r in memory.rules(self.root)))
 
+    def test_a_rule_the_ai_learned_waits_until_the_owner_says_it_is_right(self):
+        from agent_matrix import memory
+        memory.rules(self.root)                                        # the seeded rules come first
+        memory.add_rule(self.root, "需求文档先补异常场景", "两次被退回", source="AI 学的")
+        memory.add_rule(self.root, "对外文案先给两版")
+        by = {r["rule"]: r for r in memory.rules(self.root)}
+        self.assertTrue(by["需求文档先补异常场景"]["fresh"])
+        self.assertFalse(by["对外文案先给两版"]["fresh"])
+        self.assertFalse(memory.rules(self.root)[0]["fresh"])          # the owner's own (seeded) rules never wait
+        self.assertIn("需求文档先补异常场景", memory.rules_text(self.root))  # it already applies while it waits
+        memory.confirm_rule(self.root, by["需求文档先补异常场景"]["id"])
+        self.assertFalse(next(r for r in memory.rules(self.root) if r["rule"] == "需求文档先补异常场景")["fresh"])
+
     def test_waiting_items_keep_the_evidence_rules(self):
         from agent_matrix.models import MatrixError
         meta = {"meeting_id": "m1", "start_time": "2026-11-17 09:16", "owner_name": "我"}

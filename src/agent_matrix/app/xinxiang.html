@@ -1,32 +1,41 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" translate="no">
 <head>
 <meta charset="utf-8">
+<meta name="google" content="notranslate">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>心响</title>
-<link rel="icon" href="/icon.png">
+<link rel="icon" type="image/png" href="/icon.png">
+<meta name="theme-color" content="#f2f3f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111216" media="(prefers-color-scheme: dark)">
 <style>
 /* 心响 · 工作台：左边导航，中间列表，右边详情。浅色为主，跟随系统深色。 */
 :root{color-scheme:light;
---bg:#f7f7f8;--side:#f2f2f4;--panel:#ffffff;--hover:#f4f4f6;--sel:#eeedfc;--line:#e5e5ea;--line2:#efeff2;
---ink:#1c1c21;--ink2:#5d5d68;--ink3:#9b9ba5;
---brand:#5b4fe6;--brand-soft:#efedfd;--dot:#e8467c;
---blue:#2f6fe4;--blue-soft:#e9f0fd;--amber:#a8660b;--amber-soft:#fcf1de;--red:#d23e3e;--red-soft:#fcebea;
---green:#1f8a59;--green-soft:#e4f5ec;--violet:#7748d6;--violet-soft:#f1ebfc;--gray-soft:#f0f0f3;
---shadow:0 1px 2px rgba(16,16,24,.05),0 8px 24px rgba(16,16,24,.08);
+--bg:#f2f3f7;--blob1:#e4e3ff;--blob2:#dcebfb;--blob3:#fbe8f0;
+--side:rgba(255,255,255,.58);--panel:rgba(255,255,255,.74);--sheet:rgba(251,251,253,.9);--bar:rgba(242,243,247,.4);--raise:rgba(255,255,255,.95);--field:rgba(255,255,255,.66);--stroke:rgba(255,255,255,.85);
+--solid:#f6f6f9;--navsel:rgba(60,60,67,.09);--hover:rgba(120,120,128,.09);--sel:rgba(88,86,214,.1);--line:rgba(60,60,67,.14);--line2:rgba(60,60,67,.09);
+--ink:#1c1c1e;--ink2:rgba(60,60,67,.8);--ink3:rgba(60,60,67,.56);
+--brand:#5856d6;--brand-soft:rgba(88,86,214,.14);--brand-glow:rgba(88,86,214,.32);--dot:#ff3b30;
+--blue:#0a6fe0;--blue-soft:rgba(0,122,255,.13);--amber:#a85800;--amber-soft:rgba(255,149,0,.18);--red:#d70015;--red-soft:rgba(255,59,48,.14);
+--green:#1c8a3f;--green-soft:rgba(52,199,89,.18);--violet:#8944ab;--violet-soft:rgba(175,82,222,.15);--gray-soft:rgba(120,120,128,.13);
+--soft:0 8px 28px rgba(31,38,80,.09);--shadow:0 1px 2px rgba(16,16,24,.05),0 8px 24px rgba(16,16,24,.08);
 --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;
---bg:#141418;--side:#18181d;--panel:#1d1d23;--hover:#24242b;--sel:#2a2746;--line:#2d2d35;--line2:#26262d;
---ink:#ececf1;--ink2:#a4a4af;--ink3:#6e6e79;--brand:#8279ff;--brand-soft:#2a2746;--dot:#ff5c93;
---blue:#6c9dff;--blue-soft:#1c2a45;--amber:#e3a548;--amber-soft:#3a2c15;--red:#f07272;--red-soft:#3d2023;
---green:#4cc38a;--green-soft:#163326;--violet:#ab8cff;--violet-soft:#2b2346;--gray-soft:#27272e;
---shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}}
+--bg:#111216;--blob1:#1c1e3a;--blob2:#11242f;--blob3:#24182a;
+--side:rgba(28,29,35,.62);--panel:rgba(44,45,54,.5);--sheet:rgba(34,35,42,.9);--bar:rgba(17,18,22,.45);--raise:rgba(120,120,128,.36);--field:rgba(118,118,128,.18);--stroke:rgba(255,255,255,.08);
+--solid:#1a1b21;--navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
+--ink:#f4f4f6;--ink2:rgba(235,235,245,.74);--ink3:rgba(235,235,245,.48);--brand:#8a88ff;--brand-soft:rgba(138,136,255,.18);--brand-glow:rgba(138,136,255,.22);--dot:#ff453a;
+--blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
+--green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
+--soft:0 10px 32px rgba(0,0,0,.35);--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}}
 :root[data-theme=dark]{color-scheme:dark;
---bg:#141418;--side:#18181d;--panel:#1d1d23;--hover:#24242b;--sel:#2a2746;--line:#2d2d35;--line2:#26262d;
---ink:#ececf1;--ink2:#a4a4af;--ink3:#6e6e79;--brand:#8279ff;--brand-soft:#2a2746;--dot:#ff5c93;
---blue:#6c9dff;--blue-soft:#1c2a45;--amber:#e3a548;--amber-soft:#3a2c15;--red:#f07272;--red-soft:#3d2023;
---green:#4cc38a;--green-soft:#163326;--violet:#ab8cff;--violet-soft:#2b2346;--gray-soft:#27272e;
---shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}
+--bg:#111216;--blob1:#1c1e3a;--blob2:#11242f;--blob3:#24182a;
+--side:rgba(28,29,35,.62);--panel:rgba(44,45,54,.5);--sheet:rgba(34,35,42,.9);--bar:rgba(17,18,22,.45);--raise:rgba(120,120,128,.36);--field:rgba(118,118,128,.18);--stroke:rgba(255,255,255,.08);
+--solid:#1a1b21;--navsel:rgba(255,255,255,.1);--hover:rgba(255,255,255,.06);--sel:rgba(138,136,255,.16);--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.06);
+--ink:#f4f4f6;--ink2:rgba(235,235,245,.74);--ink3:rgba(235,235,245,.48);--brand:#8a88ff;--brand-soft:rgba(138,136,255,.18);--brand-glow:rgba(138,136,255,.22);--dot:#ff453a;
+--blue:#4da3ff;--blue-soft:rgba(10,132,255,.22);--amber:#ffb340;--amber-soft:rgba(255,159,10,.2);--red:#ff6961;--red-soft:rgba(255,69,58,.2);
+--green:#30d158;--green-soft:rgba(48,209,88,.18);--violet:#da8fff;--violet-soft:rgba(191,90,242,.2);--gray-soft:rgba(120,120,128,.24);
+--soft:0 10px 32px rgba(0,0,0,.35);--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.4)}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.55 var(--font);-webkit-font-smoothing:antialiased}
@@ -222,7 +231,7 @@ button:disabled{opacity:.5;cursor:wait}
 .composer .bot .btns{margin-left:auto;display:flex;gap:6px}
 .composer .bot .btn{margin-left:0}
 .eng{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:5px;font-size:11px;font-weight:650;background:var(--gray-soft);color:var(--ink2);flex:none}
-.eng.gpt{background:#e7f6ef;color:#16794c}.eng.claude{background:#fbeee6;color:#b4532a}
+.eng.gpt{background:#e7f6ef;color:#16794c}.eng.claude{background:#fbeee6;color:#b4532a}.eng.gemini{background:var(--blue-soft);color:var(--blue)}
 :root[data-theme=dark] .eng.gpt{background:#173326;color:#4cc38a}:root[data-theme=dark] .eng.claude{background:#3a2419;color:#e8936a}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .eng.gpt{background:#173326;color:#4cc38a}:root:not([data-theme=light]) .eng.claude{background:#3a2419;color:#e8936a}}
 .sess{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 8px;align-items:center;width:100%;border:0;background:none;padding:6px 0;text-align:left;border-top:1px solid var(--line2)}
@@ -322,6 +331,120 @@ button:disabled{opacity:.5;cursor:wait}
 .toast button{border:0;background:rgba(127,127,127,.25);color:inherit;border-radius:6px;padding:3px 10px;font-weight:600}
 .toast:not(.act){padding-right:16px}.toast:not(.act) button{display:none}
 
+/* glass: every surface is translucent over one soft colour field (iOS style) */
+body{background-color:var(--bg);background-image:radial-gradient(60vmax 60vmax at 6% 0%,var(--blob1),transparent 62%),radial-gradient(55vmax 55vmax at 100% 16%,var(--blob2),transparent 60%),radial-gradient(50vmax 50vmax at 62% 112%,var(--blob3),transparent 60%);background-attachment:fixed}
+.side,.list,.detail,.solo,.aicard,.mode,.modal .box,.ob,.command-result,.topbar,.d-head,.composer{-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
+.list,.solo,.mode,.aicard{background:var(--panel);border:1px solid var(--stroke);box-shadow:var(--soft)}
+.list{border-radius:16px}.solo{border-radius:18px}.aicard{border-radius:14px;box-shadow:none}
+.side{background:var(--side);border:1px solid var(--stroke)}
+.detail{background:var(--panel)}
+@media (min-width:821px){
+  .side{margin:10px 0 10px 10px;border-radius:22px;box-shadow:var(--soft)}
+  .app.with-detail .detail{margin:10px 10px 10px 0;border-radius:22px;border:1px solid var(--stroke);box-shadow:var(--soft)}
+}
+.topbar{background:var(--bar);border-bottom:0;padding-top:16px}
+.topbar h1{font-size:22px;font-weight:750;letter-spacing:-.01em}
+.d-head,.composer{background:var(--solid)}
+.nav{border-radius:11px;padding:8px 11px}
+.nav.on{background:var(--navsel);color:var(--ink);box-shadow:none}
+.nav.on svg{color:var(--brand)}
+.btn{height:30px;padding:0 14px;border-radius:99px;border:0;background:var(--gray-soft);font-weight:600}
+.btn.pri{box-shadow:0 2px 8px var(--brand-glow)}
+.chip{border-radius:99px;padding:4px 12px}.chip.on{background:var(--raise);border-color:transparent;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.pill{border-radius:99px}
+.switch .tr{width:42px;height:26px;background:var(--gray-soft)}.switch .tr:after{width:22px;height:22px}
+.switch.on .tr{background:#34c759}.switch.on .tr:after{left:18px}
+.seg{border-radius:10px;background:var(--gray-soft)}.seg button{border-radius:8px;padding:4px 12px}.seg button.on{background:var(--raise)}
+input,textarea,select{background:var(--field);border-radius:10px}
+.callout{border-radius:14px}.bub,.tr-ai{border-radius:16px 16px 16px 6px}.m.me .bub{border-radius:16px 16px 6px 16px}
+.modal,.ob-mask{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.modal .box,.ob{background:var(--sheet);border:1px solid var(--stroke);border-radius:22px}
+.command-result{background:var(--sheet);border-radius:14px}
+.who.me{color:var(--bg)}.toast{color:var(--bg);border-radius:99px}
+.mode{border-radius:16px}.mode.on{box-shadow:0 0 0 2px var(--brand) inset}
+.dv{background:var(--field);border-radius:14px}
+.row{padding-top:11px;padding-bottom:11px}
+/* settings: a grouped menu on the left (each line shows what is chosen), its options on the right */
+.set-grid{display:grid;grid-template-columns:268px minmax(0,1fr);gap:24px;align-items:start;max-width:1080px}
+.set-menu{position:sticky;top:70px}
+.set-cap{margin:18px 14px 6px;font-size:12px;color:var(--ink3);font-weight:500}.set-cap:first-child{margin-top:0}
+.cell{display:flex;align-items:center;gap:11px;width:100%;border:0;border-top:1px solid var(--line2);background:none;text-align:left;padding:9px 12px;min-height:46px;color:var(--ink)}
+.cell:first-child{border-top:0}.cell:hover{background:var(--hover)}.cell.on{background:var(--navsel)}
+.cell .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none}
+.cell .ic svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cell .lab{flex:1;min-width:0;font-weight:500;white-space:nowrap}
+.cell .val{color:var(--ink3);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .chev{color:var(--ink3);font-size:17px;line-height:1;flex:none}
+.set-title{font-size:20px;font-weight:750;margin:0 2px 2px}.set-lead{color:var(--ink3);font-size:12.5px;margin:0 2px 14px;min-height:1px}
+.set-pane .modes{margin-bottom:6px}
+
+.row.flat.mem{grid-template-columns:8px 68px minmax(0,1fr) auto}
+/* items by project: the projects on the left (a row can be dropped on one), the items on the right */
+.proj-grid{display:grid;grid-template-columns:224px minmax(0,1fr);gap:22px;align-items:start}
+.proj-list{position:sticky;top:70px}
+.pdot{width:9px;height:9px;border-radius:3px;flex:none;display:inline-block}
+.proj-list .cell{min-height:40px;padding:7px 12px}.proj-list .cell .val.need{color:var(--red);font-weight:650}
+.cell.drop{outline:2px dashed var(--brand);outline-offset:-2px}
+.cell.new{gap:6px}.cell.new input{flex:1;min-width:0;width:auto!important}
+.proj-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}.proj-head .chips{margin:0;flex:1}
+.pick{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--ink3);display:grid;place-items:center;font-size:11px;color:#fff;margin-left:-5px}
+.pick.on{background:var(--brand);border-color:var(--brand)}
+.batch{position:sticky;bottom:16px;margin:16px auto 0;width:max-content;max-width:100%;display:flex;gap:8px;align-items:center;padding:7px 8px 7px 16px;border-radius:99px;background:var(--sheet);border:1px solid var(--stroke);box-shadow:var(--soft);-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
+.proj-chip{display:inline-flex;align-items:center;gap:6px;border:0;background:var(--gray-soft);border-radius:99px;padding:2px 10px;font-size:12.5px;color:var(--ink)}
+@container (max-width:720px){.proj-grid{grid-template-columns:1fr;gap:12px}.proj-list{position:static}.proj-list .list{display:flex;overflow-x:auto;scrollbar-width:none}.proj-list .cell{width:auto;flex:none;border-top:0;white-space:nowrap}.proj-list .cell.new{min-width:190px}}
+/* setup check: one line per thing that has to work, its state, and the one next step */
+.chk{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:13px 16px;border-top:1px solid var(--line2)}
+.chk:first-child{border-top:0}
+.chk .mark{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:var(--ink3)}
+.chk.ok .mark{background:#34c759}.chk.bad .mark{background:var(--dot)}.chk.todo .mark{background:#ff9500}.chk.off .mark{background:none;border:1.5px solid var(--ink3);color:var(--ink3)}
+.chk .k{font-weight:600}.chk .d{font-size:12.5px;color:var(--ink3);margin-top:1px}.chk.bad .d,.chk.todo .d{color:var(--ink2)}
+.chk .ctl{display:flex;gap:6px;align-items:center}
+.chk .how{grid-column:2/-1;margin-top:6px;display:flex;flex-direction:column;gap:8px}
+.step-n{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--ink2)}
+.step-n>i{font-style:normal;flex:none;width:18px;height:18px;border-radius:50%;background:var(--gray-soft);display:grid;place-items:center;font-size:11px;font-weight:700;margin-top:1px}
+.step-n>div{min-width:0;flex:1}
+.cmd{display:flex;gap:8px;align-items:center;margin-top:4px;background:var(--field);border:1px solid var(--line);border-radius:9px;padding:5px 5px 5px 10px}
+.cmd code{flex:1;min-width:0;font:12px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;color:var(--ink)}
+.cmd .btn{height:24px;padding:0 10px;font-size:12px;flex:none}
+.sum{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:16px;margin:0 0 14px;background:var(--green-soft)}
+.sum.bad{background:var(--red-soft)}.sum.todo{background:var(--amber-soft)}.sum b{font-size:15px}.sum span{color:var(--ink2);font-size:12.5px}.sum .btn{margin-left:auto}
+.inner-list{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--field)}
+.dv-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border-top:1px solid var(--line2)}
+.dv-row:first-child,.dv-form:first-child{border-top:0}.dv-row b.cur{color:var(--brand)}.dv-row .acts{flex-wrap:nowrap}
+.dv-form{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line2)}.dv-form input{width:100%}
+/* a narrow window: the options sit under the menu, and a row's control drops under its text instead of squeezing it */
+.set-pane{container-type:inline-size;min-width:0}
+.set-row>div:first-child{min-width:0}.set-row .k{overflow-wrap:anywhere}
+@container (max-width:560px){.set-row{grid-template-columns:1fr}.set-row .ctl{justify-content:flex-start}}
+@container (max-width:900px){.set-grid{grid-template-columns:1fr}.set-menu{position:static}.set-pane{order:-1}}
+.main{overflow-x:hidden}
+.bug-link{display:block;width:100%;border:0;background:none;text-align:left;font-size:12.5px;color:var(--ink3);padding:6px 11px;margin:auto 0 6px;border-radius:9px}
+.bug-link:hover{color:var(--ink);background:var(--hover)}
+.side .aicard{margin-top:0}
+/* inside the Mac app the page runs up under the window buttons: leave them room, and a band to drag the window by */
+.macapp .side{padding-top:46px}
+@media (min-width:821px){.macapp .side{margin:0;border-radius:0;border-width:0 1px 0 0;border-color:var(--line2);box-shadow:none}}
+.macapp .topbar{padding-top:32px}
+.macapp .detail .d-head{padding-top:34px}
+.macapp .ob-mask,.macapp .modal{padding-top:36px}
+@media (max-width:820px){.macapp .side{padding-top:34px}.macapp .topbar{padding-top:10px}}
+/* columns that line up down a list: status, who, due, updated, then the buttons. The widths of the status and the
+   buttons are measured per list (alignRows), so a row with two buttons and a row with none still share their columns. */
+.row .meta{display:grid;grid-template-columns:var(--pill,auto) 24px 72px 84px;gap:0 12px;align-items:center;justify-items:end}
+.row .meta>.pill{justify-self:start}.row .meta>.opt:first-of-type{justify-self:center}
+.row .meta .due,.row .meta .ago{min-width:0;width:100%;text-align:right;overflow:hidden;text-overflow:ellipsis}
+.row.ev .meta{grid-template-columns:84px}
+.row>.acts{min-width:var(--acts,0);justify-content:flex-end}
+@container (max-width:760px){.row .meta{grid-template-columns:var(--pill,auto)}.row.ev .meta{grid-template-columns:84px}}
+/* a narrow list (the detail is open beside it): number, title, status, button; everything else is in the detail */
+@container (max-width:560px){
+  .row{grid-template-columns:8px 36px minmax(0,1fr) auto auto}
+  .row.ev,.row.flat.mem{grid-template-columns:8px 68px minmax(0,1fr) auto}
+  .row .meta{display:grid}.row.ev .meta{display:none}
+  .row>.acts .btn.link{display:none}
+}
+.mem-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}.mem-bar .seg{margin:0}
+
 @media (max-width:820px){
   .app,.app.with-detail{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto;min-height:100vh}
   .side{flex-direction:row;align-items:center;gap:2px;padding:8px 10px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:6}
@@ -384,7 +507,7 @@ async function api(path, body, ms=12000){
 }
 let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
-function midEdit(){ return !!S.ob||!!S.adding||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
+function midEdit(){ return !!S.ob||!!S.bugging||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||!!S.dvEdit||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
@@ -400,12 +523,12 @@ function announce(){
   const top=Math.max(0,...D.inbox.map(m=>m.id));
   if(newestSeen && top>newestSeen){
     const fresh=D.inbox.filter(m=>m.id>newestSeen&&!m.read);
-    if(fresh.length) toast(fresh.length===1?`新动态：${eventTitle(fresh[0])}`:`${fresh.length} 条新动态`,"查看",()=>{ S.view="inbox"; S.inboxTab="未读"; S.q=""; $("#q").value=""; if(!wide()) S.item=null; render(); });
+    if(fresh.length) toast(fresh.length===1?`新动态：${eventTitle(fresh[0])}`:`${fresh.length} 条新动态`,"查看",()=>{ S.view="today"; S.q=""; $("#q").value=""; if(!wide()) S.item=null; render(); });
   }
   newestSeen=top;
   const n=unreadCount(); document.title=n?`(${n}) 心响`:"心响";
 }
-const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"进行中", doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
+const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"进行中", proj:"all", pick:new Set(), picking:false, moving:null, doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
 // Requests stay visible across refreshes; an ambiguous transport error keeps the
 // same ID for reconciliation instead of creating another write.
 const localCommands = new Map();
@@ -602,10 +725,11 @@ function sub(i){
 function row(i, opts={}){
   const unread=unreadOf(i.n).length>0, d=due(i);
   const open = (i.status==="待验收"||i.status==="完成") && i.url && !isWorking(i) ? `<a class="btn link" href="${esc(i.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">打开交付</a>` : "";
-  return `<div class="row ${unread?"unread":""} ${S.item===i.n?"sel":""}" onclick="openItem(${i.n})"><span class="ud"></span><span class="no">#${i.n}</span>
+  const picked=opts.pick&&S.pick.has(i.n);
+  return `<div class="row ${unread?"unread":""} ${S.item===i.n||picked?"sel":""}" ${opts.drag?`draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${i.n}')"`:""} onclick="${opts.pick?`togglePick(${i.n})`:`openItem(${i.n})`}">${opts.pick?`<span class="pick ${picked?"on":""}">${picked?"✓":""}</span>`:`<span class="ud"></span>`}<span class="no">#${i.n}</span>
     <div style="min-width:0"><div class="t">${esc(i.title)}</div>${sub(i)}</div>
     <div class="meta">${pill(i)}<span class="opt">${avatar(i)}</span><span class="due opt ${late(i)?"late":""}">${esc(d)}</span><span class="ago opt">${esc(ago(i.updated))}</span></div>
-    <div class="acts">${open}${opts.noButtons?"":rowButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i)}`;
+    <div class="acts">${opts.pick?"":open}${opts.noButtons||opts.pick?"":rowButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i)}`;
 }
 const section=(title,items,extra="")=>items.length?`<div class="sec-h">${title}<span class="n">${items.length}</span>${extra}</div><div class="list">${items.map(i=>row(i)).join("")}</div>`:"";
 const byDue=(a,b)=>(a.due||"9")>(b.due||"9")?1:(a.due||"9")<(b.due||"9")?-1:a.n-b.n;
@@ -658,7 +782,7 @@ function inboxPage(){
   }
   const sec=(title,rows,empty)=>rows.length||empty?`<div class="sec-h">${title}<span class="n">${rows.length||""}</span></div><div class="list">${rows.join("")||`<div class="empty">${empty}</div>`}</div>`:"";
   const tabs=[["","最近"],["全部","全部"]].map(([k,l])=>`<button class="chip ${(all?"全部":"")===k?"on":""}" onclick="S.inboxTab='${k}';render()">${l}</button>`).join("");
-  return `<div class="chips" style="align-items:center">${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
+  return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('today')">‹ 今天</button>${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
     ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天发生的",groups.today,all?"":"今天还没有新动态。")}
     ${all?sec("更早",groups.old,""):groups.old.length?`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxTab='全部';render();return false">查看更早的 ${groups.old.length} 条</a></p>`:""}`;
 }
@@ -730,6 +854,36 @@ function msgBody(m){
   return `<div class="msg-open" data-msg="${m.id}">${parts.join("")||`<p class="b-p quiet">没有更多内容</p>`}</div>`;
 }
 function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); announce(); render(); }
+/* ---------- 今天：要你处理的、你自己今天要做的、AI 正在做的、今天的消息，都在这一页 ---------- */
+function todayParts(){
+  const v=D.items.filter(live), q=(D.worker&&D.worker.queue)||[], pos=i=>q.indexOf(i.n)<0?99:q.indexOf(i.n);
+  const need=[...v.filter(blockedAI),...v.filter(i=>i.status==="待验收"&&!isWorking(i)).sort(byDue),...v.filter(i=>i.status==="待确认"&&i.who!=="别人")];
+  const mine=v.filter(i=>i.who==="我"&&!["完成","取消","待确认","待验收"].includes(i.status)&&i.due&&i.due<=TODAY).sort(byDue);
+  const working=v.filter(isWorking), queued=v.filter(i=>i.who==="AI"&&active(i)&&!blockedAI(i)&&!isWorking(i)).sort((a,b)=>pos(a)-pos(b));
+  // messages: one row per message that is not just about an item already listed above
+  const listed=new Set([...need,...mine,...working,...queued].map(i=>i.n)), seen=new Set(), msgs={need:[],today:[],old:[]};
+  for(const m of D.inbox||[]){
+    const one=itemOf(m), key=one?"n"+one.n:"m"+m.id;
+    if(seen.has(key)) continue; seen.add(key);
+    if(one&&listed.has(one.n)) continue;
+    msgs[inboxBucket(m)].push(m);
+  }
+  return {need,mine,working,queued,msgs};
+}
+const todayCount = () => { const t=todayParts(); return t.need.length+t.msgs.need.length; };
+function todayPage(){
+  const {need,mine,working,queued,msgs}=todayParts(), box=D.inbox||[];
+  const d=new Date(TODAY), date=`${d.getMonth()+1} 月 ${d.getDate()} 日 周${"日一二三四五六"[d.getDay()]}`;
+  const needRows=need.map(i=>row(i)).join("")+msgs.need.map(m=>inboxRow(m,box)).join("");
+  const more=`<a class="aside" style="margin-left:auto" href="#" onclick="go('inbox');return false">全部消息${msgs.old.length?` ${msgs.old.length+msgs.today.length}`:""}</a>`;
+  const left=setupProblems();
+  return `<p class="hint" style="margin:-4px 2px 14px">${date}</p>${left.length?`<div class="sum bad" style="cursor:pointer" onclick="S.setTab='check';go('sys')"><div><b>还差 ${left.length} 步才能用</b><br><span>${left.map(x=>esc(x.title.split("：")[0])).join("、")}没配好</span></div><button class="btn pri">去看看</button></div>`:""}
+    <div class="sec-h">要你处理<span class="n">${need.length+msgs.need.length||""}</span></div><div class="list">${needRows||'<div class="empty">现在没有要你处理的。</div>'}</div>`
+   +section("你自己要做的：今天到期或已逾期",mine)
+   +section("AI 正在做",working)+section("AI 排队",queued)
+   +`<div class="sec-h">今天的消息<span class="n">${msgs.today.length||""}</span>${unreadCount()?`<button class="btn ghost" style="height:22px;padding:0 8px" onclick="readAll()">全部标为已读</button>`:""}${more}</div><div class="list">${msgs.today.map(m=>inboxRow(m,box)).join("")||'<div class="empty">今天还没有别的消息。</div>'}</div>`
+   +closedByAI();
+}
 function todoPage(){
   const v=D.items.filter(live);
   const blocked=v.filter(blockedAI), review=v.filter(i=>i.status==="待验收"&&!isWorking(i)).sort(byDue), fresh=v.filter(i=>i.status==="待确认"&&i.who!=="别人");
@@ -754,10 +908,72 @@ function donePage(){
   return `<div class="chips">${tabs}</div><p class="hint">点开任何一件都能看到当时和 AI 的对话。要改，直接在对话里说，AI 会接着原来的对话改出新版本。</p>`+
     (groups.map(([t,g])=>section(t,g)).join("")||`<div class="list"><div class="empty">没有</div></div>`);
 }
+/* ---------- 事项：按项目看。项目是本人自己分的；没分的由系统猜，猜的会标出来 ---------- */
+const projOf = id => (D.projects||[]).find(p=>p.id===id);
+const projDot = p => `<span class="pdot" style="background:${p&&p.color?esc(p.color):"var(--ink3)"}"></span>`;
 function allPage(){
   const F={"进行中":i=>!["完成","取消"].includes(i.status),"你来做":i=>i.who==="我"&&!["完成","取消"].includes(i.status),"AI 做":i=>i.who==="AI"&&!["完成","取消"].includes(i.status),"别人做":i=>i.who==="别人"&&!["完成","取消"].includes(i.status),"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
-  const list=D.items.filter(i=>!i.hidden&&F[S.all](i)).sort(byDue);
-  return `<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div><div class="list">${list.map(i=>row(i)).join("")||'<div class="empty">没有</div>'}</div>`;
+  const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking;
+  const M=D.memory||{}, later=(M.waiting||[]).length+(M.recent||[]).filter(m=>m.label==="还没定").length;
+  const NOTES={"以后要确认的":[later,laterList]}, note=NOTES[S.all];
+  const chips=`<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}<span style="width:1px;height:16px;background:var(--line);margin:0 6px;align-self:center"></span>${Object.entries(NOTES).map(([k,[n]])=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';S.picking=false;render()">${k}${n?` ${n}`:""}</button>`).join("")}</div>`;
+  if(note) return `<div class="proj-head">${chips}</div>${note[1]()}`;   // not sorted into projects: they have no number of their own
+  const shown=D.items.filter(i=>!i.hidden&&(F[S.all]||F["进行中"])(i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
+  const count=k=>shown.filter(i=>inP(i,k)).length, need=k=>shown.filter(i=>inP(i,k)&&needsYou(i)).length;
+  const drop=k=>`ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');moveItems([+event.dataTransfer.getData('text/plain')],${k})"`;
+  const cell=(k,name,p)=>`<button class="cell ${cur===k?"on":""}" onclick="S.proj=${k==="all"?"'all'":k};S.renaming=false;render()" ${k==="all"?"":drop(k)}>${k==="all"?"":projDot(p)}<span class="lab">${esc(name)}</span><span class="val ${need(k)?"need":""}">${need(k)?`${need(k)} 件等你`:count(k)}</span></button>`;
+  const rows=list=>list.sort(byDue).map(i=>row(i,{drag:true,pick})).join("");
+  const group=(p,list)=>list.length?`<div class="sec-h">${projDot(p)}${esc(p.name)}<span class="n">${list.length}</span></div><div class="list">${rows(list)}</div>`:"";
+  const list=shown.filter(i=>inP(i,cur)), here=projOf(cur);
+  const body=!list.length?'<div class="list"><div class="empty">没有</div></div>'
+    :cur==="all"&&P.length?P.map(p=>group(p,list.filter(i=>i.project===p.id))).join("")+group({name:"未归类"},list.filter(i=>!i.project))
+    :`<div class="list">${rows(list)}</div>`;
+  const manage=!here?"":S.renaming?`<input id="proj-rename" data-draft="proj-rename" value="${esc(here.name)}" maxlength="20" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')renameProject(${here.id});if(event.key==='Escape'){S.renaming=false;render()}"><button class="btn pri" onclick="renameProject(${here.id})">保存</button>`
+    :`<button class="btn ghost" onclick="S.renaming=true;render()">改名</button><button class="btn ghost" onclick="toast('删除后，里面的事回到未归类','删除项目',()=>removeProject(${here.id}))">删除项目</button>`;
+  const add=S.newProj?`<input id="proj-name" data-draft="proj-name" maxlength="20" placeholder="项目名" aria-label="新项目的名字" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')newProject(null,'proj-name');if(event.key==='Escape'){S.newProj=false;render()}"><button class="btn pri" onclick="newProject(null,'proj-name')">建好</button>`:"";
+  const head=`<div class="proj-head">${chips}${manage}
+        ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:add||`<button class="btn" onclick="openNewProject()">＋ 新建项目</button>`}</div>`;
+  const right=`${head}${body}${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}`;
+  if(!P.length) return right;   // no projects yet: just the list, and one button to make the first project
+  return `<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${cell(0,"未归类")}
+      ${S.newProj?`<div class="cell new">${add}</div>`:`<button class="cell" style="color:var(--brand)" onclick="openNewProject()"><span class="lab">＋ 新建项目</span></button>`}</div></div>
+    <div>${right}</div></div>`;
+}
+function openNewProject(){ S.newProj=true; render(); setTimeout(()=>$("#proj-name")?.focus(),30); }
+function togglePick(n){ S.pick.has(n)?S.pick.delete(n):S.pick.add(n); render(); }
+function moveView(){
+  const ns=S.moving.filter(n=>byN(n)), one=ns.length===1&&byN(ns[0]);
+  return `<div class="modal" onclick="if(event.target===this){S.moving=null;render()}"><div class="box" role="dialog" aria-modal="true" style="width:min(380px,100%)"><div class="mh"><b>${one?"移到哪个项目":`把 ${ns.length} 件事移到`}</b><button class="btn ghost x" onclick="S.moving=null;render()">关闭</button></div>
+    <div class="mb" style="padding:6px 0;gap:0">${[...(D.projects||[]),{id:0,name:"未归类"}].map(p=>`<button class="cell" onclick="moveItems([${ns}],${p.id})">${projDot(p)}<span class="lab">${esc(p.name)}</span>${one&&(one.project||0)===p.id?`<span class="val">${one.project_by==="猜"?"系统猜的":"现在在这"}</span>`:""}</button>`).join("")}
+      <div class="cell new"><input id="proj-name-m" data-draft="proj-name-m" maxlength="20" placeholder="新建项目并移进去" aria-label="新项目的名字" onkeydown="if(event.key==='Enter')newProject([${ns}],'proj-name-m')"><button class="btn" onclick="newProject([${ns}],'proj-name-m')">＋</button></div></div></div></div>`;
+}
+async function moveItems(ns,pid){
+  ns=ns.filter(n=>byN(n)); if(!ns.length) return;
+  ns.forEach(n=>Object.assign(byN(n),{project:pid||null,project_by:pid?"本人":null}));
+  Object.assign(S,{moving:null,picking:false,pick:new Set()}); render();
+  if(LIVE){ try{ await api("/api/item/project",{numbers:ns,project:pid}); }catch(e){ toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); return load(); } load(); }
+  toast(`已移到「${pid?(projOf(pid)||{}).name:"未归类"}」${ns.length>1?`（${ns.length} 件）`:""}`);
+}
+async function newProject(ns,field){
+  const el=$("#"+field), name=String(el&&el.value||"").trim(); if(!name) return el&&el.focus();
+  let id;
+  if(LIVE){ try{ const r=await api("/api/projects",{add:name}); D.projects=r.projects; id=r.id; }catch(e){ return toast(e.confirmed?e.message:"没建成，连不上本机服务"); } }
+  else{ const old=(D.projects||=[]).find(p=>p.name===name); id=old?old.id:Math.max(0,...D.projects.map(p=>p.id))+1; if(!old) D.projects.push({id,name,color:"#5856d6"}); }
+  drafts.delete(field); if(el) el.value=""; S.newProj=false;
+  if(ns&&ns.length) return moveItems(ns,id);
+  S.proj=id; toast(`已新建项目「${name}」`); render();
+}
+async function renameProject(id){
+  const el=$("#proj-rename"), name=String(el&&el.value||"").trim(); if(!name) return el&&el.focus();
+  if(LIVE){ try{ D.projects=(await api("/api/projects",{rename:id,name})).projects; }catch(e){ return toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); } }
+  else projOf(id).name=name;
+  drafts.delete("proj-rename"); S.renaming=false; render();
+}
+async function removeProject(id){
+  if(LIVE){ try{ D.projects=(await api("/api/projects",{remove:id})).projects; }catch(e){ return toast("没删成，连不上本机服务"); } }
+  else D.projects=D.projects.filter(p=>p.id!==id);
+  D.items.forEach(i=>{ if(i.project===id) Object.assign(i,{project:null,project_by:null}); });
+  S.proj="all"; render(); if(LIVE) load();
 }
 function searchPage(){
   const q=S.q.replace(/^#/,"").toLowerCase();
@@ -778,10 +994,13 @@ function autoSwitch(){
     ? "已开启：AI 先看这件事之后的聊天，你已经办完的直接关掉、不用做的放下，能独立做的接手，要你拍板的先备材料，只能你做的留在这里。"
     : "开启后，新进来的事先让 AI 看上下文再判断：办完的关掉、不用做的放下、能做的接手、要你来的先备材料。对外发送、审批、付款这类事 AI 不会接手。"}</span></div></div>`;
 }
+/* settings the server keeps as they are sent */
 const SOURCE_KEY={meeting_watch_enabled:"meetings",chat_watch_enabled:"chats",feishu_tasks_enabled:"tasks"};
+/* settings that live elsewhere on the page data, so a click shows at once */
 async function setSetting(key, on){
   D.settings = {...(D.settings||{}), [key]:on};
   if(SOURCE_KEY[key]) D.settings.sources={...(D.settings.sources||{}), [SOURCE_KEY[key]]:on};
+  if(key==="wechat_enabled"&&D.system) D.system.wechat={...(D.system.wechat||{}),enabled:on};
   if(key==="intake_mode"){ if(on!=="manual") D.settings.prework_enabled=true; if(on==="all") D.settings.auto_assign=true; }
   render();
   if(LIVE){ try{ await api("/api/settings",{[key]:on}); toast("已保存"); }catch(e){ toast("没保存成功，连不上本机服务"); } load(); }
@@ -796,21 +1015,29 @@ function copyGuide(){
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast("已复制，发给任何 AI 就能接入"))
     .catch(()=>{ const r=document.createRange(); r.selectNodeContents($("#guide")); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); toast("已选中，按 ⌘C 复制"); });
 }
+/* one line of a rule, or of something said in a meeting */
+const noteLine=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${cls}" style="justify-self:start">${tag}</span><div style="min-width:0"><div class="t wrap">${esc(title)}</div>
+    <div class="s wrap">${sub}</div>${quote?`<q>${esc(quote)}</q>`:""}</div><div class="acts">${acts}</div></div>`;
+/* 记忆 is how the system works: the owner's standing rules, read by every AI before any work. What a meeting left
+   open or decided is a matter like any other, and lives with the items (事项 → 在等的 / 会上的结论). */
 function memPage(){
-  const M=D.memory||{rules:[],waiting:[],recent:[]};
-  const mine=r=>r.source==="seed"||r.source==="本人";
-  const rules=(M.rules||[]).map(r=>`<div class="row flat ev"><span class="ud"></span><span class="pill ${mine(r)?"":"brand"}" style="justify-self:start">${mine(r)?"你定的":"AI 学的"}</span><div style="min-width:0"><div class="t wrap">${esc(r.rule)}</div>
-    <div class="s wrap">${esc(r.why||"")}</div></div><div></div><div class="acts"><button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button></div></div>`).join("");
-  const waiting=(M.waiting||[]).map(m=>`<div class="row flat ev"><span class="ud"></span><span class="pill amber" style="justify-self:start">等条件</span><div style="min-width:0"><div class="t wrap">${esc(m.text)}</div>
-    <div class="s wrap">等：${esc(m.wait_for||"")}${m.due?`，${esc(m.due.slice(5))} 到期`:""}　${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?"　已提醒过你":""}</div>${m.quote?`<q>${esc(m.quote)}</q>`:""}</div><div></div>
-    <div class="acts"><button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button></div></div>`).join("");
-  const recent=(M.recent||[]).map(m=>`<div class="row flat ev"><span class="ud"></span><span class="pill ${m.label==="还没定"?"violet":m.label==="定了"?"green":""}" style="justify-self:start">${esc(m.label)}</span><div style="min-width:0"><div class="t wrap">${esc(m.text)}</div>
-    <div class="s">${esc(m.source)}　${esc(m.at)}</div></div><div></div><div></div></div>`).join("");
-  return `<p class="hint">你的规矩，所有 AI 干活前都会先读。会上说"等条件再定"的事，条件到了或者话题再出现时会提醒你。</p>
-  <div class="sec-h">你的规矩<span class="n">${(M.rules||[]).length}</span></div><div class="list">${rules||'<div class="empty">还没有</div>'}
-    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>
-  <div class="sec-h">等条件再定的事<span class="n">${(M.waiting||[]).length}</span></div><div class="list">${waiting||'<div class="empty">现在没有在等条件的事。</div>'}</div>
-  <div class="sec-h">最近会上定的和没定的</div><div class="list">${recent||'<div class="empty">还没有记录</div>'}</div>`;
+  const R=(D.memory||{}).rules||[], mine=r=>r.source==="seed"||r.source==="本人";
+  const fresh=R.filter(r=>r.fresh), rest=R.filter(r=>!r.fresh);
+  return `<p class="hint">这里是心响做事的规矩：所有 AI 干活前都会先读。</p>`
+   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
+      `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
+   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
+      `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
+    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
+}
+/* what is not decided yet and will have to be confirmed later: left waiting on a condition, or left open in a meeting */
+function laterList(){
+  const M=D.memory||{}, W=M.waiting||[], O=(M.recent||[]).filter(m=>m.label==="还没定");
+  const rows=W.map(m=>noteLine("等条件","amber",m.text,
+      `等：${esc(m.wait_for||"")}${m.due?`，${esc(m.due.slice(5))} 到期`:""}　${esc(m.source)} ${esc(m.at)}${m.status==="alerted"?"　已提醒过你":""}`,
+      `<button class="btn" onclick="ruleOp({waiting_done:${m.id}})">已经定了</button>`,m.quote)).join("")
+    +O.map(m=>noteLine("还没定","violet",m.text,`${esc(m.source)}　${esc(m.at)}`,"")).join("");
+  return `<p class="hint">现在不用处理、以后要确认的事。条件到了，或者话题再被提起时，会在「今天」里提醒你。</p><div class="list">${rows||'<div class="empty">现在没有以后要确认的事。</div>'}</div>`;
 }
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
 function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }
@@ -853,18 +1080,21 @@ const OB=[
   {key:"me",title:"怎么称呼你",sub:"会议和群聊里提到这些称呼时，才算是你的事。",body:st=>{ const me=st.me||{};
     return `<label class="ob-field"><span>你的名字</span><input id="ob-name" data-draft="ob-name" value="${esc(me.name||"")}" placeholder="和飞书里的名字一致"></label>
       <label class="ob-field"><span>同事还怎么叫你</span><input id="ob-alias" data-draft="ob-alias" value="${esc((me.aliases||[]).join("、"))}" placeholder="可以留空；多个用顿号隔开"></label>`; }},
-  {key:"source",title:"接入你的办公工具",sub:"接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",body:(st,s)=>{ const r=s.record||{}, on=st.sources||{};
+  {key:"source",title:"要接办公工具吗",sub:"接了，别人在会议和聊天里找你的事会自动收进来。",body:(st,s)=>{ const r=s.record||{}, on=st.sources||{};
+    const want=(key,on,name,why)=>setRow(`我要接${name}`,on?"好。最后一步会给你一段话，发给你的 AI，它带你接好。":why,switchCtl(!!on,`setSetting('${key}',${!on})`));
     return `<div class="list">${r.feishu_ready
-        ?setRow("飞书","已接入","",pushLine(s))+setRow("读会议","",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","",toggle("feishu_tasks_enabled",on.tasks))
-        :setRow("飞书","没有接入。需要的话，按安装说明运行一次 setup。",`<span class="eng-state">未接入</span>`)}
-      ${setRow("Slack",s.slack?`已接入 ${esc(s.slack.team||"")}`:"需要时到 设置 → 消息来源 里粘贴 Token 连接。",`<span class="eng-state ${s.slack?"ok":""}">${s.slack?"已接入":"未接入"}</span>`)}
-      ${setRow("后台程序","收消息、整理、提醒都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)}</div>`; }},
-  {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在 设置 → 消息来源 里随时能换。",body:st=>modeCards(st)},
+        ?setRow("飞书","已接入。下面三样分别决定从哪里收进你的事。",`<span class="eng-state ok">已接入</span>`)+setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks))
+        :want("want_feishu",st.want_feishu,"飞书","想自动收进会议、聊天里别人找你的事，就打开。")}
+      ${s.slack?setRow("Slack",`已接入 ${esc(s.slack.team||"")}。`,`<span class="eng-state ok">已接入</span>`):want("want_slack",st.want_slack," Slack","团队用 Slack 沟通的话打开，会从里面找出别人找你的事。")}
+      ${wxOn(s)?setRow("微信","已接入。只在这台电脑上读，不上传。",toggle("wechat_enabled",true)):want("want_wechat",st.want_wechat,"微信","工作上的事常在微信里说的话打开。只在这台电脑上读，不上传。")}</div>
+      ${r.feishu_ready||s.slack||wxOn(s)||st.want_feishu||st.want_slack||st.want_wechat?"":`<p class="hint" style="margin:10px 2px 0">都不开也能用：要做的事自己新建，AI 照样帮你做。</p>`}`; }},
+  {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在设置里随时能换。",body:st=>modeCards(st)},
   {key:"ai",title:"让哪个 AI 来做事",sub:"选一个并测一下能不能连通。以后可以随时换。",body:(st,s)=>{ const found=s.engines||{}, cindy=st.cindy||{};
-    return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]]))}
-      ${st.engine==="cindy"?cindyRows(cindy):engineRow(st.engine==="claude"?"claude":"codex",st,found[st.engine==="claude"?"claude":"codex"])}</div>`; }},
+    return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]])]))}
+      ${st.engine==="cindy"?cindyRows(cindy):engineRow(LOCAL_ENGINES.includes(st.engine)?st.engine:"codex",st,found[LOCAL_ENGINES.includes(st.engine)?st.engine:"codex"])}</div>`; }},
   {key:"notify",title:"通知发到哪",sub:"AI 做完了、卡住了、有新的事，都会在心响里提醒你。",body:(st,s)=>
     `<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`},
+  {key:"check",title:"剩下的交给你的 AI",sub:"也可以先开始用，之后在 设置 → 配置检查 里随时看。",body:()=>checkList()},
 ];
 function obView(){
   const i=S.ob.step, step=OB[i], last=i===OB.length-1;
@@ -876,15 +1106,164 @@ function obView(){
 }
 /* ---------- 设置: AI / 消息来源 / 数据 / 通用 ---------- */
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
-const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}"><div class="sec-h">${title}</div>${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
+const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?`<div class="sec-h">${title}</div>`:""}${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
 const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
-function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{};
-  const nav=[["ai","AI"],["src","消息来源"],["data","数据"],["general","通用"]], tab=nav.some(x=>x[0]===S.setTab)?S.setTab:"ai";
-  const body={ai:()=>runSection(st,s,w)+talkSection(st)+advancedSection(st,s,w),src:()=>sourceSection(s),data:()=>dataSection(s),general:()=>generalSection(s)}[tab]();
-  return `<div class="set-page"><div class="tabs set-tabs" role="tablist">${nav.map(([k,l])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.setTab='${k}';render()">${l}</button>`).join("")}</div>${body}</div>`;
+const SET_IC={bug:'<path d="M9 8a3 3 0 0 1 6 0M7 11h10v4a5 5 0 0 1-10 0zM4 13h3M17 13h3M5 19l2.5-2M19 19l-2.5-2M5 8l2.5 2M19 8l-2.5 2"/>',update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
+  bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
+const engName = v => String(v||"").startsWith("driver:")?String(v).slice(7):(ENGINE_NAME[v]||v||"");   // an AI that said hello goes by its own name
+const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
+/* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
+function setMenu(st,s){ const r=s.record||{};
+  const left=setupProblems().length, upd=s.update||{}, waiting=(D.bugs||[]).filter(b=>b.status==="open").length;
+  return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&(r.feishu_broken?"飞书（读不到）":"飞书"),s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、")||"都没接"],
+      ["mode","inbox","#ff9500","收到消息怎么处理",(MODES.find(m=>m[0]===(st.intake_mode||"all"))||MODES[0])[1]]]],
+    ["AI",[["ai","ai","#5856d6","谁来做事",engName(st.engine||"codex")],["talk","chat","#34c759","打开对话",pickupName()]]],
+    ["数据与通知",[["store","db","#00c7be","事项存在哪",STORE_NAME[r.mode||"feishu"]||""],["notify","bell","#ff3b30","通知",r.feishu_ready&&st.brief_channel!=="local"?"心响 + 飞书简报":"只在心响里"]]],
+    ["通用",[["bugs","bug","#ff9500","问题反馈",waiting?`${waiting} 条待提交`:""],["update","update",upd.newer&&upd.can?"#ff3b30":"#007aff","版本与更新",upd.newer?`有新版 ${upd.latest}`:(upd.current||"")],["look","eye","#8e8e93","外观",THEME_NAME[savedTheme()]||""],["guide","guide","#ffcc00","新手引导",""],["adv","adv","#636366","高级",""]]]];
 }
-const toggle=(key,on)=>`<div class="switch ${on?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!on}" tabindex="0" onclick="setSetting('${key}',${!on})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setSetting('${key}',${!on})}"><div class="tr"></div></div>`;
-const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"]};
+/* ---------- 配置检查：每一项现在通没通，没通的下一步做什么 ---------- */
+function copyText(text,said){
+  const done=()=>toast(said||"已复制");
+  const fallback=()=>{ const t=document.createElement("textarea"); t.value=text; document.body.appendChild(t); t.select(); try{ document.execCommand("copy"); done(); }catch(e){ toast("没能复制，请手动复制"); } t.remove(); };
+  if(navigator.clipboard) navigator.clipboard.writeText(text).then(done,fallback); else fallback();
+}
+const cmdBox = c => `<div class="cmd"><code>${esc(c)}</code><button class="btn" data-cmd="${esc(c)}" onclick="copyText(this.dataset.cmd,'已复制，粘贴到终端里回车')">复制</button></div>`;
+const howSteps = steps => steps.map(([text,c],k)=>`<div class="step-n"><i>${k+1}</i><div>${text}${c?cmdBox(c):""}</div></div>`).join("");
+const TERM = () => ((D.system||{}).here||{}).platform==="windows"?"「开始」菜单里的 PowerShell":"「终端」（聚焦搜索里搜“终端”）";
+const ASK_AI="把上面那段话发给你的 AI，它会";
+const wxOn = s => !!((s.wechat||{}).enabled&&(s.wechat||{}).installed);
+function setupChecks(){
+  const st=D.settings||{}, s=D.system||{}, r=s.record||{}, here=s.here||{}, found=s.engines||{}, tests=st.engine_tests||{}, me=st.me||{};
+  const manual=st.intake_mode==="manual", reading=!manual&&(r.feishu_ready||s.slack||wxOn(s)), busy=S.testing||{};
+  const local=(name,job)=>{ const label=ENGINE_NAME[name], t=tests[name];
+    if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。不用装：把上面那段话发给你常用的 AI，它会自己来接手做。`};
+    if(busy[name]) return {state:"todo",text:"正在测试，最多要一两分钟…"};
+    if(!t) return {state:"todo",text:`${label} 装好了，还没试过能不能用。`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">测试连接</button>`};
+    if(!t.ok) return {state:"bad",text:`${label} 连不上：${esc(t.error||"没有回复")}`,ctl:`<button class="btn pri" onclick="testEngine('${name}')">再测一次</button>`};
+    return {state:"ok",text:`${label} 已连通（${esc(t.at||"")}）。`,ctl:`<button class="btn ghost" onclick="testEngine('${name}')">再测</button>`}; };
+  const cindyState=(c,job)=>c.ready&&c.same_project?{state:"ok",text:"Cindy 每 5 分钟来领一次活。"}
+    :{state:"bad",text:`Cindy 还没接好，${job}。`,ctl:`<button class="btn pri" onclick="S.setTab='ai';render()">去接好</button>`};
+  const out=[];
+  out.push({key:"listener",need:true,title:"后台程序",...(s.listener==="运行中"?{state:"ok",text:"在运行。收消息、叫 AI 开工、提醒都靠它。"}
+    :{state:"bad",text:`没在运行，所以现在什么都不会自动发生。${here.client?"从开始菜单重新打开「心响」，等一分钟。":ASK_AI+"把它启动并设成开机自启。"}`})});
+  const eng=st.engine||"codex", c=st.cindy||{};
+  const outside=(v,job)=>{ const name=engName(v), d=(st.drivers||[]).find(x=>x.name===name);
+    return d&&d.online?{state:"ok",text:`${esc(name)} 在这儿，正在领活${d.model?`（${esc(d.model)}）`:""}。`}
+      :{state:"bad",text:`${esc(name)} 现在不在${d&&d.seen?`（上次来是 ${esc(d.seen)}）`:""}，${job}。把上面那段话再发给它一次；发给另一个 AI，就换那个 AI 来做。`}; };
+  const who=(v,job,cindyJob)=>String(v).startsWith("driver:")?outside(v,job):v==="cindy"?cindyState(c,cindyJob||job):local(v,job);
+  out.push({key:"engine",need:true,title:`做事的 AI：${engName(eng)}`,...who(eng,"交给 AI 的事没人做","交给 AI 的事不会开工")});
+  const sort=st.engine_sort||"codex";
+  if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${engName(sort)}`,...who(sort,"会议和聊天里的事提不出来")});
+  out.push({key:"me",need:!!(reading||st.want_feishu||st.want_slack||st.want_wechat),title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
+    :{state:reading||st.want_feishu||st.want_slack||st.want_wechat?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
+  const wxBad=wxOn(s)&&((s.wechat.status||{}).ok===false);
+  if(r.feishu_ready&&r.feishu_broken) out.push({key:"feishu",need:true,title:"飞书",state:"bad",
+    text:`接着，但从 ${esc(r.feishu_broken.since||"刚才")} 起读不到：${esc(r.feishu_broken.why||"原因不明")}。会议、聊天、飞书任务都收不进来。${ASK_AI}带你重新登录，中途请你在浏览器里点一次同意。`});
+  const missing=[st.want_feishu&&!r.feishu_ready&&"飞书",st.want_slack&&!s.slack&&"Slack",(st.want_wechat&&!wxOn(s)||wxBad)&&"微信"].filter(Boolean), have=[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&!wxBad&&"微信"].filter(Boolean);
+  const manage=`<button class="btn ghost" onclick="S.setTab='tool';render()">${have.length||missing.length?"管理":"去接"}</button>`;
+  out.push({key:"tools",need:missing.length>0,title:"办公工具",...(missing.length?{state:"todo",text:`你想接${missing.join("和")}，还没接好。${ASK_AI}带你接，中途请你在浏览器里登录、点一次同意。${have.length?`已接入${have.join("、")}。`:""}`,ctl:manage}
+    :have.length?{state:"ok",text:`已接入${have.join("、")}${manual?"；现在是手动模式，不会自动收":""}。`,ctl:manage}
+    :{state:"off",text:"没接，可以不接：要做的事点「＋ 新建事项」自己加。想自动收进会议、聊天里别人找你的事，再去接飞书或 Slack。",ctl:manage})});
+  const store=s.store||{};
+  out.push({key:"store",need:false,title:"事项存在哪",...(store.failed?{state:"todo",text:`事项都在本机，没丢；有 ${store.failed} 条还没同步出去。`,ctl:`<button class="btn" onclick="retryBackup()">重试</button>`}
+    :{state:"ok",text:`${STORE_NAME[r.mode||"feishu"]||""}${r.mode==="device"?"":"，本机也有一份"}。`,ctl:`<button class="btn ghost" onclick="S.setTab='store';render()">换</button>`})});
+  return out;
+}
+function copySetupPrompt(){
+  const t=(D.settings||{}).setup_prompt; if(!t) return toast("还读不到，稍后再试");
+  copyText(t,"已复制。粘贴到你常用的 AI 里发送，它会把剩下的配好");
+}
+const setupProblems = () => setupChecks().filter(x=>x.need&&x.state!=="ok");
+function checkList(){
+  const list=setupChecks(), bad=list.filter(x=>x.need&&x.state!=="ok"), MARK={ok:"✓",bad:"!",todo:"…",off:""};
+  const ai=`<button class="btn ${bad.length?"pri":""}" onclick="copySetupPrompt()">复制给 AI 的话</button>`;
+  const sum=bad.length?`<div class="sum ${bad.some(x=>x.state==="bad")?"bad":"todo"}"><div><b>还差 ${bad.length} 步才能用</b><br><span>不用自己动手：点右边复制一段话，粘贴到你常用的 AI（Cindy、Claude、Codex、Cursor…）里发送，它会把剩下的配好。配好一项，这里就变绿一项。</span></div>${ai}</div>`
+    :`<div class="sum"><div><b>都配好了，可以用</b><br><span>以后要改什么，也可以把这段话发给你的 AI 让它来弄。</span></div>${ai}</div>`;
+  return sum+`<div class="list">${list.map(x=>`<div class="chk ${x.state}"><span class="mark">${MARK[x.state]}</span><div><div class="k">${esc(x.title)}${x.need||x.state==="ok"?"":`<span class="hint" style="margin:0 0 0 8px;font-weight:400">可选</span>`}</div><div class="d">${x.text}</div></div><div class="ctl">${x.ctl||""}</div></div>`).join("")}</div>`;
+}
+async function recheck(){ if(!LIVE) return toast("原型里不能检查"); await load(); const n=setupProblems().length; toast(n?`还差 ${n} 步`:"都配好了"); }
+/* ---------- 问题反馈：随手记一条，攒起来一起交 ---------- */
+function bugOpen(){ S.bugging={}; render(); setTimeout(()=>$("#bug-text")?.focus(),30); }
+function bugClose(){ drafts.delete("bug-text"); S.bugging=null; render(); }
+function bugView(){
+  const n=(D.bugs||[]).filter(b=>b.status==="open").length;
+  return `<div class="ob-mask" onclick="if(event.target===this)bugClose()"><div class="ob" role="dialog" aria-modal="true" aria-label="反馈问题" style="width:min(520px,100%)">
+    <h2 style="margin-top:0">反馈问题</h2><p class="ob-sub">哪里不对？当时在做什么？一两句话就行。</p>
+    <textarea id="bug-text" data-draft="bug-text" rows="4" style="width:100%" maxlength="2000" placeholder="比如：点「更新」后一直显示正在更新，等了十分钟没变" onkeydown="if(event.key==='Escape')bugClose();if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))bugSave()"></textarea>
+    <p class="hint" style="margin:8px 2px 0">点「记下」只是先存起来，不会马上发给任何人${n?`（已经存了 ${n} 条）`:""}。之后提交时，会顺带附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。</p>
+    <div class="ob-foot">${n?`<button class="btn ghost" onclick="bugClose();S.setTab='bugs';go('sys')">看已记的 ${n} 条</button>`:""}<span style="flex:1"></span><button class="btn" onclick="bugClose()">取消</button><button class="btn pri" onclick="bugSave()">记下</button></div></div></div>`;
+}
+async function bugSave(){
+  const el=$("#bug-text"), text=String(el&&el.value||"").trim(); if(!text) return el&&el.focus();
+  if(LIVE){ try{ D.bugs=(await api("/api/bugs",{add:text},20000)).bugs; }catch(e){ return toast("没记下，连不上本机服务"); } }
+  else (D.bugs ||= []).unshift({id:Date.now(),at:TODAY.slice(5)+" "+clock(),text,status:"open"});
+  bugClose(); toast("记下了。攒够了到 设置 → 问题反馈 里一起交","去看看",()=>{ S.setTab="bugs"; go("sys"); });
+}
+function bugsPage(){
+  const list=D.bugs||[], open=list.filter(b=>b.status==="open");
+  const row=b=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${b.status==="open"?"amber":"green"}" style="justify-self:start">${b.status==="open"?"待提交":"已提交"}</span><div style="min-width:0"><div class="t wrap">${esc(b.text)}</div><div class="s">${esc(b.at)}</div></div>
+    <div class="acts"><button class="btn ghost" onclick="bugOp({remove:${b.id}})">删掉</button></div></div>`;
+  return `<div class="list">${setRow(open.length?`${open.length} 条待提交`:"还没有待提交的",open.length?"提交到 GitHub 会打开一个填好内容的页面，看一眼再点提交（需要 GitHub 账号）。没有账号就点复制，发给开发的人。":"用着哪里不对，点左下角「反馈问题」记一条。",
+      `<button class="btn pri" onclick="bugOpen()">记一条</button>${open.length?`<button class="btn" onclick="bugHandIn('copy')">复制全部</button><button class="btn" onclick="bugHandIn('github')">提交到 GitHub</button>`:""}`)}</div>
+    ${list.length?`<div class="sec-h" style="margin-top:18px">记下的<span class="n">${list.length}</span></div><div class="list">${list.map(row).join("")}</div>`:""}`;
+}
+async function bugOp(body){ if(LIVE){ try{ D.bugs=(await api("/api/bugs",body,20000)).bugs; }catch(e){ return toast("没成功，连不上本机服务"); } } else if(body.remove) D.bugs=D.bugs.filter(b=>b.id!==body.remove); render(); }
+async function bugHandIn(how){
+  if(!LIVE) return toast("原型里不能提交");
+  let r; try{ r=await api("/api/bugs",{report:true},30000); }catch(e){ return toast("没取到内容，连不上本机服务"); }
+  copyText(r.report, how==="github"?"内容已复制；正在打开 GitHub":"已复制，发给开发的人就行");
+  if(how==="github") window.open(r.issue_url,"_blank","noopener");
+  toast(how==="github"?"提交好了吗？":"发出去了吗？","标为已提交",()=>bugOp({sent:true}));
+}
+/* ---------- 版本与更新：有新版时点一下就更新 ---------- */
+function updatePage(u){
+  const busy=S.updating||!!u.doing;
+  const state=u.failed?`<span class="eng-state bad">${esc(u.failed)}</span>`:busy?`<span class="eng-state busy">${esc(u.doing||"开始更新…")}</span>`
+    :u.newer?`<span class="eng-state bad">有新版本 ${esc(u.latest)}</span>`:u.latest?`<span class="eng-state ok">已是最新</span>`:`<span class="eng-state">${u.error?esc(u.error):"还没查过"}</span>`;
+  const go=u.newer&&u.can?`<button class="btn pri" ${busy?"disabled":""} onclick="updateNow()">${busy?"正在更新…":`更新到 ${esc(u.latest)}`}</button>`:"";
+  return `<div class="list">${setRow(`现在的版本　${esc(u.current||"未知")}`,
+      u.newer?(u.can?"点一下就行：自己下载、安装、重新打开，数据不动。":esc(u.why||"")+(u.page?` <a href="${esc(u.page)}" target="_blank" rel="noopener">去发布页看看</a>`:""))
+        :(u.checked?`上次检查 ${esc(u.checked)}。`:"")+(u.can?"":esc(u.why||"")),
+      `${state}${go}<button class="btn" ${S.checkingUpdate||busy?"disabled":""} onclick="checkUpdate()">${S.checkingUpdate?"正在检查…":"检查更新"}</button>`)}</div>`;
+}
+async function checkUpdate(){
+  if(!LIVE) return toast("原型里不能检查");
+  S.checkingUpdate=true; render();
+  try{ const r=await api("/api/update",{check:true},30000); (D.system ||= {}).update=r; toast(r.error?r.error:r.newer?`有新版本 ${r.latest}`:"已经是最新版本"); }
+  catch(e){ toast("检查没完成，连不上本机服务"); }
+  S.checkingUpdate=false; render();
+}
+async function updateNow(){
+  if(!LIVE) return toast("原型里不能更新");
+  S.updating=true; render();
+  try{ const r=await api("/api/update",{install:true},60000); toast(r.reply||"开始更新"); if(!r.ok) S.updating=false; }
+  catch(e){ S.updating=false; toast("没能开始更新，连不上本机服务"); }
+  render(); setTimeout(()=>{ S.updating=false; },180000);   // the page reloads itself once the new version is up
+}
+const SET_PAGES={
+  check:(st,s,w)=>["配置检查","每一项现在通没通。没通的不用自己弄，交给你的 AI。",checkList()],
+  tool:(st,s,w)=>["办公工具","接了就能自动收进别人找你的事。都不接也可以，事项自己新建。",toolPage(st,s)],
+  mode:(st,s,w)=>["收到消息怎么处理","别人找你的事，要不要自动变成事项。",modePage(st,s)],
+  ai:(st,s,w)=>["谁来做事","",aiPage(st,s)],
+  talk:(st,s,w)=>["打开对话","",talkSection(st)],
+  store:(st,s,w)=>["事项存在哪","事项一直存在这台电脑上，点了立刻生效。下面选的是另外同步到哪。",dataSection(s)],
+  notify:(st,s,w)=>["通知","AI 做完了、卡住了、有新的事，都会提醒你。",`<div class="list">${setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)}${notifyRow(s)}</div>`],
+  bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条，攒几条再一起提交。提交时会附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。",bugsPage()],
+  update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
+  look:(st,s,w)=>["外观","",`<div class="list">${setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)}</div>`],
+  guide:(st,s,w)=>["新手引导","重新走一遍首次设置：称呼、办公工具、接收模式、谁来做事、通知。",`<button class="btn pri" onclick="obOpen()">打开引导</button>`],
+  adv:(st,s,w)=>["高级","一般不用动。",advancedSection(st,s,w)],
+};
+function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{}, menu=setMenu(st,s);
+  const tab=SET_PAGES[S.setTab]?S.setTab:"check", [title,lead,body]=SET_PAGES[tab](st,s,w);
+  return `<div class="set-grid"><div class="set-menu">${menu.map(([cap,rows])=>`${cap?`<div class="set-cap">${cap}</div>`:""}<div class="list">${rows.map(([k,ic,color,label,val])=>
+      `<button class="cell ${tab===k?"on":""}" aria-current="${tab===k}" onclick="S.setTab='${k}';render();document.querySelector('.main').scrollTop=0"><span class="ic" style="background:${color}"><svg viewBox="0 0 24 24" aria-hidden="true">${SET_IC[ic]}</svg></span><span class="lab">${label}</span><span class="val">${esc(val)}</span><span class="chev">›</span></button>`).join("")}</div>`).join("")}</div>
+    <div class="set-pane"><h2 class="set-title">${title}</h2><p class="set-lead">${lead}</p>${body}</div></div>`;
+}
+const switchCtl=(on,call)=>`<div class="switch ${on?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!on}" tabindex="0" onclick="${call}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${call}}"><div class="tr"></div></div>`;
+const toggle=(key,on)=>switchCtl(on,`setSetting('${key}',${!on})`);
+const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"],gemini:["Gemini","gemini 命令行","worker_gemini_model"]};
+const LOCAL_ENGINES=["codex","claude","gemini"];
 function engineRow(name,st,found){
   const [label,cli,key]=ENG[name], t=(st.engine_tests||{})[name], busy=S.testing&&S.testing[name], model=(st.models||{})[name]||"";
   const state=found===false?`<span class="eng-state bad">没找到 ${cli}</span>`:busy?`<span class="eng-state busy">正在测试…</span>`
@@ -892,33 +1271,49 @@ function engineRow(name,st,found){
   const used=[st.engine===name?"做事":"",st.engine_sort===name?"整理":""].filter(Boolean).join("、");
   const err=t&&!t.ok&&!busy&&t.error?`<div class="d" style="color:var(--red);margin-top:6px">${esc(t.error)}</div>`:"";
   return setRow(`${label}<span class="hint" style="margin:0 0 0 8px;font-weight:400">${cli}${used?`　正在用于：${used}`:""}</span>`,
-    `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="claude"?"留空用账号默认":"模型名"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
-    `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err);
+    `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="codex"?"模型名":"留空用默认"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
+    `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err+(name==="gemini"?geminiKeyRow(st):""));
 }
-function runSection(st,s,w){
+function geminiKeyRow(st){
+  return `<div class="d" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">API Key：<input id="gemkey" type="password" autocomplete="off" placeholder="${st.gemini_key?"已填，粘贴新的可替换":"可不填；个人账号登录不了时填"}" style="width:230px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')saveGeminiKey()"><button class="btn" onclick="saveGeminiKey()">保存</button>${st.gemini_key?`<button class="btn ghost" onclick="saveGeminiKey(true)">清掉</button>`:""}
+    <span>在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a> 申请；只存在这台电脑上。</span></div>`;
+}
+async function saveGeminiKey(clear){
+  const el=$("#gemkey"), v=clear?"":String(el&&el.value||"").trim(); if(!clear&&!v) return el&&el.focus();
+  try{ await api("/api/settings",{worker_gemini_api_key:v}); D.settings.gemini_key=!!v; if(el) el.value=""; toast(v?"已保存，点「测试连接」试一下":"已清掉"); }catch(e){ toast(e.message||"没保存成功"); }
+  render();
+}
+function aiPage(st,s){
   const found=s.engines||{}, cindy=st.cindy||{}, useCindy=st.engine==="cindy";
-  const local=[["codex","本机 GPT",found.codex],["claude","本机 Claude",found.claude]];
-  return setSec("run","谁来做事","",
-    setRow("做事","交给 AI 的事由它来做：找背景、写成果、按你的意见改。",
-      choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...local]))
+  const local=LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]), cindyOk=cindy.installed===false?false:true, sortCindy=st.engine_sort==="cindy";
+  const used=LOCAL_ENGINES.filter(e=>(st.engine||"codex")===e||(st.engine_sort||"codex")===e);   // only the engines in use need a connection
+  const ais=(st.drivers||[]).map(d=>["driver:"+d.name,d.name+(d.online?"":"（不在）"),true]);
+  const aiList=(st.drivers||[]).length?`<div style="margin-top:8px">${(st.drivers||[]).map(d=>`<div class="d"><span class="eng-state ${d.online?"ok":""}">${esc(d.name)}</span>　${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}　${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</div>`).join("")}</div>`:"";
+  return setSec("any","交给哪个 AI","",
+    setRow("发给谁，谁就来做","不用事先选。把这段话发给你常用的 AI（Antigravity、Gemini、Claude Code、Cursor、Cindy…），它会回来登记自己是谁、用的什么模型，然后接手做事。想换一个 AI，就把这段话发给那个 AI。",
+      `<button class="btn pri" onclick="copySetupPrompt()">复制给 AI 的话</button>`,aiList))
+   +setSec("run","做事","",
+    setRow("谁来做","交给 AI 的事由它来做：找背景、写成果、按你的意见改。来登记过的 AI 会出现在这里，也可以手动换。",
+      choice("engine",st.engine||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
     +(useCindy?cindyRows(cindy):"")
-    +setRow("整理","从会议和聊天里找待办、判断新进来的事。",choice("engine_sort",st.engine_sort||"codex",local))
-    +setRow("自动开工", st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。对外发送、审批、付款不会碰。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled))
     +setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
         every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
       +(st.dev_mode&&st.dev_mode!=="off"&&st.engine!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
       choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])))
-   +setSec("conn","连接状态","",engineRow("codex",st,found.codex)+engineRow("claude",st,found.claude));
+   +setSec("sort","整理","",setRow("谁来整理",`从会议和聊天里找待办、判断新进来的事。${sortCindy?"Cindy 每 5 分钟来领一次，所以会议和聊天会晚几分钟才整理出来。":""}`,choice("engine_sort",st.engine_sort||"codex",[...ais,["cindy","Cindy",cindyOk],...local]))
+    +(sortCindy&&!useCindy?cindyRows(cindy):""))
+   +setSec("conn","连接状态","",used.map(e=>engineRow(e,st,found[e])).join(""));
 }
 function advancedSection(st,s,w){
   const builtin=st.builtin_driver!==false, useCindy=st.engine==="cindy";
   const seen=(w.drivers||[]).map(d=>`<div>${esc(d.driver)}：最近 ${esc(d.last)}，做完 ${d.done||0} 件${d.open?`，正在做 ${d.open} 件`:""}</div>`).join("");
-  return `<details class="set-adv" ${S.adv?"open":""} ontoggle="S.adv=this.open"><summary>高级</summary><div class="list">`
+  return `<div class="list">`
     +setRow("本机 AI 干活", builtin?`本机 AI 有活就做${useCindy?"（做事已交给 Cindy，本机只做整理）":"，最多同时 10 件"}。`:"已关：本机不干活，只等外部 AI 来领。",toggle("builtin_driver",builtin))
     +setRow("本机 Claude 用你的 MCP", st.worker_mcp?"可以用你在 Claude 里装好的插件查资料；发送、发布、删除、修改类工具一律禁止。":"已关：AI 只用本机文件、命令和网页。",toggle("worker_mcp",st.worker_mcp))
     +setRow("接入别的 AI","Claude Code、Cursor 等能运行命令的 AI，都可以来领心响的活。",`<button class="btn" onclick="copyGuide()">复制接入说明</button>`,
       `<details><summary>查看接入说明${seen?"和最近接入过的 AI":""}</summary><div class="guide" style="padding:10px 0 0"><pre id="guide">${esc(D.guide||"")}</pre>${seen?`<div class="hint" style="margin:0">${seen}</div>`:""}</div></details>`)
-    +`</div></details>`;
+    +setRow("后台程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)
+    +`</div>`;
 }
 function cindyRows(c){
   const projects=c.projects||[], sch=c.schedule;
@@ -938,34 +1333,67 @@ function cindyRows(c){
 }
 function talkSection(st){
   const f=st.apps||{};
-  return setSec("talk","打开对话","",
-    setRow("接着做","在事项里点「接着做」时，用哪个软件打开新对话。",
-      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]]]))
+  return setSec("talk","","",
+    setRow("接着做","在事项里点「接着做」时，默认用哪个软件打开新对话。单件事想换别的，在那件事的「AI 会话」里点「换一个 App」，不影响这里。",
+      choice("pickup_app",st.pickup_app,[["cindy","Cindy",f.cindy],["claude","Claude",f.claude],["terminal-claude","终端 · Claude",f["terminal-claude"]],["terminal-codex","终端 · Codex",f["terminal-codex"]],["terminal-gemini","终端 · Gemini",f["terminal-gemini"]]]))
     +setRow("看本机 GPT 的对话","点开一段本机 GPT 对话时，在哪里显示。",
       choice("gpt_open",st.gpt_open||"here",[["here","心响里",true],["chatgpt","ChatGPT 桌面版",f.chatgpt],["terminal","终端",f["terminal-codex"]]])));
 }
-function sourceSection(s){
-  const r=s.record||{}, every=r.review_every??5, me=s.slack, t=S.slackTry;
+function wechatRows(st,s){
+  const w=s.wechat||{}, t=w.status||{}, c=S.wechatCheck;
+  if(!w.installed&&!w.enabled) return setRow("我要接微信",st.want_wechat?"已记下。到「配置检查」复制那段话发给你的 AI，它带你接好（中途要你输一次电脑密码）。":"工作上的事常在微信里说的话打开。只在这台电脑上读你自己的微信，不上传。",
+    switchCtl(!!st.want_wechat,`setSetting('want_wechat',${!st.want_wechat})`));
+  const state=!w.installed?`<span class="eng-state bad">没找到微信命令行</span>`:c&&c.busy?`<span class="eng-state busy">正在试读，约 20 秒…</span>`
+    :c&&c.ok===false?`<span class="eng-state bad">读不到</span>`:c&&c.ok?`<span class="eng-state ok">能读到</span>`
+    :t.ok===false?`<span class="eng-state bad">读不到（${esc(t.at||"")}）</span>`:t.at?`<span class="eng-state ok">上次读取 ${esc(t.at)}</span>`:`<span class="eng-state">还没读过</span>`;
+  const note=(c&&c.ok===false&&c.error)||(t.ok===false&&t.error)||"";
+  return setRow("读微信",w.enabled?"每两分钟看一次有新消息的聊天，只留跟你有关的话。只在这台电脑上读，不上传。":"已关。",toggle("wechat_enabled",!!w.enabled))
+    +setRow("能不能读到",t.behind?"最近的聊天记录读不出来，现在只看得到每个聊天的最后一条。到「配置检查」复制那段话发给你的 AI，它带你修好。":"读得比较慢：一轮最多看 4 个聊天，其余排到下一轮。",
+      `${state}<button class="btn" ${c&&c.busy||!w.installed?"disabled":""} onclick="wechatCheck()">试读一下</button>`,note?`<div class="d" style="color:var(--red)">${esc(note)}</div>`:"");
+}
+async function wechatCheck(){
+  if(!LIVE) return toast("原型里不能试");
+  S.wechatCheck={busy:true}; render();
+  try{ S.wechatCheck=await api("/api/wechat/check",{},120000); toast(S.wechatCheck.ok?"微信能读到":"微信读不到"); }
+  catch(e){ S.wechatCheck={ok:false,error:"试读没完成，连不上本机服务"}; }
+  render();
+}
+function slackRow(s){
+  const me=s.slack, t=S.slackTry;
   const slackCtl=me?`<button class="btn" onclick="slackTry()">试跑最近 24 小时</button><button class="btn ghost" onclick="slackOff()">断开</button>`
     :`<input id="slacktok" type="password" autocomplete="off" data-draft="slack-token" placeholder="xoxp-…" style="width:200px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')slackOn()"><button class="btn pri" onclick="slackOn()">连接</button>`;
   const slackDesc=me?`已连接 ${esc(me.team||"")}，@${esc(me.user||"")}。每分钟搜一次你能看到的新消息，只留跟你有关的话。`
-    :`还没连接。粘贴 Slack 的 User OAuth Token 就能连上。`;
+    :`还没连接。有 Token 就粘贴到右边；没有的话打开下面的「我要接 Slack」，到「配置检查」复制那段话发给你的 AI，它带你拿到。`;
   const slackHelp=me?"":`<details><summary>怎么拿到这个 Token</summary><div class="d" style="margin-top:6px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开你的 App → OAuth &amp; Permissions → User Token Scopes 加上 <code>${SLACK_SCOPES}</code> → Install to Workspace → 复制 User OAuth Token（xoxp- 开头）。</div></details>`;
   const tried=!t?"":t.busy?`<div class="hint" style="margin:0">正在读 Slack，最多要一分钟</div>`:t.error?`<div class="hint" style="margin:0;color:var(--red)">${esc(t.error)}</div>`
     :`<div class="hint" style="margin:0 0 6px">最近 24 小时：看了 ${t.chats} 个会话、${t.messages_scanned} 条消息，筛中 ${t.candidates} 条（试跑，不建事项）</div>${(t.lines||[]).map(m=>`<div class="d">· ${esc(m.text)}（${esc(m.chat_name)} ${esc(m.sender_name)}）</div>`).join("")}`;
-  const st=D.settings||{}, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready;
-  const feishu=!fs?setRow("飞书","没有接入。要接入，按安装说明运行一次 setup；不接也可以，事项自己新建就行。",`<span class="eng-state">未接入</span>`)
-    :setRow("飞书","","",pushLine(s))
+  const st=D.settings||{};
+  return setRow("Slack",slackDesc,slackCtl,slackHelp+tried)+(me?"":setRow("我要接 Slack",st.want_slack?"已记下。到「配置检查」复制那段话发给你的 AI，它带你接好。":"打开后，配置检查会把它算作要做的一步。",switchCtl(!!st.want_slack,`setSetting('want_slack',${!st.want_slack})`)));
+}
+function toolPage(st,s){
+  const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack||wxOn(s);
+  const feishu=!fs?setRow("我要接飞书",st.want_feishu?"还没接好。到「配置检查」复制那段话发给你的 AI，它带你接好。":"没有接入。不接也可以，事项自己新建就行。",switchCtl(!!st.want_feishu,`setSetting('want_feishu',${!st.want_feishu})`))
+    :(r.feishu_broken?setRow("现在读不到",`${esc(r.feishu_broken.why||"原因不明")}（从 ${esc(r.feishu_broken.since||"刚才")} 起）。会议、聊天、飞书任务都收不进来。到「配置检查」复制那段话发给你的 AI，它带你重新登录。`,`<span class="eng-state bad">读不到</span><button class="btn pri" onclick="S.setTab='check';render()">去修</button>`):"")
+     +setRow("飞书","","",pushLine(s))
      +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
      +setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))
      +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));
-  return setSec("mode","收到消息怎么处理","",`<div class="set-row" style="display:block">${modeCards(st)}</div>`)
-   +setSec("src","从哪里收进新的事",manual?"现在是手动模式，下面这些来源都不会自动收。":"",
-    feishu
-    +setRow("Slack",slackDesc,slackCtl,slackHelp+tried)
-    +filterRow(r)
-    +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
-      `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`));
+  return setSec("feishu","飞书",any&&manual?"现在是手动模式，下面这些来源都不会自动收。":"",feishu)
+   +setSec("slack","Slack","",slackRow(s))
+   +setSec("wechat","微信","",wechatRows(st,s))
+   +(any?setSec("filter","过滤和节奏","",filterRow(r)
+      +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
+        `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`))
+     :`<p class="hint" style="margin:14px 2px 0">现在没有接任何工具。要做的事点右上角「＋ 新建事项」自己添加。</p>`);
+}
+function modePage(st,s){
+  const manual=st.intake_mode==="manual", any=(s.record||{}).feishu_ready||s.slack, auto=!!st.auto_assign;
+  return modeCards(st)
+   +(manual?"":setSec("after","接进来之后","",
+      setRow("AI 先判断能不能做",auto?"办完的关掉，不用做的放下，能做的接手，要你定的先备材料。":"已关：新进来的事等你来定谁做。",switchCtl(auto,`toggleAuto(${!auto})`))
+      +setRow("自动开工",st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled)))
+     +`<p class="hint" style="margin:8px 2px 0">对外发送、审批、付款，AI 永远不会碰。</p>`)
+   +(!any&&!manual?`<p class="hint" style="margin:8px 2px 0;color:var(--amber)">你还没有接任何办公工具，所以现在不会有事自动进来。</p>`:"");
 }
 const MODES=[["all","全能模式","别人找你的事都接进来，AI 直接开始做。"],["accepted","全自动模式","你答应了（回了「好的」「我来」）才接进来，然后 AI 开始做。"],["manual","手动模式","什么都不自动接，要做的事自己新建。"]];
 function modeCards(st){
@@ -990,9 +1418,10 @@ function dataSection(s){
   const say={feishu:"事项存在本机，点了立刻生效；飞书多维表格在后台备份，手机上也能看。",notion:"事项存在本机；Notion 的「心响事项」数据库在后台同步。在 Notion 里改的会被下一次同步覆盖。",device:"事项只存在这台电脑上，不同步到别处。"}[mode];
   const form=(S.pickNotion||(mode==="notion"&&!r.notion))?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><input id="notiontok" type="password" autocomplete="off" placeholder="Integration Secret（ntn_…）" style="height:28px;padding:3px 8px"><input id="notionpage" autocomplete="off" placeholder="共享给它的页面链接" style="height:28px;padding:3px 8px;flex:1;min-width:200px" onkeydown="if(event.key==='Enter')notionOn()"><button class="btn pri" onclick="notionOn()">连接 Notion</button></div>
     <div class="hint" style="margin:6px 0 0">在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> 新建 Internal integration，复制 Secret；再打开一个页面，··· → Connections 加上它，Share → Copy link 粘过来。</div>`:"";
-  return setSec("data","事项存在哪","",
-    setRow("事项记在哪",`${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}`,
-      `<div class="chips">${[["feishu","飞书多维表格"],["notion","Notion"],["device","只存本机"]].map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>`,form)
+  const stores=Object.entries(STORE_NAME).filter(([k])=>k!=="feishu"||r.feishu_ready!==false||mode==="feishu");
+  return setSec("data","","",
+    setRow("同步到哪",`${say}${mode==="notion"&&r.notion_url?` <a href="${esc(r.notion_url)}" target="_blank" rel="noopener">打开 Notion 数据库</a>`:""}`,
+      `<div class="chips">${stores.map(([k,l])=>`<button class="chip ${mode===k?"on":""}" onclick="pickStore('${k}')">${l}</button>`).join("")}</div>`,form)
     +setRow("备份状态",storeLine(s.store||{},mode),""));
 }
 function notifyRow(s){
@@ -1000,14 +1429,6 @@ function notifyRow(s){
   return fs?setRow("早晚简报也发到飞书",st.brief_channel==="local"?"已关：08:30 早报和 21:00 晚报只在心响里。":"08:30 早报和 21:00 晚报同时发到你的飞书。其余通知都只在心响里。",
       `<div class="switch ${st.brief_channel!=="local"?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${st.brief_channel!=="local"}" tabindex="0" onclick="setSetting('brief_channel','${st.brief_channel==="local"?"feishu":"local"}')"><div class="tr"></div></div>`)
     :setRow("通知","所有通知都只在心响里。","");
-}
-function generalSection(s){
-  const t=savedTheme();
-  return setSec("general","通用","",
-    setRow("新手引导","重新走一遍首次设置。",`<button class="btn" onclick="obOpen()">打开引导</button>`)
-    +notifyRow(s)
-    +setRow("外观","",`<div class="chips">${[["auto","跟随系统"],["light","浅色"],["dark","深色"]].map(([k,l])=>`<button class="chip ${t===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)
-    +setRow("后台程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`));
 }
 function copyCindySetup(){
   const text=((D.settings||{}).cindy||{}).setup_text;
@@ -1027,7 +1448,7 @@ async function testEngine(name){
   S.testing[name]=false; render();
 }
 async function saveModel(key,value){
-  value=String(value||"").trim(); const name=key==="worker_model"?"codex":"claude";
+  value=String(value||"").trim(); const name=Object.keys(ENG).find(e=>ENG[e][2]===key);
   if(((D.settings||{}).models||{})[name]===value) return;
   if(key==="worker_model"&&!value) return toast("GPT 需要填模型名");
   try{ await api("/api/settings",{[key]:value}); (D.settings.models ||= {})[name]=value; toast("模型已保存，下一件活开始用"); }
@@ -1183,7 +1604,7 @@ function sessionsTab(i){
   const list=i.sessions||[];
   const buddy=D.settings?.pickup_app==="cindy" && D.settings?.pickup_buddy;
   const label={queued:"等待 Cindy 投递",delivered:"已交给豚豚",error:"未收到送达回执，请打开豚豚对话核对"}[i.cindy_pickup];
-  const start=buddy?`<div class="callout"><div class="what">${esc(label||"带上原对话和已有交付，由豚豚接着做。")}</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在豚豚对话里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`:`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button><button class="btn ghost" onclick="go('sys')">换一个 App</button></div></div>`;
+  const start=buddy?`<div class="callout"><div class="what">${esc(label||"带上原对话和已有交付，由豚豚接着做。")}</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在豚豚对话里接着做</button>${appPicker(i.n)}</div></div>`:`<div class="callout" style="margin:0 0 12px"><div class="what">想自己接着和 AI 做这件事？在 ${esc(pickupName())} 里接手：这件事的来龙去脉、之前的对话和本机 GPT 做出的东西都会带过去，那段对话也会绑在这里。</div><div class="acts"><button class="btn pri" onclick="pickUp(${i.n})">在 ${esc(pickupName())} 里接着做</button>${appPicker(i.n)}</div></div>`;
   if(!list.length) return start+`<div class="hint" style="margin:0">还没有 AI 会话绑定这件事。左侧「AI 会话」里正在进行的对话，也可以点「关联到事项…」绑过来。</div>`;
   return start+`<div class="list">${list.map(s=>`<div class="row flat ev"><span class="ud"></span>${engineTag(s)}
     <div style="min-width:0"><div class="t">${esc(s.local?s.title:s.driver)}${s.status==="open"?'　<span class="pill blue"><span class="live"></span>回复中</span>':""}</div>
@@ -1214,22 +1635,53 @@ function composer(i){
 function itemView(i){
   const [what,tone]=nowText(i), dvs=(D.deliverables[i.n]||[]).length, d=due(i), tab=S.tab||"talk";
   const talk=(D.threads[i.n]||[]).filter(m=>m.from!=="system"&&m.kind!=="step").length, sess=(i.sessions||[]).length;
+  const pj=projOf(i.project), guessed=pj&&i.project_by==="猜";
   const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
+    ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="quiet-link" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
     ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
     [i.status==="取消"?"关闭":"完成",closedText(i)],
-    ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="act(${i.n},'link','粘贴新的交付链接',this);return false">${i.url?"换链接":"填链接"}</a>`}`],
+    ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="dvOpen(${i.n},${dvs?(D.deliverables[i.n].at(-1).v):0});return false">${i.url?"换链接":"填链接"}</a>`}`],
     ["来源",`${esc(i.source||"手动")}${i.source_url?`<a href="${esc(i.source_url)}" target="_blank" rel="noopener">原处 ↗</a>`:""}`],
     ["更新",esc(ago(i.updated))]];
   return `<div class="d-head"><div class="d-top"><span class="num">#${i.n}</span>${pill(i)}
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
-    ${chainView(i)}
+    ${chainView(i)}${deliverView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
     <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
 }
+/* ---------- 交付：每一版的链接和说明都能改、能删，也能自己加一版 ---------- */
+function deliverView(i){
+  const list=D.deliverables[i.n]||[], e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;
+  if(!list.length&&!e) return "";
+  const form=(v,cur)=>`<div class="dv-form"><input id="dv-url" data-draft="dv-url-${i.n}-${v}" value="${esc(cur.url||"")}" placeholder="粘贴文档链接（http 开头）" aria-label="交付链接" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
+      <input id="dv-sum" data-draft="dv-sum-${i.n}-${v}" value="${esc(cur.summary||"")}" placeholder="一句话说明这是什么（可不填）" maxlength="300" aria-label="交付说明" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
+      <div class="acts"><button class="btn pri" onclick="dvSave(${i.n},${v})">保存</button><button class="btn" onclick="dvClose()">取消</button></div></div>`;
+  const rows=[...list].reverse().map((v,k)=>e&&e.v===v.v?form(v.v,v):`<div class="dv-row"><b class="${k?"":"cur"}">v${v.v}</b><div style="min-width:0"><div class="t wrap">${linkify(v.summary||"交付")}</div><div class="s">${esc(v.at||"")}${v.url?`　${esc(linkLabel(v.url))}`:"　没有链接"}</div></div>
+      <div class="acts">${v.url?`<a class="btn" href="${esc(v.url)}" target="_blank" rel="noopener">打开</a>`:""}<button class="btn ghost" onclick="dvOpen(${i.n},${v.v})">编辑</button><button class="btn ghost" onclick="toast('删掉 v${v.v} 这一版交付？','删掉',()=>dvRemove(${i.n},${v.v}))">删掉</button></div></div>`).join("");
+  return `<div class="d-sec" style="padding-top:14px"><h3>交付<span class="n">${list.length||""}</span>${e&&e.v===0?"":`<button class="btn ghost" style="margin-left:auto;height:24px;padding:0 8px" onclick="dvOpen(${i.n},0)">＋ 加一版</button>`}</h3>
+    <div class="inner-list">${e&&e.v===0?form(0,{}):""}${rows}</div></div>`;
+}
+function dvOpen(n,v){ S.dvEdit={n,v}; render(); setTimeout(()=>$("#dv-url")?.focus(),30); }
+function dvClose(){ const e=S.dvEdit; if(e){ drafts.delete(`dv-url-${e.n}-${e.v}`); drafts.delete(`dv-sum-${e.n}-${e.v}`); } S.dvEdit=null; render(); }
+async function dvSend(n,body,done){
+  if(LIVE){ try{ await api("/api/item/deliverable",{n,...body},40000); }catch(e){ return toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); } }
+  else{ const list=(D.deliverables[n] ||= []), i=byN(n);
+    if(body.op==="add") list.push({v:Math.max(0,...list.map(x=>x.v))+1,at:TODAY.slice(5)+" "+clock(),summary:body.summary||"你加的交付",url:body.url});
+    else if(body.op==="edit") Object.assign(list.find(x=>x.v===body.v)||{},body.url!==undefined?{url:body.url}:{},{summary:body.summary});
+    else D.deliverables[n]=list.filter(x=>x.v!==body.v);
+    i.url=(D.deliverables[n].at(-1)||{}).url||null; }
+  dvClose(); toast(done); if(LIVE) load();
+}
+function dvSave(n,v){
+  const url=String($("#dv-url")?.value||"").trim(), summary=String($("#dv-sum")?.value||"").trim();
+  if(!/^https?:\/\/\S+$/.test(url)) { toast("链接要以 http 开头"); return $("#dv-url")?.focus(); }
+  return dvSend(n,v?{op:"edit",v,url,summary}:{op:"add",url,summary},v?"改好了":"加上了");
+}
+function dvRemove(n,v){ return dvSend(n,{op:"remove",v},"删掉了"); }
 /* ---------- 串起来的事：这件事前面接着哪件、后面还有哪件 ---------- */
 function chainView(i){
   const tag=(n,dir)=>{ const x=byN(n); if(!x) return ""; const [e,l]=dir==="before"?[n,i.n]:[i.n,n];
@@ -1279,6 +1731,7 @@ function sendNote(complete){
 /* ---------- frame ---------- */
 const wide = () => window.innerWidth >= 1180;
 const ICON={
+  today:'<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
   inbox:'<path d="M2.5 9.5l1.6-5.2A1.5 1.5 0 015.5 3.2h5a1.5 1.5 0 011.4 1.1l1.6 5.2v3a1 1 0 01-1 1h-9a1 1 0 01-1-1z"/><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/>',
   todo:'<circle cx="8" cy="8" r="5.8"/><path d="M5.6 8.2l1.7 1.7 3.2-3.4"/>',
   doing:'<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
@@ -1286,7 +1739,7 @@ const ICON={
   all:'<path d="M5.5 4.5h8M5.5 8h8M5.5 11.5h8"/><circle cx="2.8" cy="4.5" r=".6"/><circle cx="2.8" cy="8" r=".6"/><circle cx="2.8" cy="11.5" r=".6"/>',
   mem:'<path d="M8 3.2c-2.6 0-4.5 1.8-4.5 4.1 0 1.4.7 2.6 1.9 3.3V13h5.2v-2.4c1.2-.7 1.9-1.9 1.9-3.3 0-2.3-1.9-4.1-4.5-4.1z"/><path d="M6.4 13h3.2"/>',
   sys:'<circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/>'};
-function engineTag(s){ const e=s.engine||""; return `<span class="eng ${e}">${esc(s.local?(s.driver||"AI"):e==="gpt"?"本机 GPT":e==="claude"?"本机 Claude":String(s.driver||"AI").slice(0,8))}</span>`; }
+function engineTag(s){ const e=s.engine||""; return `<span class="eng ${e}">${esc(s.local?(s.driver||"AI"):e==="gpt"?"本机 GPT":e==="claude"?"本机 Claude":e==="gemini"?"本机 Gemini":String(s.driver||"AI").slice(0,8))}</span>`; }
 /* every AI conversation replying right now: which app, what it is about, which item it is for */
 const replyingNow = s => s.local?(s.working??s.status==="open"):s.status==="open";
 function sessCard(s){
@@ -1301,11 +1754,13 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["inbox","收件箱",unread,"hot"],["todo","等我处理",todo,"need"],["doing","进行中",doing,""],["done","已完成",0,""],["all","全部事项",0,""],null,["mem","记忆",0,""],["sys","设置",0,""]];
+  const nav=[["today","今天",todayCount(),"hot"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length,"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
-  return `<div class="brand"><i></i><span>心响</span></div>`+nav.map(x=>x?`<button class="nav ${S.view===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
+  const upd=(D.system||{}).update||{};
+  return `<div class="brand"><i></i><span>心响</span>${upd.newer&&upd.can?`<button class="pill red" style="margin-left:auto;border:0;cursor:pointer" onclick="S.setTab='update';go('sys')" title="有新版本 ${esc(upd.latest)}">更新</button>`:""}</div>`+nav.map(x=>x?`<button class="nav ${(NAV_OF[S.view]||S.view)===x[0]&&!S.q?"on":""}" onclick="go('${x[0]}')"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON[x[0]]}</svg>${x[1]}${x[2]?`<span class="c ${x[3]}">${x[2]}</span>`:""}</button>`:`<div class="sep"></div>`).join("")+
+    `<button class="bug-link" onclick="bugOpen()">反馈问题${(D.bugs||[]).filter(b=>b.status==="open").length?`　已记 ${(D.bugs||[]).filter(b=>b.status==="open").length} 条`:""}</button>`+
     `<div class="aicard ${replying?"busy":""}"><div class="h"><svg viewBox="0 0 40 16" aria-hidden="true"><path pathLength="60" d="M0 9 L11 9 L14 5 L17 12 L20 2 L23 13 L26 9 L40 9"/></svg>${replying?`AI 正在回复 ${replying}`:"AI 空闲"}</div>${replying?now.map(sessCard).join(""):idle}</div>`;
 }
 function localBindControl(s){
@@ -1328,15 +1783,21 @@ async function unbind(key){
   try{ await api("/api/session/unbind",{key}); await load(); toast("已解除，这段对话不会再自动绑到这件事"); }
   catch(e){ toast(e.message||"没有解除成功"); }
 }
-const PICKUP_NAME={"cindy":"Cindy","claude":"Claude","terminal-claude":"终端（Claude 命令行）","terminal-codex":"终端（Codex 命令行）"};
+const PICKUP_NAME={"cindy":"Cindy","claude":"Claude","terminal-claude":"终端（Claude 命令行）","terminal-codex":"终端（Codex 命令行）","terminal-gemini":"终端（Gemini 命令行）"};
+/* another app for this one item, this once: the usual choice in 设置 stays as it is */
+function appPicker(n){
+  const apps=(D.settings||{}).apps||{}, usual=(D.settings||{}).pickup_app, others=Object.keys(PICKUP_NAME).filter(k=>apps[k]&&k!==usual);
+  if(S.pickApp!==n) return `<button class="btn ghost" onclick="S.pickApp=${n};render()">换一个 App</button>`;
+  return `<div class="chips" style="margin:8px 0 0;flex-basis:100%;align-items:center"><span class="hint" style="margin:0 4px 0 0">只这件事换，默认不变：</span>${others.map(k=>`<button class="chip on" onclick="S.pickApp=null;pickUp(${n},'${k}')">${PICKUP_NAME[k]}</button>`).join("")||'<span class="hint" style="margin:0">这台电脑上没有别的可用 App</span>'}<button class="chip" onclick="S.pickApp=null;render()">取消</button></div>`;
+}
 const pickupName = () => PICKUP_NAME[(D.settings||{}).pickup_app]||"Cindy";
-async function pickUp(n){
+async function pickUp(n,app){
   if(!LIVE) return toast("原型里不能打开");
-  const where=pickupName();
-  try{ const r=await api("/api/session/pickup",{n},30000);
+  const where=app?PICKUP_NAME[app]:pickupName(), chosen=app||(D.settings||{}).pickup_app;
+  try{ const r=await api("/api/session/pickup",app?{n,app}:{n},30000);
     if(r.pickup){ const status={queued:"已排队，等待 Cindy 投递",delivered:"Cindy 已确认送达豚豚",error:"未收到送达回执，请在豚豚对话里核对"}[r.pickup];
       toast(status+(r.navigation_failed?"；未能打开对话":"")); await load(); return; }
-    toast((D.settings||{}).pickup_app==="cindy"?"已在 Cindy 里新建任务，就在这件事的文件夹里。发第一句话（比如「继续」），它会先读这件事的来龙去脉":`已在 ${where} 里接手这件事，它会先读这件事的来龙去脉`); setTimeout(load,5000); }
+    toast(chosen==="cindy"?"已在 Cindy 里新建任务，就在这件事的文件夹里。发第一句话（比如「继续」），它会先读这件事的来龙去脉":`已在 ${where} 里接手这件事，它会先读这件事的来龙去脉`); setTimeout(load,5000); }
   catch(e){ toast(e.message||`没能打开 ${where}`); }
 }
 async function startClaude(n){
@@ -1383,7 +1844,8 @@ function drawTranscript(scroll){
   const mb=box.querySelector(".mb"); if(mb&&(scroll&&atEnd||!old)) mb.scrollTop=mb.scrollHeight;
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
-const TITLES={inbox:"收件箱",todo:"等我处理",doing:"进行中",done:"已完成",all:"全部事项",mem:"记忆",sys:"设置"};
+const NAV_OF={inbox:"today",todo:"today",doing:"today",done:"all"};   // pages that are reached from another one
+const TITLES={today:"今天",inbox:"全部消息",todo:"等我处理",doing:"进行中",done:"已完成",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
 /* 开发模式: steps the AI is waiting on you for, shown above every page */
 function approvalView(){
@@ -1403,6 +1865,20 @@ async function decide(id, allow){
 function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
 function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
 function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
+/* after drawing: in every list, give the status column and the button column the width of their widest entry */
+function alignRows(){
+  for(const list of document.querySelectorAll("#main .list, #detail .list")){
+    let pill=0, acts=0;
+    list.style.removeProperty("--pill"); list.style.removeProperty("--acts");
+    for(const row of list.querySelectorAll(":scope > .row")){
+      const p=row.querySelector(":scope > .meta > .pill"), a=row.querySelector(":scope > .acts");
+      if(p) pill=Math.max(pill,Math.ceil(p.getBoundingClientRect().width));
+      if(a&&a.children.length) acts=Math.max(acts,Math.ceil(a.scrollWidth));
+    }
+    if(pill) list.style.setProperty("--pill",pill+"px");
+    if(acts) list.style.setProperty("--acts",acts+"px");
+  }
+}
 function render(){
   const focused=document.activeElement, focusKey=focused?.dataset?.draft;
   const selection=focusKey?[focused.selectionStart,focused.selectionEnd]:null;
@@ -1411,20 +1887,21 @@ function render(){
   for(const b of document.querySelectorAll("[data-n]")) b.disabled=!!pendingFor(Number(b.dataset.n));
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
-  if(!S.view) S.view=unreadCount()?"inbox":"todo";
+  if(!S.view) S.view="today";
   if(S.ob===undefined) S.ob=(LIVE&&D.settings&&D.settings.onboarded===false)?{step:0}:null;
   if(S.item&&!byN(S.item)) S.item=null;
   const item=S.item&&byN(S.item), split=!!item&&wide(), solo=!!item&&!split;
   $("#app").classList.toggle("with-detail",split);
   putHTML("#side",sideHTML());
   const title=solo?`#${item.n}`:S.q?`搜索：${S.q}`:TITLES[S.view];
-  const count={inbox:unreadCount(),todo:D.items.filter(needsYou).length}[S.view];
+  const count={today:todayCount(),inbox:unreadCount(),todo:D.items.filter(needsYou).length}[S.view];
   putHTML("#ttl",esc(title)+(!S.q&&!solo&&count?`<span class="c">${count}</span>`:""));
-  const page=S.q?searchPage:{inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
+  const page=S.q?searchPage:{today:todayPage,inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
   let changed=putHTML("#main",approvalView()+(solo?`<div class="solo">${itemView(item)}</div>`:page()));
   changed=putHTML("#detail",split?itemView(item):"")||changed;
   changed=putHTML("#onboard",S.ob?obView():"")||changed;
-  changed=putHTML("#adder",S.adding?addView():"")||changed;
+  changed=putHTML("#adder",S.adding?addView():S.moving?moveView():S.bugging?bugView():"")||changed;
+  if(changed) alignRows();
   if(changed){
     for(const field of document.querySelectorAll("#main [data-draft], #detail [data-draft], #onboard [data-draft], #adder [data-draft]")){
       if(drafts.has(field.dataset.draft))field.value=drafts.get(field.dataset.draft);
@@ -1442,7 +1919,7 @@ function openFromHash(){
   const m=h.match(/^#item-(\d+)$/);
   if(!m||!D||!byN(+m[1])) return false;
   history.replaceState(null,"",location.pathname+location.search);
-  if(!S.view) S.view="inbox";
+  if(!S.view) S.view="today";
   openItem(+m[1]);
   return true;
 }
@@ -1454,6 +1931,19 @@ document.addEventListener("keydown",e=>{
   if(e.key==="Escape"&&S.item&&!typing) closeItem();
   if(e.key==="/"&&!typing){ e.preventDefault(); $("#q").focus(); }
 });
+// Opened by the Windows client ("#win"): Edge reuses the size of its last app window, which may be a sliver.
+function fitWindow(){
+  if(location.hash!=="#win") return;
+  history.replaceState(null,"",location.pathname+location.search);
+  try{
+    if(sessionStorage.getItem("xinxiang-fitted")) return;
+    sessionStorage.setItem("xinxiang-fitted","1");
+    if(window.outerWidth>=1180&&window.outerHeight>=720) return;
+    const w=Math.min(screen.availWidth,1320), h=Math.min(screen.availHeight,880);
+    window.resizeTo(w,h); window.moveTo(Math.max(0,(screen.availWidth-w)/2),Math.max(0,(screen.availHeight-h)/2));
+  }catch(e){}
+}
+fitWindow();
 if(LIVE){ load(); } else render();
 </script>
 </body>

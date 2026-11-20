@@ -39,6 +39,9 @@ class Config(BaseModel):
     feishu_tasks_enabled: bool = True
     # Slack as a second chat source: a user token (xoxp-); empty = env SLACK_USER_TOKEN; neither = off.
     slack_token: str = ""
+    # WeChat as a chat source, read on this computer through the wechat-cli command (the owner's own local messages).
+    wechat_enabled: bool = False
+    wechat_binary: str = ""          # path to wechat-cli; empty = find it on PATH
     # Words too common in meeting titles to link items by topic, e.g. the company name.
     topic_stopwords: list[str] = Field(default_factory=list)
     # The AI employee (worker.py): up to ten concurrent jobs, one GPT conversation per item.
@@ -67,6 +70,10 @@ class Config(BaseModel):
     worker_timeout_minutes: int = Field(default=30, ge=5, le=120)
     worker_claude: str = ""          # path to the claude command; empty = find it on PATH (used when 系统 → 本机 AI is Claude)
     worker_claude_model: str = ""    # e.g. opus / sonnet; empty = the claude account's default
+    worker_gemini: str = ""          # path to the gemini command; empty = find it on PATH (本机 Gemini)
+    worker_gemini_model: str = ""    # e.g. gemini-2.5-pro; empty = the Gemini CLI's default
+    worker_gemini_api_key: str = ""  # optional Gemini API key (GEMINI_API_KEY); empty = however the gemini command is signed in
+    worker_gemini_sandbox: bool = True  # macOS: run it in the system sandbox, so it only writes inside the job's folder
     # MCP tools the local Claude may use while working, e.g. ["mcp__claude_ai_Notion__notion-fetch"]. Empty = none
     # (safe mode). Non-empty: the owner's own hooks/plugins stay off, only these MCP tools are allowed.
     worker_mcp_tools: list[str] = Field(default_factory=list)

@@ -1,0 +1,72 @@
+name: Windows client
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        shell: pwsh
+        run: ./windows/build.ps1
+      - name: Try the build on a clean data folder
+        shell: pwsh
+        run: ./windows/smoke.ps1
+      - name: Install it silently (the way an update does) and try the installed copy
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist/Xinxiang-Setup-*.exe).FullName
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/MERGETASKS="!desktopicon,!autostart"' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Xinxiang"
+          if (-not (Test-Path "$app\python\pythonw.exe")) { throw "nothing was installed at $app" }
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*agent_matrix*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          ./windows/smoke.ps1 -App $app
+      - name: The whole way a user goes, with screenshots
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*agent_matrix*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Xinxiang" -Filter "unins*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($un) { Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait }
+          ./windows/e2e.ps1 -Setup (Get-ChildItem dist/Xinxiang-Setup-*.exe).FullName -Shots shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots/*.png
+          if-no-files-found: warn
+      - name: Unit tests on Windows (for information)
+        continue-on-error: true
+        shell: cmd
+        run: |
+          python -m pip install --disable-pip-version-check -q -e .[windows] > pip.log 2>&1
+          type pip.log
+          python -m unittest discover -s tests > unit.log 2>&1
+          powershell -NoProfile -Command "Get-Content unit.log -Tail 200 -Encoding UTF8"
+          exit /b 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Xinxiang-Windows
+          path: dist/Xinxiang-Setup-*.exe
+          if-no-files-found: error
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag 2>$null; if ($LASTEXITCODE -ne 0) { gh release create $tag --title "心响 $tag" --notes "Windows：下载 Xinxiang-Setup，双击安装，不需要另外装 Python。" }
+          gh release upload $tag (Get-ChildItem dist/Xinxiang-Setup-*.exe).FullName --clobber

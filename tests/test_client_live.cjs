@@ -87,7 +87,7 @@ const response=data=>({ok:true,status:200,json:async()=>clone(data)});
   // macOS can leave a textarea focused when a navigation button is clicked.
   const navigation=harness(async()=>response(clone(base)));
   navigation.run('openItem(1); document.activeElement={tagName:"TEXTAREA",value:"尚未发送",dataset:{draft:"say-1"},closest:()=>true}; S.view="all"; render();');
-  assert.match(navigation.elements.get("#ttl").innerHTML,/全部事项/);
+  assert.match(navigation.elements.get("#ttl").innerHTML,/事项/);
   let writes=0, markup=navigation.elements.get("#main").innerHTML;
   Object.defineProperty(navigation.elements.get("#main"),"innerHTML",{get:()=>markup,set:v=>{writes++;markup=v}});
   navigation.run('for(let i=0;i<20;i++)render()');

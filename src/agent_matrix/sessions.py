@@ -18,8 +18,8 @@ import subprocess
 from .models import MatrixError
 from .timeutil import TZ
 
-ENGINES = {"本机 GPT": "gpt", "本机 Claude": "claude"}
-FILES = {"gpt": ".thread", "claude": ".claude-session"}
+ENGINES = {"本机 GPT": "gpt", "本机 Claude": "claude", "本机 Gemini": "gemini"}
+FILES = {"gpt": ".thread", "claude": ".claude-session", "gemini": ".gemini-session"}
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{3,120}")
 
 

@@ -25,10 +25,12 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from uuid import uuid4
 
 from . import activity
 from .workenv import shim_path  # noqa: F401
+from . import promptfile
 from .jobstore import now, _db, _save, get, open_jobs, drivers, stop_record  # noqa: F401
 from . import db as database
 from .models import MatrixBusy, MatrixError
@@ -84,7 +86,7 @@ def install_shim(root):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
-            body = f'@echo off\r\ncd /d "{Path(root).resolve()}"\r\n"{sys.executable}" -m agent_matrix.drive %*\r\n'
+            body = f'@echo off\r\nset PYTHONUTF8=1\r\ncd /d "{Path(root).resolve()}"\r\n"{sys.executable}" -m agent_matrix.drive %*\r\n'
         else:
             body = f'#!/bin/sh\ncd "{Path(root).resolve()}" || exit 1\nexec "{sys.executable}" -m agent_matrix.drive "$@"\n'
         if not path.is_file() or path.read_text() != body:
@@ -138,7 +140,7 @@ def _prepare_triage(root, config, driver):
                                                  ensure_ascii=False, indent=1), encoding="utf-8")
     return {"id": f"triage-{stamp}", "kind": "triage", "title": f"判断新进来的 {len(items)} 件事", "folder": str(folder),
             "ref": {"items": items}, "output": ["triage.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
-            "instructions": (Path(root) / "prompts/triage.md").read_text(encoding="utf-8")}
+            "instructions": promptfile.read(root, "triage.md")}
 
 
 LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
@@ -175,7 +177,7 @@ def _prepare_learn(root, config, driver):
     (folder / "rules.json").write_text(json.dumps(memory.rules(root), ensure_ascii=False, indent=1), encoding="utf-8")
     return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {len(feedback)} 条反馈里学规矩", "folder": str(folder),
             "ref": {"count": len(feedback)}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
-            "instructions": (Path(root) / "prompts/learn.md").read_text(encoding="utf-8")}
+            "instructions": promptfile.read(root, "learn.md")}
 
 
 def _submit_learn(root, job):
@@ -270,7 +272,7 @@ def _prepare_meeting(root, config, driver):
         return {"id": f"meeting-{mid}", "kind": "meeting", "title": f"提取会议待办：{topic}"[:40], "folder": str(folder),
                 "ref": {"meeting_id": mid, "source": str(source), "validate": validate, "publish": publish},
                 "output": ["review.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
-                "instructions": header + "\n\n" + (Path(root) / "prompts/meeting_extract.md").read_text(encoding="utf-8")}
+                "instructions": header + "\n\n" + promptfile.read(root, "meeting_extract.md")}
     return None
 
 
@@ -314,7 +316,7 @@ def _prepare_chat(root, config, driver):
     return {"id": f"chat-{re.sub(r'[^A-Za-z0-9_-]', '', batch)}", "kind": "chat", "title": "提取聊天待办", "folder": str(folder),
             "ref": {"source": str(source), "validate": validate, "publish": publish}, "output": ["review.json"],
             "lease_until": _lease(OTHER_LEASE_MINUTES),
-            "instructions": header + "\n\n" + (Path(root) / "prompts/chat_extract.md").read_text(encoding="utf-8")}
+            "instructions": header + "\n\n" + promptfile.read(root, "chat_extract.md")}
 
 
 def _history_text(root, record_id, limit=30):
@@ -339,6 +341,16 @@ def _prepare_item(root, config, driver, skip=()):
     if not got:
         return {"skip": pick["record_id"]}
     client, rows, row, notes = got
+    try:
+        return _item_job(root, config, driver, item, client, rows, row, notes)
+    except BaseException:
+        item.release()   # claimed but not handed out: back to the queue now, not when the lease runs out
+        raise
+
+
+def _item_job(root, config, driver, item, client, rows, row, notes):
+    from .itemwork import _changes, first_prompt, resume_prompt
+    from .workenv import project
     from .prework import add_note
     add_note(root, item.rid, f"{driver} 开始处理")
     item.prepare_folder(client, rows, row, notes)
@@ -368,13 +380,68 @@ SORTING = ("triage", "meeting", "chat", "learn")   # 整理: judging new items, 
 def item_runner(root):
     """Who does the items (设置 → AI 执行 → 做事用哪个): "cindy" (Cindy's own schedule takes them) or "local"."""
     from .thread import setting
-    return "cindy" if setting(Path(root), "engine", "codex") == "cindy" else "local"
+    chosen = setting(Path(root), "engine", "codex")
+    return "cindy" if chosen == "cindy" else "driver" if str(chosen).startswith("driver:") else "local"
+
+
+def sort_runner(root):
+    """Who sorts (judging new items, meetings, chats, learning rules): "cindy" or "local"."""
+    from .thread import setting
+    chosen = setting(Path(root), "engine_sort", "")
+    return "cindy" if chosen == "cindy" else "driver" if str(chosen).startswith("driver:") else "local"
+
+
+def cindy_kinds(root):
+    """What Cindy's schedule takes: the items and/or the sorting, as the owner chose (设置 → 谁来做事)."""
+    return [*(SORTING if sort_runner(root) == "cindy" else ()), *(("item",) if item_runner(root) == "cindy" else ())]
+
+
+def local_kinds(root):
+    """What the built-in driver takes: whatever was not handed to Cindy or to an AI that said hello."""
+    return [*(SORTING if sort_runner(root) == "local" else ()), *(("item",) if item_runner(root) == "local" else ())]
+
+
+def kinds_for(root, driver):
+    """What this AI takes: the work handed to it by name (an AI that said hello), or to Cindy's schedule."""
+    from .thread import setting
+    work, sort = setting(Path(root), "engine", "codex"), setting(Path(root), "engine_sort", "")
+    mine = lambda chosen: chosen == "driver:" + str(driver) or (chosen == "cindy" and "cindy" in str(driver).lower())
+    return [*(SORTING if mine(sort) else ()), *(("item",) if mine(work) else ())]
+
+
+def has_sorting_for(root, config):
+    """Is there a meeting, a round of chats or new items to judge waiting? Cheap: a schedule's pre-run check asks."""
+    from . import thread as conversation
+    from .workenv import _check
+    try:
+        code, checked = _check(root, "agent_matrix.meeting_watch")
+        taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
+        if any(m.get("status") == "ready" and m["meeting_id"] not in taken for m in checked.get("ready") or []):
+            return "meeting"
+        if not _busy(root, "chat"):
+            code, checked = _check(root, "agent_matrix.chat_review")
+            if code == 0 and checked.get("run_model"):
+                return "chat"
+        if conversation.setting(Path(root), "auto_assign", False) and not _busy(root, "triage"):
+            from .itemwork import _pending_new
+            from .snapshot import _snapshot
+            if _pending_new(_snapshot(root).get("rows") or [], conversation.judgments(root)):
+                return "triage"
+    except Exception as exc:
+        activity.swallowed(root, "drive.has_sorting_for", exc)
+    return None
 
 
 def next_job(root, config, driver, *, skip=(), kinds=None):
     """The next piece of work for this driver, already prepared; None when there is nothing to do.
     kinds limits what it takes: e.g. Cindy takes only items, the built-in driver then only sorting work."""
     root = Path(root)
+    from . import aidrivers
+    if "cindy" in str(driver).lower() or aidrivers.is_known(root, driver):
+        # Cindy's schedule and every AI that said hello take what was handed to them, whatever their prompt asks for
+        kinds = kinds_for(root, driver)
+        if not kinds:
+            return None
     wanted = set(kinds or (*SORTING, "item"))
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
@@ -662,7 +729,10 @@ GUIDE = """# 接入心响：任何 AI 都可以驱动
 
 你是本人的 AI 员工。循环做下面几步，直到没有活：
 
-1. 运行 `{cmd} next --driver "<你的名字>" --session "<你这段对话的编号或链接>"`。返回 `{{"idle": true}}` 就结束。
+0. 先说你是谁（只用一次）：`{cmd} hello --name "<你的名字>" --app "<你所在的客户端>" --model "<你用的模型>"`。
+   从这一刻起，心响的事和整理都交给你；本人把这段话发给另一个 AI，就换成那个 AI。
+1. 运行 `{cmd} next --driver "<你的名字>" --wait 600 --session "<你这段对话的编号或链接>"`。没活时它会等着，有活立刻返回；
+   返回 `{{"idle": true}}` 就再运行一次，一直守着，直到本人说停。
    `--session` 让本人在心响里看到你在做哪件事，并能直接打开你这段对话；没有就省略。
 2. 返回的 JSON 里有 `folder`（工作文件夹）、`instructions`（这件活的完整说明）、`output`（要写出的文件）。
    进入 folder，按 instructions 做；需要飞书资料时用 `lark-cli`（只读）。
@@ -677,7 +747,11 @@ GUIDE = """# 接入心响：任何 AI 都可以驱动
 def main(argv=None):
     from .config import load
     p = argparse.ArgumentParser(prog="xinxiang", description="心响驱动协议：任何 AI 都能领活、交活")
-    p.add_argument("command", choices=["next", "step", "say", "submit", "ask", "release", "guide", "status", "gate"])
+    p.add_argument("command", choices=["hello", "next", "step", "say", "submit", "ask", "release", "guide", "status", "gate"])
+    p.add_argument("--name", help="hello：你是谁（Antigravity、Gemini、Claude Code、Cursor …）")
+    p.add_argument("--app", default="", help="hello：你所在的客户端")
+    p.add_argument("--model", default="", help="hello：你现在用的模型")
+    p.add_argument("--wait", type=int, default=0, help="next：没活时最多等这么多秒再回来（期间有活立刻给你）")
     p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn")
     p.add_argument("--driver", default=os.environ.get("XINXIANG_DRIVER") or "外部 AI")
     p.add_argument("--job"); p.add_argument("--text"); p.add_argument("--question"); p.add_argument("--tried")
@@ -696,17 +770,37 @@ def main(argv=None):
             print(json.dumps({"open": [{k: j[k] for k in ("id", "kind", "title", "driver", "step")} for j in open_jobs(root)],
                               "drivers": drivers(root)}, ensure_ascii=False))
             return 0
+        from . import aidrivers
+        if args.command == "hello":
+            # an AI says who it is: from now on it does the items and the sorting, until another one says hello
+            try:
+                me = aidrivers.hello(root, args.name or args.driver, app=args.app, model=args.model)
+            except ValueError as exc:
+                raise MatrixError(str(exc)) from None
+            print(json.dumps({"ok": True, "you": me["name"], "now": "心响的事和整理都交给你了",
+                              "next": f'{_cmd()} next --driver "{me["name"]}" --wait 600'}, ensure_ascii=False))
+            return 0
+        aidrivers.seen(root, args.driver)
         config = load(path)
         if args.command == "gate":
             # a schedule's pre-run check: exit 0 = there is an item to do, 2 = nothing (skip this round, no tokens)
             if item_runner(root) == "cindy" and has_items_for(root, config):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))
                 return 0
+            sorting = sort_runner(root) == "cindy" and has_sorting_for(root, config)
+            if sorting:
+                print(json.dumps({"ok": True, "work": sorting}, ensure_ascii=False))
+                return 0
             print(json.dumps({"ok": True, "work": None}, ensure_ascii=False))
             return 2
         if args.command == "next":
             kinds = [k.strip() for k in (args.kinds or "").split(",") if k.strip()] or None
             job = next_job(root, config, args.driver, kinds=kinds)
+            until = time.monotonic() + max(0, min(args.wait, 3600))
+            while not job and time.monotonic() < until:   # nothing yet: stay on the line, so the AI need not poll
+                time.sleep(5)
+                aidrivers.seen(root, args.driver)
+                job = next_job(root, config, args.driver, kinds=kinds)
             if job and args.session:
                 from .sessions import bind
                 bind(root, job["id"], args.session)

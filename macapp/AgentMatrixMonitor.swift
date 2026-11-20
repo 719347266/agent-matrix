@@ -8,6 +8,14 @@ import UserNotifications
 
 /// The 心响 main window: the local client served by the always-on listener (127.0.0.1 only).
 @MainActor
+/// The band at the top of the window: drag it to move the window, double-click it to zoom, like any title bar.
+final class DragStrip: NSView {
+    static let height: CGFloat = 28
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { window?.performZoom(nil) } else { window?.performDrag(with: event) }
+    }
+}
+
 final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     static let shared = CenterWindow()
     private var window: NSWindow?
@@ -40,15 +48,26 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
             clientURL = parts.url ?? base
         }
         if window == nil {
-            let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: WKWebViewConfiguration())
+            // The page runs up under the title bar (no separate strip on top); it is told so, to leave room for
+            // the window buttons and a band to drag the window by.
+            let setup = WKWebViewConfiguration()
+            setup.userContentController.addUserScript(WKUserScript(
+                source: "document.documentElement.classList.add('macapp')", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: setup)
             web.autoresizingMask = [.width, .height]
             web.navigationDelegate = self
             let links = ClientLinks(clientURL: clientURL!)
             self.links = links  // WKWebView keeps its UI delegate weakly.
             web.uiDelegate = links
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
-                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            w.title = "心响"; w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = self
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.title = "心响"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
+            let holder = NSView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800))
+            holder.addSubview(web)
+            let strip = DragStrip(frame: NSRect(x: 0, y: 800 - DragStrip.height, width: 1180, height: DragStrip.height))
+            strip.autoresizingMask = [.width, .minYMargin]
+            holder.addSubview(strip)
+            w.contentView = holder; w.isReleasedWhenClosed = false; w.delegate = self
             w.minSize = NSSize(width: 720, height: 520)
             if !w.setFrameUsingName("XinxiangMain") { w.center() }
             w.setFrameAutosaveName("XinxiangMain")

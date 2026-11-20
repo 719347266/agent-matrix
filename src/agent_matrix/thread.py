@@ -124,6 +124,32 @@ def add_deliverable(root, record_id, *, summary, url, confirm="", assumptions=()
         db.close()
 
 
+def edit_deliverable(root, record_id, version, *, url=None, summary=None):
+    """The owner corrects one version in place (its link, its wording). False when there is no such version."""
+    db = _db(root)
+    try:
+        with db:
+            if not db.execute("SELECT 1 FROM deliverables WHERE record_id=? AND version=?", (record_id, version)).fetchone():
+                return False
+            if url is not None:
+                db.execute("UPDATE deliverables SET url=? WHERE record_id=? AND version=?", (url, record_id, version))
+            if summary is not None:
+                db.execute("UPDATE deliverables SET summary=? WHERE record_id=? AND version=?", (summary, record_id, version))
+        return True
+    finally:
+        db.close()
+
+
+def remove_deliverable(root, record_id, version):
+    """Take one version away (a link the AI made up, a duplicate). The other versions keep their numbers."""
+    db = _db(root)
+    try:
+        with db:
+            return db.execute("DELETE FROM deliverables WHERE record_id=? AND version=?", (record_id, version)).rowcount > 0
+    finally:
+        db.close()
+
+
 def assumptions_of(markdown):
     """The bullet list under「我做的假设」in a delivery."""
     part = markdown.split("我做的假设", 1)[1] if "我做的假设" in markdown else ""

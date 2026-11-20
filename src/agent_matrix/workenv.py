@@ -204,6 +204,10 @@ def claude_binary(config):
     return getattr(config, "worker_claude", "") or shutil.which("claude")
 
 
+def gemini_binary(config):
+    return getattr(config, "worker_gemini", "") or shutil.which("gemini")
+
+
 def kick(root, config=None, force=False):
     """Start `run` in the background unless it is already running. Cheap; safe to call every minute.
 

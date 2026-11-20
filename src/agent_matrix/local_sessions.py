@@ -332,7 +332,7 @@ def open_local(root,config,key):
 CINDY_APP = Path("/Applications/Cindy.app")
 CLAUDE_APP = Path("/Applications/Claude.app")
 CHATGPT_APP = Path("/Applications/ChatGPT.app")
-PICKUP = ("cindy", "claude", "terminal-claude", "terminal-codex")   # where the owner picks an item up
+PICKUP = ("cindy", "claude", "terminal-claude", "terminal-codex", "terminal-gemini")   # where the owner picks an item up
 GPT_OPEN = ("here", "chatgpt", "terminal")                         # where a built-in GPT conversation opens
 
 
@@ -341,7 +341,8 @@ def apps(config=None):
     from . import workenv
     return {"cindy": CINDY_APP.is_dir(), "claude": CLAUDE_APP.is_dir(), "chatgpt": CHATGPT_APP.is_dir(),
             "terminal-claude": bool(workenv.claude_binary(config)) if config else bool(__import__("shutil").which("claude")),
-            "terminal-codex": bool(workenv.codex_binary(config)) if config else bool(__import__("shutil").which("codex"))}
+            "terminal-codex": bool(workenv.codex_binary(config)) if config else bool(__import__("shutil").which("codex")),
+            "terminal-gemini": bool(workenv.gemini_binary(config)) if config else bool(__import__("shutil").which("gemini"))}
 
 
 def pickup_choice(root, found=None):
@@ -439,9 +440,13 @@ def start_in_cindy(root, config, item, history=""):
     return {"opened": "cindy", "folder": str(folder)}
 
 
-def pick_up(root, config, item, history=""):
-    """Pick an item up in the app the owner chose (设置 → AI 对话), with the whole context in the item's folder."""
-    where = pickup_choice(root, apps(config))
+def pick_up(root, config, item, history="", where=None):
+    """Pick an item up with the whole context in the item's folder: in the app chosen for this one item (`where`),
+    else in the owner's usual one (设置 → 打开对话). Choosing for one item changes nothing else."""
+    found = apps(config)
+    if where is not None and (where not in PICKUP or not found.get(where)):
+        raise MatrixError("这台电脑上没有这个 App。")
+    where = where or pickup_choice(root, found)
     if where == "cindy":
         return start_in_cindy(root, config, item, history)
     if where == "claude":
@@ -454,7 +459,7 @@ def start_in_terminal(root, config, item, history="", cli="claude"):
     from . import sessions, workenv
     import shlex
     folder = write_context(root, item, history)
-    binary = (workenv.claude_binary if cli == "claude" else workenv.codex_binary)(config)
+    binary = {"claude": workenv.claude_binary, "gemini": workenv.gemini_binary}.get(cli, workenv.codex_binary)(config)
     if not binary:
         raise MatrixError(f"没有找到 {cli} 命令行。")
     prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
@@ -546,7 +551,8 @@ def cindy_schedule(home=None):
     when = lambda ms: datetime.fromtimestamp(int(ms) / 1000, TZ).strftime("%m-%d %H:%M") if ms else ""
     # the hook may run `xinxiang gate` itself or through the project's own check script: either way the gate's
     # answer ({"ok": .., "work": ..}) shows up in the hook output Cindy keeps for each run
-    gate_seen = bool(last and '"work"' in (last.get("hook") or ""))
+    # (looked for in the last few rounds: the round going on right now has no answer written down yet)
+    gate_seen = bool(last and last.get("answered"))
     return {"id": sid, "status": status, "cron": cron, "folder": folder or "", "engine": kind,
             # True: the gate answers; False: no hook at all; None: a hook that has not run yet, so not known
             "hooked": True if hook and ("gate" in hook or gate_seen) else (None if hook and not last else False),
@@ -562,17 +568,22 @@ def _cindy_last_run(db, schedule_id):
     if not {"schedule_id", "fired_at", "status"} <= cols:
         return None
     hook = "pre_run_hook_result" if "pre_run_hook_result" in cols else "NULL"
-    row = db.execute(f"SELECT fired_at, status, {hook} FROM schedule_runs WHERE schedule_id=? ORDER BY fired_at DESC LIMIT 1",
-                     (schedule_id,)).fetchone()
-    if not row:
+    rows = db.execute(f"SELECT fired_at, status, {hook} FROM schedule_runs WHERE schedule_id=? ORDER BY fired_at DESC LIMIT 6",
+                      (schedule_id,)).fetchall()
+    if not rows:
         return None
-    fired, status, out = row
+
+    def said(out):
+        try:
+            return str(json.loads(out).get("stdout") or "") if out else ""   # Cindy keeps the hook result as JSON
+        except (ValueError, AttributeError):
+            return str(out or "")
+    fired, status, out = rows[0]
     result = {"skipped": "没活，跳过", "running": "正在做", "failed": "出错了", "error": "出错了"}.get(status, "领了活" if status else "")
-    try:
-        said = json.loads(out).get("stdout") or "" if out else ""   # Cindy keeps the hook result as JSON
-    except (ValueError, AttributeError):
-        said = out or ""
-    return {"at": fired, "result": result, "hook": str(said)}
+    return {"at": fired, "result": result, "hook": said(out), "answered": any('"work"' in said(o) for _, _, o in rows)}
+
+
+_CINDY_SEEN = [0, [], None]   # when, projects, schedule: the last time Cindy's records could be read
 
 
 def cindy_status(root):
@@ -582,8 +593,10 @@ def cindy_status(root):
     from .thread import setting
     try:
         projects, schedule = cindy_projects(), cindy_schedule()
+        _CINDY_SEEN[:] = [time.time(), projects, schedule]
     except ISSUES:
-        projects, schedule = [], None
+        # Cindy was writing its records at that moment: what was read a moment ago still holds
+        projects, schedule = (_CINDY_SEEN[1], _CINDY_SEEN[2]) if time.time() - _CINDY_SEEN[0] < 900 else ([], None)
     chosen = setting(Path(root), "cindy_project", "") or (projects[0]["folder"] if projects else "")
     ok = bool(schedule and schedule["status"] == "active" and schedule["hooked"] is True)
     return {"installed": True, "projects": projects, "project": chosen, "schedule": schedule, "ready": ok,
@@ -607,9 +620,9 @@ def cindy_setup_text(root):
 - prompt 用下面这段：
 
 你是本人在 Cindy 里的 AI 员工，替心响做事。一次只做一件，做完就结束。
-1. 运行 `{cmd} next --driver Cindy --kinds item`，拿到这件事（folder、instructions、job）。返回 {{"idle": true}} 就直接结束。
+1. 运行 `{cmd} next --driver Cindy`，拿到这件事（folder、instructions、job）。返回 {{"idle": true}} 就直接结束。
 2. 回复第一行写「心响 #编号 标题」。
-3. 这件事属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。
+3. kind 是 item 的，属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。kind 是 meeting、chat、triage、learn 的是整理类的活：只按 instructions 做，不要套用项目模板。
 4. 按 instructions 做，交付文件写到 folder 里；按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
 
 建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查都对就行。"""

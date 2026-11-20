@@ -367,8 +367,8 @@ def add_followups(client, candidates, now, per_message=10):
     for m in candidates.get("messages") or []:
         by_chat.setdefault(m.get("chat_id"), []).append(m)
     for cid, msgs in by_chat.items():
-        if not cid:
-            continue
+        if not cid or any(str(m.get("message_id") or "").startswith("wechat:") for m in msgs):
+            continue   # WeChat: not read again here (slow); the two lines before each message are already attached
         slack_msgs = [(m, slack.link_parts(str(m.get("message_id")))) for m in msgs]
         if any(parts for _, parts in slack_msgs):
             later = {}  # one read per thread (None = the channel itself, with its threads)

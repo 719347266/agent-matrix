@@ -151,6 +151,13 @@ def build_state(root):
         if dv and not any(m["kind"] == "deliver" for m in msgs):
             msgs += [{"at": v["at"], "from": "ai", "kind": "deliver", "text": v["summary"] or "交付", "url": v["url"], "driver": "AI"} for v in dv]
         threads[n], deliverables[n] = msgs, dv
+    try:  # which project each item is in: where the owner put it, or a guess shown as a guess
+        from . import projects
+        project_list, placed = projects.all(root), projects.place(root, rows)
+    except Exception:
+        project_list, placed = [], {}
+    for item in items:
+        item["project"], item["project_by"] = placed.get(item["rid"], (None, None))
     from . import local_sessions
     external = local_sessions.view(root, sessions_of, running_sessions, items)
     from . import cindy_pickup
@@ -199,13 +206,25 @@ def build_state(root):
             settings["cindy"]["setup_text"] = local_sessions.cindy_setup_text(root)
     except Exception:
         settings["cindy"] = {}
-    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude")}
+    try:
+        from . import aidrivers
+        settings["drivers"] = aidrivers.known(root)   # every AI that came and said who it is
+    except Exception as exc:
+        activity.swallowed(root, "app.drivers", exc)
+        settings["drivers"] = []
+    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude", "gemini")}
     try:  # where conversations open and items are picked up (设置 → AI 对话)
         from . import local_sessions
         from .config import load as load_config
         found = local_sessions.apps(load_config(root / "config.yaml"))
         cfg = load_config(root / "config.yaml")
-        settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model}
+        settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model, "gemini": cfg.worker_gemini_model}
+        settings["want_feishu"] = bool(thread.setting(root, "want_feishu", False))
+        settings["want_slack"] = bool(thread.setting(root, "want_slack", False))
+        settings["want_wechat"] = bool(thread.setting(root, "want_wechat", False))
+        from . import setupshim
+        settings["setup_prompt"] = setupshim.prompt(root)   # the one message the owner pastes to their own AI
+        settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
                         sources={"meetings": cfg.meeting_watch_enabled, "chats": cfg.chat_watch_enabled, "tasks": cfg.feishu_tasks_enabled})
@@ -217,8 +236,28 @@ def build_state(root):
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
             **memory_view(root, items),
-            "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "threads": threads, "deliverables": deliverables,
-            "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external, "system": {**system_info(root), "store": store_info(root)}}
+            "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
+            "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
+            "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}, "bugs": _bugs(root)}
+
+
+def _bugs(root):
+    try:
+        from . import bugs
+        return bugs.all(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.bugs", exc)
+        return []
+
+
+def _update_status(root):
+    try:
+        from . import update
+        update.check_soon(root)   # looks at the releases page in the background, a few times a day at most
+        return update.status(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.update_status", exc)
+        return {}
 
 
 def page_version():
@@ -272,27 +311,45 @@ def system_info(root):
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
         slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
+        wechat_status = json.loads((db.execute("SELECT value FROM kv WHERE key='wechat:status'").fetchone() or ["null"])[0])
+        feishu_health = json.loads((db.execute("SELECT value FROM kv WHERE key='feishu:health'").fetchone() or ["null"])[0])
         notion_url = json.loads((db.execute("SELECT value FROM kv WHERE key='notion:url'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat, slack, notion_url = {}, None, None, None
+        status, beat, slack, notion_url, wechat_status, feishu_health = {}, None, None, None, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
     except (TypeError, ValueError):
         pass
     from .config import load
-    from .workenv import claude_binary, codex_binary
+    from .workenv import claude_binary, codex_binary, gemini_binary
     try:
         config = load(Path(root) / "config.yaml")
-        found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config))}
+        found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config)), "gemini": bool(gemini_binary(config))}
         mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
         record = {"review_every": config.chat_review_every_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
                   "notion": bool(config.notion_database_id), "notion_url": notion_url,
                   "skip_chats": config.chat_skip_chats, "skip_words": config.chat_skip_words, "recent_chats": _recent_chats(root)}
     except Exception:
         found, record = {}, {}
-    return {"engines": found, "slack": slack, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    try:  # what the setup check needs to say "do this next" in the owner's own words and paths
+        import shutil
+        lark, npm = bool(shutil.which(getattr(config, "lark_binary", "") or "lark-cli")), bool(shutil.which("npm"))
+    except Exception:
+        lark, npm = False, False
+    here = {"platform": "windows" if sys.platform.startswith("win") else "mac" if sys.platform == "darwin" else "other",
+            "root": str(Path(root).resolve()), "python": re.sub(r"(?i)pythonw(\.exe)$", r"python\1", sys.executable), "lark_cli": lark, "npm": npm,
+            "client": bool(os.environ.get("XINXIANG_CLIENT"))}   # started by the desktop client, which keeps the listener alive itself
+    try:
+        from .sources import wechat as wechat_source
+        wechat = {"installed": bool(wechat_source.binary(config)), "enabled": bool(config.wechat_enabled), "status": wechat_status}
+    except Exception:
+        wechat = {"installed": False, "enabled": False, "status": None}
+    # connected on paper is not enough: a few failed sign-in checks in a row mean nothing is being read
+    broken = bool(feishu_health and feishu_health.get("ok") is False and feishu_health.get("count", 0) >= 3)
+    record["feishu_broken"] = {"why": feishu_health.get("why") or "", "since": feishu_health.get("since") or ""} if broken and record.get("feishu_ready") else None
+    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -380,8 +437,15 @@ class Handler(BaseHTTPRequestHandler):
             page = PAGE.read_text(encoding="utf-8")
             page = page.replace("/*__PAGE__*/\"\"", json.dumps(page_version())).replace("/*__TOKEN__*/\"\"", json.dumps(self.server.token))
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+        if path.startswith("/doc/"):  # a deliverable kept on this computer (no Feishu): readable like any document link
+            from . import localdoc
+            parts = path.split("/")
+            text = localdoc.read(self.server.root, *parts[2:4]) if len(parts) == 4 else None
+            if text is None:
+                return self._send(404, "这份交付已经不在这台电脑上了。".encode("utf-8"), "text/plain; charset=utf-8")
+            return self._send(200, localdoc.page(text).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/icon.png":  # the app icon doubles as the page logo
-            icon = Path(__file__).resolve().parents[2] / "macapp/AppIcon.png"
+            icon = Path(__file__).resolve().parent / "app/icon.png"   # travels with the program, on every system
             if icon.is_file():
                 return self._send(200, icon.read_bytes(), "image/png")
             return self._send(404, {"error": "no icon"})
@@ -422,6 +486,8 @@ class Handler(BaseHTTPRequestHandler):
                     memory.add_rule(root, body["add"], "本人在心响里加的", source="本人")
                 if body.get("remove"):
                     memory.remove_rule(root, body["remove"])
+                if body.get("confirm"):
+                    memory.confirm_rule(root, body["confirm"])
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
                 return self._send(200, {"ok": True, "rules": memory.rules(root)})
@@ -434,6 +500,64 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/wechat/check":  # can WeChat be read right now (takes about 20 seconds)
+                from .config import load
+                from .sources import wechat
+                return self._send(200, wechat.check(load(root / "config.yaml")))
+            if path == "/api/bugs":  # write a problem down, take one away, or get them all as one text to hand in
+                from . import bugs
+                if body.get("add"):
+                    bugs.add(root, body["add"])
+                if body.get("remove"):
+                    bugs.remove(root, body["remove"])
+                if body.get("sent"):
+                    bugs.mark_sent(root)
+                out = {"ok": True, "bugs": bugs.all(root)}
+                if body.get("report"):
+                    out.update(report=bugs.report(root), issue_url=bugs.issue_url(root))
+                return self._send(200, out)
+            if path == "/api/update":  # look for a newer version, or get it
+                from . import update
+                if body.get("install"):
+                    return self._send(200, update.start(root))
+                update.check(root, force=True)
+                return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/item/deliverable":  # the owner adds, corrects or removes a deliverable version
+                from . import deliverables
+                from .models import MatrixBusy, MatrixError
+                try:
+                    return self._send(200, {"ok": True, **deliverables.change(
+                        root, int(body.get("n") or 0), str(body.get("op") or ""), version=body.get("v"),
+                        url=body.get("url"), summary=body.get("summary"))})
+                except MatrixBusy:
+                    return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/projects":  # the owner's projects: add one, rename one, take one away
+                from . import projects
+                from .models import MatrixError
+                try:
+                    made = projects.create(root, body["add"]) if body.get("add") else None
+                    if body.get("rename"):
+                        projects.rename(root, body["rename"], body.get("name"))
+                    if body.get("remove"):
+                        projects.remove(root, body["remove"])
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True, "id": made, "projects": projects.all(root)})
+            if path == "/api/item/project":  # put items in a project (0 = none)
+                from . import projects
+                from .models import MatrixError
+                from .snapshot import _snapshot
+                rid = {int(r.get("编号") or 0): r.get("record_id") for r in _snapshot(root).get("rows") or []}
+                ids = [rid[int(n)] for n in body.get("numbers") or [] if rid.get(int(n))]
+                if not ids:
+                    return self._send(400, {"ok": False, "reply": "找不到这个编号的事项。"})
+                try:
+                    projects.assign(root, ids, body.get("project"))
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True})
             if path == "/api/item/link":  # string two items together (or take the link away): earlier → later
                 from . import itemlinks
                 from .models import MatrixError
@@ -456,19 +580,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "retried": itemstore.retry_failed(root)})
             if path == "/api/settings":
                 from . import thread
-                if body.get("engine") in {"codex", "claude", "cindy"}:
+                from . import aidrivers
+                ai_names = {aidrivers.setting_of(d["name"]) for d in aidrivers.known(root)}
+                if body.get("engine") in {"codex", "claude", "gemini", "cindy"} | ai_names:
                     thread.set_setting(root, "engine", body["engine"])
                 from . import approvals
                 if body.get("dev_mode") in approvals.MODES:
                     thread.set_setting(root, "dev_mode", body["dev_mode"])
+                for want in ("want_feishu", "want_slack", "want_wechat"):   # the owner means to connect it: the setup check then says how
+                    if want in body:
+                        thread.set_setting(root, want, bool(body[want]))
                 if "cindy_project" in body:
                     thread.set_setting(root, "cindy_project", str(body["cindy_project"] or "")[:500])
-                if body.get("engine_sort") in {"codex", "claude"}:
+                if body.get("engine_sort") in {"codex", "claude", "gemini", "cindy"} | ai_names:
                     thread.set_setting(root, "engine_sort", body["engine_sort"])
-                if any(k in body for k in ("worker_model", "worker_claude_model")):  # model names live in config.yaml
+                if "worker_gemini_api_key" in body:  # kept in config.yaml on this computer, handed to the gemini command only
                     from .config import load as load_config, save as save_config
                     config = load_config(root / "config.yaml")
-                    for key in ("worker_model", "worker_claude_model"):
+                    config.worker_gemini_api_key = str(body["worker_gemini_api_key"] or "").strip()[:200]
+                    save_config(root / "config.yaml", config)
+                if any(k in body for k in ("worker_model", "worker_claude_model", "worker_gemini_model")):  # model names live in config.yaml
+                    from .config import load as load_config, save as save_config
+                    config = load_config(root / "config.yaml")
+                    for key in ("worker_model", "worker_claude_model", "worker_gemini_model"):
                         if key in body:
                             value = " ".join(str(body[key] or "").split())[:80]
                             if key == "worker_model" and not value:
@@ -484,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if "onboarded" in body:
                     thread.set_setting(root, "onboarded", bool(body["onboarded"]))
-                switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled")
+                switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled", "wechat_enabled")
                 if (body.get("intake_mode") in ("all", "accepted", "manual") or body.get("brief_channel") in ("feishu", "local")
                         or any(k in body for k in switches)):
                     from .config import load as load_config, save as save_config
@@ -587,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .config import load
                 from .engines import test_engine
                 name = body.get("engine")
-                if name not in {"codex", "claude"}:
+                if name not in {"codex", "claude", "gemini"}:
                     return self._send(400, {"ok": False, "reply": "不认识这个 AI。"})
                 return self._send(200, {"ok": True, **test_engine(root, load(root / "config.yaml"), name)})
             if path == "/api/session/unbind":
@@ -610,8 +744,9 @@ class Handler(BaseHTTPRequestHandler):
                         "rejected": _clean(row.get("退回意见"))}
                 try:
                     start = {"/api/session/cindy": local_sessions.start_in_cindy, "/api/session/start": local_sessions.start_for_item}.get(path, local_sessions.pick_up)
+                    extra = {"where": str(body["app"])} if path == "/api/session/pickup" and body.get("app") else {}   # this item, this once
                     return self._send(200, {"ok": True, **start(root, load(root / "config.yaml"), item,
-                                                               history=_history_text(root, row["record_id"], 40))})
+                                                               history=_history_text(root, row["record_id"], 40), **extra)})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
             if path == "/api/session/open":
@@ -651,6 +786,11 @@ def start_background(root, config):
         thread.backfill(root)
         inbox.import_history(root)
         drive.install_shim(root)  # `~/.agent-matrix/bin/xinxiang`: the command any AI calls
+        try:
+            from . import update
+            update.settle(root)   # an update that was under way has landed
+        except Exception as exc:
+            activity.swallowed(root, "app.update_settle", exc)
         from . import meeting_review
         meeting_review.backfill_meetings(root)  # earlier meetings become history (quietly, once)
     except Exception as exc:

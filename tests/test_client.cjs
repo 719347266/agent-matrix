@@ -44,9 +44,181 @@ function reset(item) {
   evaluate('S.working=true'); // a late job snapshot cannot resurrect a closed item
   assert.equal(evaluate("isWorking(byN(45))"), false);
   assert.match(evaluate("statusOf(byN(45))[0]"),/已完成/);
-  const settings = ["ai","src","data","general"].map(tab => evaluate(`S.setTab="${tab}"; sysPage()`)).join("");
-  for (const label of ["Slack","Notion","只存本机","本机 AI","整理","新手引导"]) assert.ok(settings.includes(label), label);
-  assert.ok(!evaluate('S.setTab="ai"; sysPage()').includes("Slack"), "one settings tab at a time");
+  const pane = tab => evaluate(`S.setTab="${tab}"; sysPage()`).split('class="set-pane"')[1];
+  const settings = ["tool","mode","ai","talk","store","notify","look","guide","adv"].map(pane).join("");
+  for (const label of ["Slack","Notion","只存本机","本机 AI","整理","打开引导","跟随系统","接着做"]) assert.ok(settings.includes(label), label);
+  assert.ok(!pane("ai").includes("Slack"), "one settings page at a time");
+  // the menu says what is chosen now, and a page only shows what follows from the choices made
+  evaluate('D.settings={engine:"cindy",engine_sort:"codex",intake_mode:"manual"}; D.system={record:{feishu_ready:false,mode:"device"},store:{local:true}}');
+  const menu = evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0];
+  for (const label of ["都没接","手动模式","Cindy","只存本机","只在心响里"]) assert.ok(menu.includes(label), label);
+  assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
+  assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
+  assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
+  evaluate('D.settings={intake_mode:"all"}; D.system={record:{feishu_ready:true,mode:"feishu"}}');
+  assert.match(pane("mode"),/自动开工/); assert.match(pane("store"),/飞书多维表格/);
+  // setup check: every essential thing says whether it works, and what to do next when it does not
+  evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"",aliases:[]},engine_tests:{}}; D.system={listener:"没在运行",engines:{codex:false,claude:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac",root:"/x/心响",python:"/x/py",lark_cli:true}}');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["listener","engine","me"]);
+  let check = pane("check");
+  for (const label of ["还差 3 步才能用","复制给 AI 的话","copySetupPrompt()","不用自己动手","去填"]) assert.ok(check.includes(label), label);
+  assert.doesNotMatch(check,/npm install|install-listen|class="cmd"/, "the owner is not handed commands: the AI gets them");
+  assert.match(evaluate('S.setTab="check"; sysPage()').split('class="set-pane"')[0],/配置检查<\/span><span class="val">还差 3 步/);
+  assert.match(evaluate("todayPage()"),/还差 3 步才能用/);
+  evaluate('D.system.here.client=true'); assert.match(pane("check"),/从开始菜单重新打开/); evaluate('D.system.here.client=false');
+  evaluate('D.settings.me={name:"王小明",aliases:[]}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"11-20 10:00"}}; D.system.engines.codex=true; D.system.listener="运行中"');
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(pane("check"),/都配好了，可以用/); assert.doesNotMatch(evaluate("todayPage()"),/才能用/);
+  evaluate('D.settings.engine_tests={}'); assert.match(pane("check"),/testEngine\('codex'\)">测试连接/);
+  evaluate('D.settings.intake_mode="manual"; D.settings.me={name:""}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"x"}}; D.system.record.feishu_ready=false');
+  assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
+  for (const label of ["没接，可以不接","去接"]) assert.ok(pane("check").includes(label), label);
+  for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)"]) assert.ok(pane("tool").includes(label), label);
+  // the guide's step for office tools: two plain switches when nothing is connected, no technical rows
+  let step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
+  for (const label of ["我要接飞书","我要接 Slack","我要接微信","都不开也能用"]) assert.ok(step.includes(label), label);
+  assert.doesNotMatch(step,/Token|后台程序|实时/, "nothing a newcomer cannot read");
+  evaluate('D.settings.want_slack=true');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接Slack/);
+  evaluate('D.settings.want_slack=false; D.system.record.feishu_ready=true; D.settings.sources={meetings:true,chats:true,tasks:false}');
+  step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
+  for (const label of ["已接入","读会议","读聊天","读飞书任务","我要接 Slack"]) assert.ok(step.includes(label), label);
+  assert.doesNotMatch(step,/后台程序|实时|我要接飞书/);
+  evaluate('D.system.record.feishu_ready=false; D.settings.sources={}');
+  // WeChat: wanted is a step for the AI; installed and on shows whether it can be read
+  evaluate('D.settings.want_wechat=true'); assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接微信/);
+  assert.match(pane("tool"),/setSetting\('want_wechat',false\)/);
+  evaluate('D.settings.want_wechat=false; D.settings.me={name:"王小明"}; D.system.wechat={installed:true,enabled:true,status:{ok:true,at:"11-20 14:00",behind:true}}');
+  let wx = pane("tool");
+  for (const label of ["读微信","setSetting('wechat_enabled',false)","上次读取 11-20 14:00","只看得到每个聊天的最后一条","wechatCheck()"]) assert.ok(wx.includes(label), label);
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(pane("check"),/已接入微信/);
+  assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/办公工具<\/span><span class="val">微信/);
+  evaluate('D.system.wechat.status={ok:false,error:"微信没有打开",at:"11-20 14:02"}');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["tools"]); assert.match(pane("tool"),/微信没有打开/);
+  evaluate('D.system.wechat=null; D.settings.me={name:""}');
+  evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接飞书/);
+  evaluate('D.settings.want_feishu=false');
+  assert.equal(evaluate("OB.at(-1).key"),"check");
+  // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself
+  evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,kind:"client",checked:"11-20 12:00"}');
+  let up = pane("update");
+  for (const label of ["现在的版本　0.4.0","updateNow()","更新到 0.4.1","检查更新","数据不动"]) assert.ok(up.includes(label), label);
+  assert.match(evaluate('S.setTab="update"; sysPage()').split('class="set-pane"')[0],/版本与更新<\/span><span class="val">有新版 0.4.1/);
+  assert.match(evaluate("sideHTML()"),/title="有新版本 0.4.1">更新</);
+  evaluate('D.system.update={current:"0.4.1",latest:"0.4.1",newer:false,can:false,kind:"git",why:"这份是开发中的版本"}');
+  up = pane("update"); assert.match(up,/已是最新/); assert.doesNotMatch(up,/updateNow/); assert.match(up,/开发中的版本/);
+  assert.doesNotMatch(evaluate("sideHTML()"),/>更新</);
+  evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,doing:"正在下载 0.4.1…"}'); assert.match(pane("update"),/正在下载 0\.4\.1…/);
+  evaluate('D.system.update=null');
+  // deliverables: each version can be corrected or removed, one can be added; the item follows the newest
+  const keepD = evaluate("JSON.stringify([D.items,D.deliverables,D.threads])");
+  evaluate('D.items=[{n:9,title:"写方案",status:"待验收",who:"AI",url:"https://x/docx/AI"}]; D.deliverables={9:[{v:1,at:"11-20 10:00",summary:"AI 写的",url:"https://x/docx/AI"}]}; D.threads={9:[]}; S.dvEdit=null');
+  let dv = evaluate("deliverView(byN(9))");
+  for (const label of ["交付","v1","AI 写的","dvOpen(9,1)","编辑","删掉","＋ 加一版"]) assert.ok(dv.includes(label), label);
+  evaluate('S.dvEdit={n:9,v:1}'); assert.match(evaluate("deliverView(byN(9))"),/id="dv-url"[^>]*value="https:\/\/x\/docx\/AI"/);
+  await evaluate('dvSend(9,{op:"edit",v:1,url:"https://x/docx/MINE",summary:"我自己建的"},"改好了")');
+  assert.deepEqual(plain("[D.deliverables[9][0].url,D.deliverables[9][0].summary,byN(9).url,S.dvEdit]"),["https://x/docx/MINE","我自己建的","https://x/docx/MINE",null]);
+  await evaluate('dvSend(9,{op:"add",url:"https://x/docx/V2",summary:""},"加上了")');
+  assert.deepEqual(plain("[D.deliverables[9].map(v=>v.v),byN(9).url]"),[[1,2],"https://x/docx/V2"]);
+  await evaluate('dvSend(9,{op:"remove",v:2},"删掉了")'); await evaluate('dvSend(9,{op:"remove",v:1},"删掉了")');
+  assert.deepEqual(plain("[D.deliverables[9],byN(9).url]"),[[],null]); assert.equal(evaluate("deliverView(byN(9))"),"");
+  assert.match(evaluate("itemView(byN(9))"),/dvOpen\(9,0\);return false">填链接/);
+  // another app for one item: offered there, and the usual one in settings is not what changes
+  evaluate('D.settings={pickup_app:"cindy",apps:{cindy:true,claude:true,"terminal-codex":true,"terminal-claude":false}}; S.pickApp=null');
+  assert.match(evaluate("sessionsTab(byN(9))"),/S\.pickApp=9;render\(\)">换一个 App/); assert.doesNotMatch(evaluate("sessionsTab(byN(9))"),/go\('sys'\)/);
+  evaluate('S.pickApp=9'); let apps = evaluate("sessionsTab(byN(9))");
+  for (const label of ["只这件事换，默认不变","pickUp(9,'claude')","pickUp(9,'terminal-codex')"]) assert.ok(apps.includes(label), label);
+  assert.doesNotMatch(apps,/pickUp\(9,'cindy'\)|terminal-claude/); assert.equal(evaluate("D.settings.pickup_app"),"cindy");
+  evaluate(`[D.items,D.deliverables,D.threads]=${keepD}; D.settings={}; S.pickApp=null`);
+  // a problem can be written down from anywhere, and they are handed in together
+  evaluate('D.bugs=[]; S.bugging=null');
+  assert.match(evaluate("sideHTML()"),/onclick="bugOpen\(\)">反馈问题</);
+  evaluate('S.bugging={}'); assert.match(evaluate("bugView()"),/id="bug-text"/);
+  evaluate('S.bugging=null; D.bugs=[{id:2,at:"11-20 15:20",text:"更新一直转圈",status:"open"},{id:1,at:"11-20 15:14",text:"窗口太窄",status:"sent"}]');
+  assert.match(evaluate("sideHTML()"),/反馈问题　已记 1 条/);
+  let bugs = pane("bugs");
+  for (const label of ["1 条待提交","更新一直转圈","窗口太窄","已提交","bugHandIn('copy')","bugHandIn('github')","bugOp({remove:2})"]) assert.ok(bugs.includes(label), label);
+  assert.match(evaluate('S.setTab="bugs"; sysPage()').split('class="set-pane"')[0],/问题反馈<\/span><span class="val">1 条待提交/);
+  await evaluate("bugOp({remove:2})"); assert.doesNotMatch(pane("bugs"),/bugHandIn/);
+  evaluate('D.bugs=null');
+  // an update that never landed says so instead of spinning for ever
+  evaluate('D.system.update={current:"0.4.2",latest:"0.4.6",newer:true,can:true,failed:"更新没有完成。再点一次试试"}');
+  assert.match(pane("update"),/更新没有完成/); assert.match(pane("update"),/onclick="updateNow\(\)">更新到 0\.4\.6/);
+  evaluate('D.system.update=null');
+  // Feishu connected on paper but unreadable: it is a step, with the reason, wherever "connected" was shown
+  evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"王小明"},engine_tests:{codex:{ok:true,at:"x"}}}; D.system={listener:"运行中",engines:{codex:true},record:{feishu_ready:true,mode:"feishu",feishu_broken:{why:"飞书登录过期了，要重新登录一次",since:"11-20 14:36"}},store:{local:true},here:{platform:"windows",client:true}}');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["feishu"]);
+  for (const label of ["还差 1 步才能用","飞书登录过期了","11-20 14:36","都收不进来"]) assert.ok(pane("check").includes(label), label);
+  assert.match(pane("tool"),/现在读不到/); assert.match(evaluate("todayPage()"),/还差 1 步才能用/);
+  assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/飞书（读不到）/);
+  evaluate('D.system.record.feishu_broken=null'); assert.deepEqual(plain("setupProblems()"),[]); assert.doesNotMatch(pane("tool"),/现在读不到/);
+  // any AI the message was sent to: it says who it is, shows up by name, and is missed when it stops asking
+  evaluate('D.settings={engine:"driver:Antigravity",engine_sort:"driver:Antigravity",intake_mode:"all",me:{name:"王小明"},engine_tests:{},drivers:[{name:"Antigravity",app:"Antigravity",model:"gemini-3",seen:"11-20 16:40",online:true},{name:"Claude Code",app:"终端",model:"opus",seen:"11-20 09:00",online:false}]}; D.system={listener:"运行中",engines:{codex:false,claude:false,gemini:false},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"windows",client:true}}');
+  assert.deepEqual(plain("setupProblems()"),[]);
+  let any = pane("ai");
+  for (const label of ["发给谁，谁就来做","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","上次来 11-20 09:00"]) assert.ok(any.includes(label), label);
+  assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/谁来做事<\/span><span class="val">Antigravity</);
+  assert.match(pane("check"),/做事的 AI：Antigravity/); assert.match(pane("check"),/正在领活（gemini-3）/);
+  evaluate('D.settings.drivers[0].online=false');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["engine"]); assert.match(pane("check"),/现在不在（上次来是 11-20 16:40）/);
+  evaluate('D.settings={engine:"codex",intake_mode:"manual",me:{name:""},engine_tests:{},drivers:[]}');
+  assert.match(pane("check"),/不用装：把上面那段话发给你常用的 AI/);
+  // three local AIs and Cindy, for doing items and for sorting
+  evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
+  let ai = pane("ai");
+  for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活","晚几分钟"]) assert.ok(ai.includes(label), label);
+  assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use");
+  assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
+  evaluate('D.system.engines.gemini=false'); assert.match(pane("check"),/还没有装 本机 Gemini/);
+  // rules the AI learned wait on top for the owner's yes or no
+  evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
+  let mem = evaluate("memPage()");
+  assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
+  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
+  // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
+  assert.doesNotMatch(mem,/年卡要不要打折|在等的|会上的结论/);
+  evaluate('D.memory.recent=[{label:"还没定",text:"投流方案怎么定",source:"周会",at:"11-19"},{label:"定了",text:"先做周视图",source:"周会",at:"11-19"}]; S.all="以后要确认的"');
+  let later = evaluate("allPage()");
+  for (const label of ["年卡要不要打折","ruleOp({waiting_done:7})","投流方案怎么定","以后要确认的 2<"]) assert.ok(later.includes(label), label);
+  assert.doesNotMatch(later,/先做周视图/, "what is decided is not something to confirm later");
+  evaluate('S.all="进行中"'); assert.match(evaluate("allPage()"),/S\.all='以后要确认的';S\.picking=false;render\(\)">以后要确认的 2</);
+  assert.doesNotMatch(evaluate("allPage()"),/会上的结论/);
+  evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
+  // projects: the owner's own sorting; a guess is marked, and moving is one call
+  const keep = evaluate("JSON.stringify(D.items)");
+  evaluate('D.projects=[{id:1,name:"标签体系",color:"#5856d6"},{id:2,name:"招人",color:"#ff9500"}]; D.items=[{n:1,title:"写标签文档",status:"进行中",who:"AI",project:1,project_by:"本人"},{n:2,title:"标签更新",status:"待验收",who:"AI",project:1,project_by:"猜"},{n:3,title:"发招聘",status:"进行中",who:"我"}]; S.all="进行中"; S.proj="all"');
+  let all = evaluate("allPage()");
+  for (const label of ["全部项目","标签体系","招人","未归类","新建项目","多选"]) assert.ok(all.includes(label), label);
+  assert.match(all,/标签体系<\/span><span class="val need">1 件等你/);
+  assert.match(evaluate("itemView(byN(2))"),/系统猜的/); assert.doesNotMatch(evaluate("itemView(byN(1))"),/系统猜的/);
+  assert.match(evaluate("itemView(byN(3))"),/未归类/);
+  await evaluate("moveItems([2,3],2)");
+  assert.deepEqual(plain("D.items.map(i=>[i.project,i.project_by])"),[[1,"本人"],[2,"本人"],[2,"本人"]]);
+  evaluate('S.proj=2'); assert.doesNotMatch(evaluate("allPage()").split('class="proj-head"')[1],/写标签文档/);
+  evaluate('S.picking=true; togglePick(1); S.moving=[...S.pick]');
+  assert.match(evaluate("moveView()"),/移到哪个项目/); assert.match(evaluate("moveView()"),/moveItems\(\[1\],0\)/);
+  await evaluate("moveItems([1],0)");
+  assert.deepEqual(plain("[byN(1).project,S.picking,S.moving,S.pick.size]"),[null,false,null,0]);
+  await evaluate("removeProject(2)");
+  assert.deepEqual(plain("[D.projects.length,byN(3).project,S.proj]"),[1,null,"all"]);
+  evaluate(`D.items=${keep}; D.projects=[]; S.proj="all"`);
+  assert.doesNotMatch(evaluate("allPage()"),/未归类|多选|全部项目|proj-grid/, "no projects yet: a plain list, nothing standing alone beside it");
+  assert.match(evaluate("allPage()"),/openNewProject\(\)">＋ 新建项目/);
+  evaluate("S.newProj=true"); assert.match(evaluate("allPage()"),/id="proj-name"/); evaluate("S.newProj=false");
+  // 今天: what waits on the owner, the owner's own work due, what the AI is doing and today's messages, on one page
+  const keepAll = evaluate("JSON.stringify([D.items,D.inbox])");
+  evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"}];
+    D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"brief",title:"旧早报",text:"旧\\n第二行",read:true}]; S.view=null; S.openMsg=null; S.working=false; render()`);
+  assert.equal(evaluate("S.view"),"today");
+  const today = evaluate("todayPage()");
+  for (const label of ["要你处理","等验收的事","问你的事","你自己要做的","今天要交的事","AI 排队","排队的事","今天的消息","早报","全部消息"]) assert.ok(today.includes(label), label);
+  assert.doesNotMatch(today,/别人的事|旧早报/);
+  assert.equal(today.split("等验收的事").length,2,"an item listed above is not repeated as a message");
+  assert.equal(evaluate("todayCount()"),2);
+  const side = evaluate("sideHTML()");
+  assert.match(side,/今天<span class="c hot">2</); assert.doesNotMatch(side,/收件箱|等我处理|进行中|已完成/);
+  evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('today'\)"/);
+  evaluate(`[D.items,D.inbox]=${keepAll}; S.view="todo"`);
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
   for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
     evaluate(`S.ob={step:${step}}`);
@@ -129,14 +301,14 @@ function reset(item) {
   assert.deepEqual(plain("[byN(1).after,byN(2).before]"),[[],[]]);
   assert.equal(evaluate('CMD.link(2,"https://x/docx/NEW")'),"2 交付链接 https://x/docx/NEW");
   // Every path is the owner's choice: what is taken in, which tools are read, where briefs go; and items can be added by hand.
-  evaluate('D.settings={intake_mode:"accepted",sources:{meetings:true,chats:false,tasks:true},brief_channel:"feishu"}; D.system={record:{feishu_ready:true}}; S.setTab="src"');
-  let src=evaluate("sysPage()");
+  evaluate('D.settings={intake_mode:"accepted",sources:{meetings:true,chats:false,tasks:true},brief_channel:"feishu"}; D.system={record:{feishu_ready:true}}; S.setTab="tool"');
+  let src=evaluate("sysPage()")+pane("mode");
   for (const label of ["全能模式","全自动模式","手动模式","读会议","读聊天","读飞书任务","Slack"]) assert.ok(src.includes(label), label);
   assert.match(src,/class="mode on" aria-pressed="true" onclick="setSetting\('intake_mode','accepted'\)"/);
-  assert.match(evaluate('S.setTab="general"; sysPage()'),/早晚简报也发到飞书/);
+  assert.match(pane("notify"),/早晚简报也发到飞书/);
   evaluate('D.system={record:{feishu_ready:false}}');   // nothing connected: no Feishu switches, notifications stay in the app
-  assert.match(evaluate('S.setTab="src"; sysPage()'),/没有接入/); assert.doesNotMatch(evaluate("sysPage()"),/读会议/);
-  assert.match(evaluate('S.setTab="general"; sysPage()'),/所有通知都只在心响里/);
+  assert.match(pane("tool"),/没有接入/); assert.doesNotMatch(pane("tool"),/读会议/);
+  assert.match(pane("notify"),/所有通知都只在心响里/);
   await evaluate('setSetting("intake_mode","all")');
   assert.deepEqual(plain("[D.settings.intake_mode,D.settings.auto_assign,D.settings.prework_enabled]"),["all",true,true]);
   evaluate("addOpen()"); assert.match(evaluate("addView()"),/要做什么[\s\S]*谁来做[\s\S]*创建/); evaluate("S.adding=null");

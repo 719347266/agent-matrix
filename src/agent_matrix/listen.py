@@ -45,6 +45,53 @@ def log(*parts):
     print(datetime.now(TZ).strftime("%m-%d %H:%M:%S"), *parts, flush=True)
 
 
+def wechat_loop(root, path, wake=None):
+    """WeChat is read in its own thread: the command takes minutes, so nothing waits for it and the project lock
+    is only held for the moment the result is filed."""
+    from .sources import wechat
+    while True:
+        time.sleep(120)
+        try:
+            config = load(path)
+            if not config.wechat_enabled or config.intake_mode == "manual":
+                continue
+            state = State(root / "state/state.db")
+            try:
+                seen = wechat.cursors(state)
+            finally:
+                state.close()
+            now = datetime.now(TZ)
+            try:
+                read = wechat.collect(config, seen, now)
+            except MatrixError as exc:
+                state = State(root / "state/state.db")
+                try:
+                    state.set("wechat:status", {"ok": False, "at": now.strftime("%m-%d %H:%M"), "error": str(exc)[:160]})
+                finally:
+                    state.close()
+                log("wechat", "→", str(exc)[:160])
+                continue
+            for _ in range(20):   # the lock is busy only for moments
+                try:
+                    with exclusive_lock(root / "state"):
+                        state = State(root / "state/state.db")
+                        try:
+                            out = wechat.store(config, root, state, now, read)
+                        finally:
+                            state.close()
+                    break
+                except MatrixBusy:
+                    time.sleep(3)
+            else:
+                continue
+            if out["chats"] or out["candidates"]:
+                log("timer", "wechat", "→", json.dumps(out, ensure_ascii=False))
+            if out["candidates"] and wake:
+                wake(config)
+        except Exception as exc:
+            log("wechat failed", type(exc).__name__, str(exc)[:200])
+
+
 def backup_loop(root, path):
     """心响 keeps the items on this computer; this copies every change to the Feishu table in the background,
     in its own thread, so a slow or failing Feishu never holds up a click or another timer."""
@@ -146,7 +193,16 @@ class Listener:
             state = State(self.root / "state/state.db")
             try:
                 client = Feishu(config, self.root)
-                client.verify_owner(client.auth())
+                try:
+                    client.verify_owner(client.auth())
+                except MatrixError as exc:
+                    if not isinstance(exc, MatrixBusy) and not client.feishu_free():
+                        from .feishu import note_health
+                        note_health(state, exc)   # every timer stops here while Feishu cannot be used: say so on the page
+                    raise
+                if not client.feishu_free():
+                    from .feishu import note_health
+                    note_health(state)
                 return job(config, client, state)
             finally:
                 state.close()
@@ -254,6 +310,18 @@ class Listener:
             return True
         return False
 
+    def trouble(self, name, what):
+        """A timer went wrong: always in the log; told to the owner once per half hour for the same trouble, not
+        every minute."""
+        log("timer failed", name, what[:300])
+        key, seen = f"{name}|{what[:80]}", getattr(self, "troubles", {})
+        if time.time() - seen.get(key, 0) < 1800:
+            return
+        seen[key] = time.time()
+        self.troubles = seen
+        from . import activity
+        activity.log(self.root, "error", f"后台定时任务出错：{name}", detail=what, status="failed")
+
     def wake_worker(self, config, force=False):
         """The AI employee runs in its own process; this only starts it when it is idle."""
         try:
@@ -316,14 +384,24 @@ class Listener:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
-                now = datetime.now(TZ)
-                out = {"prep": meeting_prep.run(config, client, state, now, horizon=31, lead=20)}
-                if state.get("brief-v1:migration-stage") == "v1_active":
-                    out["catch_up"] = catch_up_briefs(config, client, state, now)
-                    out["weekly"] = weekly_review.run(config, client, state, now)
                 from . import monitor
-                out["cindy_alert"] = monitor.alert_if_cindy_stalled(self.root, client, state, now)
-                out["meetings"] = self.meeting_check(config, client, state, now)
+                now = datetime.now(TZ)
+                parts = [("prep", lambda: meeting_prep.run(config, client, state, now, horizon=31, lead=20))]
+                if state.get("brief-v1:migration-stage") == "v1_active":
+                    parts += [("catch_up", lambda: catch_up_briefs(config, client, state, now)),
+                              ("weekly", lambda: weekly_review.run(config, client, state, now))]
+                parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now)),
+                          ("meetings", lambda: self.meeting_check(config, client, state, now))]
+                out, wrong = {}, []
+                for name, part in parts:   # each on its own: one that fails must not stop the others
+                    try:
+                        out[name] = part()
+                    except MatrixBusy:
+                        raise
+                    except Exception as exc:
+                        wrong.append(f"{name}: {type(exc).__name__} {str(exc)[:120]}")
+                if wrong:
+                    self.trouble("minute", "；".join(wrong))
                 return out
             jobs.append(("minute", minute))
         if self.every("snapshot", 120):
@@ -377,9 +455,7 @@ class Listener:
             except MatrixBusy:
                 self.last[name] = 0  # try again on the next loop
             except Exception as exc:
-                log("timer failed", name, type(exc).__name__, str(exc)[:200])
-                from . import activity
-                activity.log(self.root, "error", f"监听定时任务出错：{name}", detail=str(exc), status="failed")
+                self.trouble(name, f"{type(exc).__name__} {str(exc)[:300]}")
 
     def run(self):
         config = load(self.path)
@@ -389,6 +465,7 @@ class Listener:
         from .app import start_background
         served = start_background(self.root, config)
         threading.Thread(target=backup_loop, args=(self.root, self.path), daemon=True, name="xinxiang-backup").start()
+        threading.Thread(target=wechat_loop, args=(self.root, self.path, self.wake_worker), daemon=True, name="xinxiang-wechat").start()
         log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:
