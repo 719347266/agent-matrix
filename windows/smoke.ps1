@@ -45,6 +45,11 @@ try {
     if (-not $state.system.here.client) { Fail "the page does not know it runs in the client" }
     $cfg = Get-Content "$Data\config.yaml" -Raw -Encoding UTF8
     if ($cfg -notmatch "item_store: device") { Fail "first config is not the no-account one" }
+    # nothing 心响 starts may flash a terminal: a console child started the usual way must have no window
+    $quiet = & "$App\python\python.exe" -c "import agent_matrix, subprocess, sys; child='import ctypes;print(ctypes.windll.kernel32.GetConsoleWindow())'; a=subprocess.run([sys.executable,'-c',child],capture_output=True,text=True).stdout.strip(); b=subprocess.run([sys.executable,'-c',child],capture_output=True,text=True,creationflags=0x10).stdout.strip(); print(getattr(subprocess.Popen,'_xinxiang_quiet',False), a, b)"
+    Write-Host "console windows: patched / window handle of a child started normally / with its own new console = $quiet"
+    if ($quiet -notmatch "^True ") { Fail "console programs are not started hidden" }
+    if ($quiet -notmatch "^True 0 ") { Fail "a console child started the usual way still has a window ($quiet)" }
     Write-Host "OK: page up, item #$($made.n) added and filed, Chinese intact, listener running. platform=$($state.system.here.platform) npm=$($state.system.here.npm)"
 } finally {
     Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*agent_matrix*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

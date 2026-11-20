@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import time
 from . import activity
 from .models import Config, MatrixError
 from .delivery import require_message_receipt
@@ -45,6 +46,10 @@ class FeishuError(MatrixError):
         self.not_sent = False
         self.scope = scope
         super().__init__(f"飞书调用失败（{self.code}）；已停止，不自动重放写操作。")
+
+
+AUTH_KEEP_SECONDS = 45
+_AUTH = {}   # (command, project) → (when, answer): the last good sign-in check
 
 
 class Feishu:
@@ -103,6 +108,12 @@ class Feishu:
         if self.feishu_free():  # nothing to verify: no Feishu account is used
             ok = {"status": "ready", "available": True, "verified": True}
             return {"app_id": self.config.app_id, "user": dict(ok), "bot": dict(ok)}
+        # Every timer checks who is signed in before it works; several fire in the same second. Ask the command
+        # once and let the others within the next moments use that answer (only a good answer is kept).
+        key = (resolve_lark(self.config.lark_binary), str(self.root))
+        kept = _AUTH.get(key)
+        if self.runner is subprocess.run and kept and time.monotonic() - kept[0] < AUTH_KEEP_SECONDS:
+            return json.loads(kept[1])
         raw = self._exec(["auth", "status", "--json", "--verify"], auth=True)
         raw = raw.get("data", raw)
         user = raw.get("identities", {}).get("user", {})
@@ -114,6 +125,10 @@ class Feishu:
         for kind in ("user", "bot"):
             v = ids.get(kind, {})
             result[kind] = {k: v.get(k) for k in ("status", "available", "verified", "openId", "userName", "tokenStatus")}
+        if self.runner is subprocess.run and all(result[k].get("verified") and result[k].get("status") == "ready" for k in ("user", "bot")):
+            _AUTH[key] = (time.monotonic(), json.dumps(result))
+        else:
+            _AUTH.pop(key, None)
         return result
 
     def verify_owner(self, status, *, require_user=True):
