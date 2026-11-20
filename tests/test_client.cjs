@@ -75,7 +75,7 @@ function reset(item) {
   for (const label of ["setSetting('want_feishu',true)","setSetting('want_slack',true)"]) assert.ok(pane("tool").includes(label), label);
   // the guide's step for office tools: two plain switches when nothing is connected, no technical rows
   let step = evaluate('OB.find(o=>o.key==="source").body(D.settings,D.system)');
-  for (const label of ["我要接飞书","我要接 Slack","两个都不开也能用"]) assert.ok(step.includes(label), label);
+  for (const label of ["我要接飞书","我要接 Slack","我要接微信","都不开也能用"]) assert.ok(step.includes(label), label);
   assert.doesNotMatch(step,/Token|后台程序|实时/, "nothing a newcomer cannot read");
   evaluate('D.settings.want_slack=true');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接Slack/);
@@ -84,6 +84,17 @@ function reset(item) {
   for (const label of ["已接入","读会议","读聊天","读飞书任务","我要接 Slack"]) assert.ok(step.includes(label), label);
   assert.doesNotMatch(step,/后台程序|实时|我要接飞书/);
   evaluate('D.system.record.feishu_ready=false; D.settings.sources={}');
+  // WeChat: wanted is a step for the AI; installed and on shows whether it can be read
+  evaluate('D.settings.want_wechat=true'); assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接微信/);
+  assert.match(pane("tool"),/setSetting\('want_wechat',false\)/);
+  evaluate('D.settings.want_wechat=false; D.settings.me={name:"王小明"}; D.system.wechat={installed:true,enabled:true,status:{ok:true,at:"11-20 14:00",behind:true}}');
+  let wx = pane("tool");
+  for (const label of ["读微信","setSetting('wechat_enabled',false)","上次读取 11-20 14:00","只看得到每个聊天的最后一条","wechatCheck()"]) assert.ok(wx.includes(label), label);
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(pane("check"),/已接入微信/);
+  assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/办公工具<\/span><span class="val">微信/);
+  evaluate('D.system.wechat.status={ok:false,error:"微信没有打开",at:"11-20 14:02"}');
+  assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["tools"]); assert.match(pane("tool"),/微信没有打开/);
+  evaluate('D.system.wechat=null; D.settings.me={name:""}');
   evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(pane("check"),/你想接飞书/);
   evaluate('D.settings.want_feishu=false');

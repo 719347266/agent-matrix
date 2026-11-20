@@ -45,6 +45,53 @@ def log(*parts):
     print(datetime.now(TZ).strftime("%m-%d %H:%M:%S"), *parts, flush=True)
 
 
+def wechat_loop(root, path, wake=None):
+    """WeChat is read in its own thread: the command takes minutes, so nothing waits for it and the project lock
+    is only held for the moment the result is filed."""
+    from .sources import wechat
+    while True:
+        time.sleep(120)
+        try:
+            config = load(path)
+            if not config.wechat_enabled or config.intake_mode == "manual":
+                continue
+            state = State(root / "state/state.db")
+            try:
+                seen = wechat.cursors(state)
+            finally:
+                state.close()
+            now = datetime.now(TZ)
+            try:
+                read = wechat.collect(config, seen, now)
+            except MatrixError as exc:
+                state = State(root / "state/state.db")
+                try:
+                    state.set("wechat:status", {"ok": False, "at": now.strftime("%m-%d %H:%M"), "error": str(exc)[:160]})
+                finally:
+                    state.close()
+                log("wechat", "→", str(exc)[:160])
+                continue
+            for _ in range(20):   # the lock is busy only for moments
+                try:
+                    with exclusive_lock(root / "state"):
+                        state = State(root / "state/state.db")
+                        try:
+                            out = wechat.store(config, root, state, now, read)
+                        finally:
+                            state.close()
+                    break
+                except MatrixBusy:
+                    time.sleep(3)
+            else:
+                continue
+            if out["chats"] or out["candidates"]:
+                log("timer", "wechat", "→", json.dumps(out, ensure_ascii=False))
+            if out["candidates"] and wake:
+                wake(config)
+        except Exception as exc:
+            log("wechat failed", type(exc).__name__, str(exc)[:200])
+
+
 def backup_loop(root, path):
     """心响 keeps the items on this computer; this copies every change to the Feishu table in the background,
     in its own thread, so a slow or failing Feishu never holds up a click or another timer."""
@@ -389,6 +436,7 @@ class Listener:
         from .app import start_background
         served = start_background(self.root, config)
         threading.Thread(target=backup_loop, args=(self.root, self.path), daemon=True, name="xinxiang-backup").start()
+        threading.Thread(target=wechat_loop, args=(self.root, self.path, self.wake_worker), daemon=True, name="xinxiang-wechat").start()
         log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:

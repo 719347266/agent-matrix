@@ -63,6 +63,24 @@ class SetupCheckTests(unittest.TestCase):
         self.assertTrue(by["slack"]["ok"])
         self.assertEqual(setupcheck.parse(["want_slack=true"]), {"want_slack": True})
 
+    def test_wechat_wanted_reading_behind_or_broken(self):
+        thread.set_setting(self.root, "want_wechat", True)
+        by = {x["key"]: x for x in self.report(BARE)["items"]}
+        steps = "\n".join(by["wechat"]["steps"])
+        self.assertTrue(by["wechat"]["need"] and by["me"]["need"])
+        for words in ("npm install -g @canghe_ai/wechat-cli", "wechat-cli init", "同意再做", "set wechat_enabled=true"):
+            self.assertIn(words, steps)
+        on = {**BARE, "wechat": {"installed": True, "enabled": True, "status": {"ok": True, "behind": True}}}
+        w = {x["key"]: x for x in self.report(on)["items"]}["wechat"]
+        self.assertFalse(w["need"])                                          # it works, only less well: not a blocker
+        self.assertIn("最后一条", w["say"]); self.assertIn("wechat-cli init", w["steps"][0])
+        broken = {**BARE, "wechat": {"installed": True, "enabled": True, "status": {"ok": False, "error": "微信没有打开"}}}
+        w = {x["key"]: x for x in self.report(broken)["items"]}["wechat"]
+        self.assertTrue(w["need"] and "微信没有打开" in w["say"])
+        fine = {**BARE, "wechat": {"installed": True, "enabled": True, "status": {"ok": True}}}
+        self.assertTrue({x["key"]: x for x in self.report(fine)["items"]}["wechat"]["ok"])
+        self.assertEqual(setupcheck.parse(["wechat_enabled=true"]), {"wechat_enabled": True})
+
     def test_the_desktop_client_and_another_ai(self):
         thread.set_setting(self.root, "engine", "gemini")
         system = {**BARE, "here": {**BARE["here"], "platform": "windows", "client": True}}

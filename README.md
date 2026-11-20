@@ -92,7 +92,7 @@
 
 | 配什么 | 可以选 |
 |---|---|
-| 办公工具 | 飞书（会议、聊天、飞书任务可以分别开关）、Slack，或者都不接，事项在心响里自己新建 |
+| 办公工具 | 飞书（会议、聊天、飞书任务可以分别开关）、Slack、微信，或者都不接，事项在心响里自己新建 |
 | 别人找你的事怎么处理 | 全能模式（都接进来，AI 直接做）、全自动模式（你答应了才接）、手动模式（都不接） |
 | 谁来做事 | Cindy、本机 GPT、本机 Claude、本机 Gemini，或者接入别的能运行命令的 AI；「做事」和「整理」可以分别交给不同的 AI（都交给 Cindy 也行） |
 | 事项存在哪 | 本机 + 飞书多维表格备份、本机 + Notion 同步、只存本机 |
@@ -118,6 +118,8 @@ cp config.example.yaml config.yaml
 实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`；卡片按钮要在"事件与回调 → 回调配置"里开启 `card.action.trigger`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
 
 **事项记在哪**：心响「系统 → 事项记在哪」可选飞书多维表格、Notion 或只存本机（`item_store: local / notion / device`）。选 Notion 或本机时完全不需要飞书：飞书会议、群聊、任务这几个来源随之关闭，Slack 照常。Notion 要一个 Internal integration 的 Secret 和一个共享给它的页面，心响在页面下建「心响事项」数据库并单向同步，在 Notion 里改的内容会被下一次同步覆盖。
+
+**微信（可选）**：靠本机的 `wechat-cli`（npm 包 `@canghe_ai/wechat-cli`，先运行一次 `wechat-cli init` 提取读取钥匙）读你自己电脑上的微信，只在本机读、不上传；在「设置 → 办公工具」打开「读微信」，或在 `config.yaml` 写 `wechat_enabled: true`。和飞书聊天、Slack 用同一套规则过滤，筛中的话才交给模型。这个命令比较慢（列会话约 20 秒、读一个聊天约 30 秒），所以每两分钟一轮、一轮最多读 4 个有新消息的聊天；读不到聊天记录时（钥匙比微信最新的消息库旧）只看每个聊天的最后一条，并在配置检查里提示重新提取。试跑：`python -m agent_matrix.sources.wechat --hours 24`（只打印数量，加 `--show` 才打印筛中的话）。
 
 **Slack（可选）**：在 `config.yaml` 写 `slack_token: xoxp-...`（或设环境变量 `SLACK_USER_TOKEN`），常驻监听每分钟用搜索拉一次新的 Slack 消息，按和飞书聊天一样的规则过滤，到整理时间一起提取，来源链接直接跳回那条 Slack 消息。用户 token 需要这些权限：`search:read`（一次搜出所有新消息；没有它就退回逐个会话读，只读前 25 个）`channels:history` `groups:history` `im:history` `mpim:history` `channels:read` `groups:read` `im:read` `mpim:read` `users:read`。
 

@@ -954,9 +954,11 @@ function autoSwitch(){
 }
 /* settings the server keeps as they are sent */
 const SOURCE_KEY={meeting_watch_enabled:"meetings",chat_watch_enabled:"chats",feishu_tasks_enabled:"tasks"};
+/* settings that live elsewhere on the page data, so a click shows at once */
 async function setSetting(key, on){
   D.settings = {...(D.settings||{}), [key]:on};
   if(SOURCE_KEY[key]) D.settings.sources={...(D.settings.sources||{}), [SOURCE_KEY[key]]:on};
+  if(key==="wechat_enabled"&&D.system) D.system.wechat={...(D.system.wechat||{}),enabled:on};
   if(key==="intake_mode"){ if(on!=="manual") D.settings.prework_enabled=true; if(on==="all") D.settings.auto_assign=true; }
   render();
   if(LIVE){ try{ await api("/api/settings",{[key]:on}); toast("已保存"); }catch(e){ toast("没保存成功，连不上本机服务"); } load(); }
@@ -1035,8 +1037,9 @@ const OB=[
     return `<div class="list">${r.feishu_ready
         ?setRow("飞书","已接入。下面三样分别决定从哪里收进你的事。",`<span class="eng-state ok">已接入</span>`)+setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))+setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))+setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks))
         :want("want_feishu",st.want_feishu,"飞书","想自动收进会议、聊天里别人找你的事，就打开。")}
-      ${s.slack?setRow("Slack",`已接入 ${esc(s.slack.team||"")}。`,`<span class="eng-state ok">已接入</span>`):want("want_slack",st.want_slack," Slack","团队用 Slack 沟通的话打开，会从里面找出别人找你的事。")}</div>
-      ${r.feishu_ready||s.slack||st.want_feishu||st.want_slack?"":`<p class="hint" style="margin:10px 2px 0">两个都不开也能用：要做的事自己新建，AI 照样帮你做。</p>`}`; }},
+      ${s.slack?setRow("Slack",`已接入 ${esc(s.slack.team||"")}。`,`<span class="eng-state ok">已接入</span>`):want("want_slack",st.want_slack," Slack","团队用 Slack 沟通的话打开，会从里面找出别人找你的事。")}
+      ${wxOn(s)?setRow("微信","已接入。只在这台电脑上读，不上传。",toggle("wechat_enabled",true)):want("want_wechat",st.want_wechat,"微信","工作上的事常在微信里说的话打开。只在这台电脑上读，不上传。")}</div>
+      ${r.feishu_ready||s.slack||wxOn(s)||st.want_feishu||st.want_slack||st.want_wechat?"":`<p class="hint" style="margin:10px 2px 0">都不开也能用：要做的事自己新建，AI 照样帮你做。</p>`}`; }},
   {key:"mode",title:"收到消息怎么处理",sub:"选一种。以后在设置里随时能换。",body:st=>modeCards(st)},
   {key:"ai",title:"让哪个 AI 来做事",sub:"选一个并测一下能不能连通。以后可以随时换。",body:(st,s)=>{ const found=s.engines||{}, cindy=st.cindy||{};
     return `<div class="list">${setRow("做事","",choice("engine",st.engine||"codex",[["cindy","Cindy",cindy.installed===false?false:true],...LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]])]))}
@@ -1063,7 +1066,7 @@ const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemin
 /* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
 function setMenu(st,s){ const r=s.record||{};
   const left=setupProblems().length, upd=s.update||{};
-  return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean).join("、")||"都没接"],
+  return [["",[["check","check",left?"#ff3b30":"#34c759","配置检查",left?`还差 ${left} 步`:"都好了"]]],["接入",[["tool","tool","#007aff","办公工具",[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、")||"都没接"],
       ["mode","inbox","#ff9500","收到消息怎么处理",(MODES.find(m=>m[0]===(st.intake_mode||"all"))||MODES[0])[1]]]],
     ["AI",[["ai","ai","#5856d6","谁来做事",ENGINE_NAME[st.engine||"codex"]||""],["talk","chat","#34c759","打开对话",pickupName()]]],
     ["数据与通知",[["store","db","#00c7be","事项存在哪",STORE_NAME[r.mode||"feishu"]||""],["notify","bell","#ff3b30","通知",r.feishu_ready&&st.brief_channel!=="local"?"心响 + 飞书简报":"只在心响里"]]],
@@ -1079,9 +1082,10 @@ const cmdBox = c => `<div class="cmd"><code>${esc(c)}</code><button class="btn" 
 const howSteps = steps => steps.map(([text,c],k)=>`<div class="step-n"><i>${k+1}</i><div>${text}${c?cmdBox(c):""}</div></div>`).join("");
 const TERM = () => ((D.system||{}).here||{}).platform==="windows"?"「开始」菜单里的 PowerShell":"「终端」（聚焦搜索里搜“终端”）";
 const ASK_AI="把上面那段话发给你的 AI，它会";
+const wxOn = s => !!((s.wechat||{}).enabled&&(s.wechat||{}).installed);
 function setupChecks(){
   const st=D.settings||{}, s=D.system||{}, r=s.record||{}, here=s.here||{}, found=s.engines||{}, tests=st.engine_tests||{}, me=st.me||{};
-  const manual=st.intake_mode==="manual", reading=!manual&&(r.feishu_ready||s.slack), busy=S.testing||{};
+  const manual=st.intake_mode==="manual", reading=!manual&&(r.feishu_ready||s.slack||wxOn(s)), busy=S.testing||{};
   const local=(name,job)=>{ const label=ENGINE_NAME[name], t=tests[name];
     if(found[name]===false) return {state:"bad",text:`这台电脑上还没有装 ${label}，${job}。${ASK_AI}装好，中途会请你登录一次账号。`};
     if(busy[name]) return {state:"todo",text:"正在测试，最多要一两分钟…"};
@@ -1097,9 +1101,10 @@ function setupChecks(){
   out.push({key:"engine",need:true,title:`做事的 AI：${ENGINE_NAME[eng]||eng}`,...(eng!=="cindy"?local(eng,"交给 AI 的事没人做"):cindyState(c,"交给 AI 的事不会开工"))});
   const sort=st.engine_sort||"codex";
   if(reading&&sort!==eng) out.push({key:"sort",need:true,title:`整理消息的 AI：${ENGINE_NAME[sort]||sort}`,...(sort!=="cindy"?local(sort,"会议和聊天里的事提不出来"):cindyState(c,"会议和聊天里的事提不出来"))});
-  out.push({key:"me",need:!!(reading||st.want_feishu||st.want_slack),title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
-    :{state:reading||st.want_feishu||st.want_slack?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
-  const missing=[st.want_feishu&&!r.feishu_ready&&"飞书",st.want_slack&&!s.slack&&"Slack"].filter(Boolean), have=[r.feishu_ready&&"飞书",s.slack&&"Slack"].filter(Boolean);
+  out.push({key:"me",need:!!(reading||st.want_feishu||st.want_slack||st.want_wechat),title:"怎么称呼你",...(me.name?{state:"ok",text:`${esc(me.name)}${(me.aliases||[]).length?`，也叫 ${esc(me.aliases.join("、"))}`:""}。会议和聊天里提到这些称呼才算你的事。`,ctl:`<button class="btn ghost" onclick="S.ob={step:1};render()">改</button>`}
+    :{state:reading||st.want_feishu||st.want_slack||st.want_wechat?"bad":"todo",text:"还没填。不填的话，分不清会议和聊天里哪些事是你的。",ctl:`<button class="btn pri" onclick="S.ob={step:1};render()">去填</button>`})});
+  const wxBad=wxOn(s)&&((s.wechat.status||{}).ok===false);
+  const missing=[st.want_feishu&&!r.feishu_ready&&"飞书",st.want_slack&&!s.slack&&"Slack",(st.want_wechat&&!wxOn(s)||wxBad)&&"微信"].filter(Boolean), have=[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&!wxBad&&"微信"].filter(Boolean);
   const manage=`<button class="btn ghost" onclick="S.setTab='tool';render()">${have.length||missing.length?"管理":"去接"}</button>`;
   out.push({key:"tools",need:missing.length>0,title:"办公工具",...(missing.length?{state:"todo",text:`你想接${missing.join("和")}，还没接好。${ASK_AI}带你接，中途请你在浏览器里登录、点一次同意。${have.length?`已接入${have.join("、")}。`:""}`,ctl:manage}
     :have.length?{state:"ok",text:`已接入${have.join("、")}${manual?"；现在是手动模式，不会自动收":""}。`,ctl:manage}
@@ -1236,6 +1241,25 @@ function talkSection(st){
     +setRow("看本机 GPT 的对话","点开一段本机 GPT 对话时，在哪里显示。",
       choice("gpt_open",st.gpt_open||"here",[["here","心响里",true],["chatgpt","ChatGPT 桌面版",f.chatgpt],["terminal","终端",f["terminal-codex"]]])));
 }
+function wechatRows(st,s){
+  const w=s.wechat||{}, t=w.status||{}, c=S.wechatCheck;
+  if(!w.installed&&!w.enabled) return setRow("我要接微信",st.want_wechat?"已记下。到「配置检查」复制那段话发给你的 AI，它带你接好（中途要你输一次电脑密码）。":"工作上的事常在微信里说的话打开。只在这台电脑上读你自己的微信，不上传。",
+    switchCtl(!!st.want_wechat,`setSetting('want_wechat',${!st.want_wechat})`));
+  const state=!w.installed?`<span class="eng-state bad">没找到微信命令行</span>`:c&&c.busy?`<span class="eng-state busy">正在试读，约 20 秒…</span>`
+    :c&&c.ok===false?`<span class="eng-state bad">读不到</span>`:c&&c.ok?`<span class="eng-state ok">能读到</span>`
+    :t.ok===false?`<span class="eng-state bad">读不到（${esc(t.at||"")}）</span>`:t.at?`<span class="eng-state ok">上次读取 ${esc(t.at)}</span>`:`<span class="eng-state">还没读过</span>`;
+  const note=(c&&c.ok===false&&c.error)||(t.ok===false&&t.error)||"";
+  return setRow("读微信",w.enabled?"每两分钟看一次有新消息的聊天，只留跟你有关的话。只在这台电脑上读，不上传。":"已关。",toggle("wechat_enabled",!!w.enabled))
+    +setRow("能不能读到",t.behind?"最近的聊天记录读不出来，现在只看得到每个聊天的最后一条。到「配置检查」复制那段话发给你的 AI，它带你修好。":"读得比较慢：一轮最多看 4 个聊天，其余排到下一轮。",
+      `${state}<button class="btn" ${c&&c.busy||!w.installed?"disabled":""} onclick="wechatCheck()">试读一下</button>`,note?`<div class="d" style="color:var(--red)">${esc(note)}</div>`:"");
+}
+async function wechatCheck(){
+  if(!LIVE) return toast("原型里不能试");
+  S.wechatCheck={busy:true}; render();
+  try{ S.wechatCheck=await api("/api/wechat/check",{},120000); toast(S.wechatCheck.ok?"微信能读到":"微信读不到"); }
+  catch(e){ S.wechatCheck={ok:false,error:"试读没完成，连不上本机服务"}; }
+  render();
+}
 function slackRow(s){
   const me=s.slack, t=S.slackTry;
   const slackCtl=me?`<button class="btn" onclick="slackTry()">试跑最近 24 小时</button><button class="btn ghost" onclick="slackOff()">断开</button>`
@@ -1249,7 +1273,7 @@ function slackRow(s){
   return setRow("Slack",slackDesc,slackCtl,slackHelp+tried)+(me?"":setRow("我要接 Slack",st.want_slack?"已记下。到「配置检查」复制那段话发给你的 AI，它带你接好。":"打开后，配置检查会把它算作要做的一步。",switchCtl(!!st.want_slack,`setSetting('want_slack',${!st.want_slack})`)));
 }
 function toolPage(st,s){
-  const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack;
+  const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack||wxOn(s);
   const feishu=!fs?setRow("我要接飞书",st.want_feishu?"还没接好。到「配置检查」复制那段话发给你的 AI，它带你接好。":"没有接入。不接也可以，事项自己新建就行。",switchCtl(!!st.want_feishu,`setSetting('want_feishu',${!st.want_feishu})`))
     :setRow("飞书","","",pushLine(s))
      +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
@@ -1257,6 +1281,7 @@ function toolPage(st,s){
      +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));
   return setSec("feishu","飞书",any&&manual?"现在是手动模式，下面这些来源都不会自动收。":"",feishu)
    +setSec("slack","Slack","",slackRow(s))
+   +setSec("wechat","微信","",wechatRows(st,s))
    +(any?setSec("filter","过滤和节奏","",filterRow(r)
       +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
         `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`))

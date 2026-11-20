@@ -39,6 +39,9 @@ class Config(BaseModel):
     feishu_tasks_enabled: bool = True
     # Slack as a second chat source: a user token (xoxp-); empty = env SLACK_USER_TOKEN; neither = off.
     slack_token: str = ""
+    # WeChat as a chat source, read on this computer through the wechat-cli command (the owner's own local messages).
+    wechat_enabled: bool = False
+    wechat_binary: str = ""          # path to wechat-cli; empty = find it on PATH
     # Words too common in meeting titles to link items by topic, e.g. the company name.
     topic_stopwords: list[str] = Field(default_factory=list)
     # The AI employee (worker.py): up to ten concurrent jobs, one GPT conversation per item.

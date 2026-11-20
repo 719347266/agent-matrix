@@ -15,7 +15,7 @@ LAYERS = [
     ("基础", ["models", "config", "timeutil", "schema", "alerts", "cards", "digest", "reply_timing", "llm",
               "precheck", "db", "lifecycle", "values", "textmatch", "delivery", "setupshim"]),
     ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory", "jobstore", "snapshot", "itemlinks", "projects"]),
-    ("外部连接", ["feishu", "bitable", "records", "notion", "storemode", "workenv", "sources.chats", "sources.slack", "sources"]),
+    ("外部连接", ["feishu", "bitable", "records", "notion", "storemode", "workenv", "sources.chats", "sources.slack", "sources.wechat", "sources"]),
     ("业务规则", ["workflow", "merge", "automation", "linked_sync", "sources.feishu_tasks", "manual", "automation_demo", "brief_migration", "brief_v1", "prework",
                   "reply", "meeting_watch", "meeting_review", "chat_review", "background", "proactive",
                   "agents", "agents.daily_brief", "agents.meeting_followup", "agents.meeting_prep",

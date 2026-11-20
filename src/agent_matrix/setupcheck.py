@@ -22,7 +22,7 @@ INSTALL = {"codex": ("@openai/codex", "codex login", "会打开浏览器，请�
            "claude": ("@anthropic-ai/claude-code", "claude", "第一次运行会让本人登录 Claude 账号；登录完输入 /exit 退出"),
            "gemini": ("@google/gemini-cli", "gemini", "第一次运行会让本人登录 Google 账号；个人账号登录不了的话，请本人到 心响 → 设置 → 谁来做事 里填一个 Gemini API Key")}
 SETTABLE = {"owner_name", "owner_aliases", "engine", "engine_sort", "intake_mode", "brief_channel", "meeting_watch_enabled",
-            "chat_watch_enabled", "feishu_tasks_enabled", "want_feishu", "want_slack", "cindy_project", "prework_enabled", "onboarded"}
+            "chat_watch_enabled", "feishu_tasks_enabled", "want_feishu", "want_slack", "want_wechat", "wechat_enabled", "cindy_project", "prework_enabled", "onboarded"}
 
 
 from .setupshim import _cmd, install_shim, prompt, shim_path  # noqa: F401
@@ -65,7 +65,9 @@ def report(root):
     manual = bool(config and config.intake_mode == "manual")
     feishu, want_feishu = bool(record.get("feishu_ready")), bool(thread.setting(root, "want_feishu", False))
     slack, want_slack = bool(s.get("slack")), bool(thread.setting(root, "want_slack", False))
-    reading = not manual and (feishu or bool(s.get("slack")))
+    wx, want_wechat = s.get("wechat") or {}, bool(thread.setting(root, "want_wechat", False))
+    wechat_on = bool(wx.get("enabled") and wx.get("installed"))
+    reading = not manual and (feishu or slack or wechat_on)
     python = here.get("python") or sys.executable
     out = []
 
@@ -94,7 +96,7 @@ def report(root):
         out.append({"key": "sort", "title": f"整理消息的 AI：{NAMES.get(sort, sort)}", "need": True, **sorting})
 
     name = (config.owner_name if config else "") or ""
-    out.append({"key": "me", "title": "怎么称呼本人", "need": bool(reading or want_feishu or want_slack), "ok": bool(name),
+    out.append({"key": "me", "title": "怎么称呼本人", "need": bool(reading or want_feishu or want_slack or want_wechat), "ok": bool(name),
                 "say": f"{name}。" if name else "还没填，分不清会议和聊天里哪些事是本人的。",
                 "steps": [] if name else [f"问本人：同事在会议和聊天里怎么叫你（名字，和别的叫法）。然后运行 `{cmd} set owner_name=名字 owner_aliases=叫法1,叫法2`（没有别的叫法就不写 owner_aliases）。"]})
 
@@ -119,6 +121,23 @@ def report(root):
             "在 OAuth & Permissions → User Token Scopes 里加上这些权限：search:read channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read",
             "点 Install to Workspace，请本人点同意。页面上会出现一串 xoxp- 开头的 User OAuth Token。",
             "请本人自己把这串 Token 粘贴到 心响 → 设置 → 办公工具 → Slack 里，点「连接」。不要让他把 Token 发到对话里。"]})
+    renew = "运行 `wechat-cli init` 提取微信的读取钥匙。这一步要本人在场：会让他输入电脑的开机密码，可能还要重新签名微信（先把这一点告诉本人，他同意再做）。"
+    status = wx.get("status") or {}
+    if wechat_on and status.get("ok") is False:
+        out.append({"key": "wechat", "title": "微信", "need": True, "ok": False, "say": f"开着，但读不到：{status.get('error') or '原因不明'}。",
+                    "steps": ["确认微信已经在这台电脑上打开并登录。", renew, "验证：`wechat-cli sessions --limit 3` 能列出聊天。"]})
+    elif wechat_on and status.get("behind"):
+        out.append({"key": "wechat", "title": "微信", "need": False, "ok": False,
+                    "say": "已接入，但最近的聊天记录读不出来，现在只看得到每个聊天的最后一条消息。",
+                    "steps": [renew, "验证：`wechat-cli history <某个群名> --limit 3` 能读到今天的消息。"]})
+    elif wechat_on:
+        out.append({"key": "wechat", "title": "微信", "need": False, "ok": True, "say": "已接入。"})
+    elif want_wechat or wx.get("enabled"):
+        steps = [] if wx.get("installed") else [*([] if here.get("npm") else ["先装 Node.js（LTS 版），装完重新打开终端。"]),
+                                                  "安装微信命令行：`npm install -g @canghe_ai/wechat-cli`"]
+        steps += ["确认微信已经在这台电脑上打开并登录。", renew, "验证：`wechat-cli sessions --limit 3` 能列出聊天。",
+                  f"打开这个来源：`{cmd} set wechat_enabled=true`"]
+        out.append({"key": "wechat", "title": "微信", "need": True, "ok": False, "say": "本人想接微信，还没接好。", "steps": steps})
     return {"ready": all(x["ok"] for x in out if x["need"]), "items": out, "cmd": cmd}
 
 

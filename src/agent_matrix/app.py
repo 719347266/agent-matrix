@@ -212,6 +212,7 @@ def build_state(root):
         settings["models"] = {"codex": cfg.worker_model, "claude": cfg.worker_claude_model, "gemini": cfg.worker_gemini_model}
         settings["want_feishu"] = bool(thread.setting(root, "want_feishu", False))
         settings["want_slack"] = bool(thread.setting(root, "want_slack", False))
+        settings["want_wechat"] = bool(thread.setting(root, "want_wechat", False))
         from . import setupshim
         settings["setup_prompt"] = setupshim.prompt(root)   # the one message the owner pastes to their own AI
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
@@ -292,10 +293,11 @@ def system_info(root):
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
         slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
+        wechat_status = json.loads((db.execute("SELECT value FROM kv WHERE key='wechat:status'").fetchone() or ["null"])[0])
         notion_url = json.loads((db.execute("SELECT value FROM kv WHERE key='notion:url'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat, slack, notion_url = {}, None, None, None
+        status, beat, slack, notion_url, wechat_status = {}, None, None, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
@@ -320,7 +322,12 @@ def system_info(root):
     here = {"platform": "windows" if sys.platform.startswith("win") else "mac" if sys.platform == "darwin" else "other",
             "root": str(Path(root).resolve()), "python": re.sub(r"(?i)pythonw(\.exe)$", r"python\1", sys.executable), "lark_cli": lark, "npm": npm,
             "client": bool(os.environ.get("XINXIANG_CLIENT"))}   # started by the desktop client, which keeps the listener alive itself
-    return {"engines": found, "slack": slack, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    try:
+        from .sources import wechat as wechat_source
+        wechat = {"installed": bool(wechat_source.binary(config)), "enabled": bool(config.wechat_enabled), "status": wechat_status}
+    except Exception:
+        wechat = {"installed": False, "enabled": False, "status": None}
+    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -464,6 +471,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/wechat/check":  # can WeChat be read right now (takes about 20 seconds)
+                from .config import load
+                from .sources import wechat
+                return self._send(200, wechat.check(load(root / "config.yaml")))
             if path == "/api/update":  # look for a newer version, or get it
                 from . import update
                 if body.get("install"):
@@ -515,7 +526,7 @@ class Handler(BaseHTTPRequestHandler):
                 from . import thread
                 if body.get("engine") in {"codex", "claude", "gemini", "cindy"}:
                     thread.set_setting(root, "engine", body["engine"])
-                for want in ("want_feishu", "want_slack"):   # the owner means to connect it: the setup check then says how
+                for want in ("want_feishu", "want_slack", "want_wechat"):   # the owner means to connect it: the setup check then says how
                     if want in body:
                         thread.set_setting(root, want, bool(body[want]))
                 if "cindy_project" in body:
@@ -546,7 +557,7 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if "onboarded" in body:
                     thread.set_setting(root, "onboarded", bool(body["onboarded"]))
-                switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled")
+                switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled", "wechat_enabled")
                 if (body.get("intake_mode") in ("all", "accepted", "manual") or body.get("brief_channel") in ("feishu", "local")
                         or any(k in body for k in switches)):
                     from .config import load as load_config, save as save_config
