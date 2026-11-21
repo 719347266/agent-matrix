@@ -121,6 +121,10 @@ SCHEMAS = {
         # 记忆更新: what the daily tidy proposes, waiting for the owner's 用 / 不要 (tidy.py)
         """CREATE TABLE IF NOT EXISTS memory_updates (id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT, kind TEXT NOT NULL,
             content TEXT NOT NULL, why TEXT, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL, decided TEXT)""",
+    ], [
+        # 记忆增强: what waits to be written into Hy Memory, written in the background by the listener (hymem.py)
+        """CREATE TABLE IF NOT EXISTS hymem_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL,
+            text TEXT NOT NULL, workspace TEXT, ref TEXT, tries INTEGER NOT NULL DEFAULT 0, error TEXT, done TEXT, UNIQUE(kind, ref))""",
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

@@ -103,6 +103,12 @@ foreach ($i in 1..5) { $null = Api "api/state"; Start-Sleep 1 }
 $after = @((Procs "*agent_matrix.listen*") | ForEach-Object { $_.ProcessId })
 Check "连看五次面板，后台还是同一个、没被重启" ($before.Count -ge 1 -and ($before -join ",") -eq ($after -join ",")) "before=$($before -join ',') after=$($after -join ',')"
 
+Write-Host "[3c] 记忆增强（混元 Hy Memory）随安装包带上了"
+$hy = (& "$app\python\python.exe" -c "import hy_memory, chromadb; print('hy ok')" 2>&1 | Out-String)
+Check "安装包里带着混元记忆 SDK，能加载" ($hy -match "hy ok") ($hy.Substring(0, [Math]::Min(300, $hy.Length)))
+$mb = (Api "api/state").settings.memory_boost
+Check "设置里能看到记忆增强，默认关着" ($mb -and $mb.installed -eq $true -and $mb.enabled -eq $false) "installed=$($mb.installed) enabled=$($mb.enabled)"
+
 Write-Host "[4] 用一用"
 $a = Api "api/item/new" @{ title = "整理十二月活动排期"; who = "我"; due = "明天" }
 $b = Api "api/item/new" @{ title = "写季度复盘"; who = "我" }

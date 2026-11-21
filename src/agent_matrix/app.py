@@ -237,6 +237,11 @@ def build_state(root):
         settings["part_prompts"] = {part: setupshim.part_prompt(part) for part in setupshim.PARTS}   # one part to a second AI
         settings["setup"] = setup_view(root)   # what the owner asked the driving AI to set up, and how far it got
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
+        from . import hymem   # 记忆增强: the settings without the keys, and how far writing has got
+        settings["memory_boost"] = {"enabled": cfg.memory_boost_enabled, "base_url": cfg.memory_base_url, "has_key": bool(cfg.memory_api_key),
+                                    "llm": cfg.memory_llm_model, "embed_base_url": cfg.memory_embed_base_url, "has_embed_key": bool(cfg.memory_embed_api_key),
+                                    "embed": cfg.memory_embed_model, "dims": cfg.memory_embed_dims, "installed": hymem.installed(),
+                                    "ready": hymem.ready(cfg), "presets": hymem.PRESETS, "status": hymem.status(root)}
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
                         sources={"meetings": cfg.meeting_watch_enabled, "chats": cfg.chat_watch_enabled, "tasks": cfg.feishu_tasks_enabled})
@@ -526,6 +531,31 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/commands/dismiss":
                 self.server.commands.dismiss(str(body.get("id") or ""))
                 return self._send(200, {"ok": True})
+            if path == "/api/hymem":  # 记忆增强: save the owner's endpoint and key, test them, or search (for AI jobs)
+                from . import hymem
+                from .config import load as load_config, save as save_config
+                config = load_config(root / "config.yaml")
+                if body.get("search") is not None:
+                    try:
+                        return self._send(200, {"ok": True, "lines": hymem.search(root, config, body["search"], int(body.get("limit") or 8))})
+                    except Exception as exc:
+                        return self._send(200, {"ok": False, "lines": [], "error": f"{type(exc).__name__}: {exc}"[:200]})
+                if body.get("test"):
+                    return self._send(200, hymem.test(root, config))
+                save = body.get("save") or {}
+                fields = {"enabled": "memory_boost_enabled", "base_url": "memory_base_url", "llm": "memory_llm_model",
+                          "embed_base_url": "memory_embed_base_url", "embed": "memory_embed_model", "dims": "memory_embed_dims",
+                          "key": "memory_api_key", "embed_key": "memory_embed_api_key"}
+                was_on = hymem.ready(config)
+                for k, attr in fields.items():
+                    if k not in save or (k in ("key", "embed_key") and not str(save[k] or "").strip()):
+                        continue   # an empty key box keeps the key already saved
+                    v = save[k]
+                    setattr(config, attr, bool(v) if k == "enabled" else int(v or 1024) if k == "dims" else str(v or "").strip()[:300])
+                save_config(root / "config.yaml", config)
+                hymem.mark(root, hymem.ready(config))
+                queued = hymem.backfill(root) if hymem.ready(config) and not was_on else 0   # just switched on: start from what 心响 knows
+                return self._send(200, {"ok": True, "ready": hymem.ready(config), "queued": queued})
             if path == "/api/profile":  # 关于你: the owner writes or corrects it; every AI reads it before work
                 from . import memory
                 if body.get("scan") is not None:   # 让 AI 认识我: the places the owner ticked
@@ -538,8 +568,13 @@ class Handler(BaseHTTPRequestHandler):
                         return self._send(400, {"ok": False, "reply": str(exc)})
                     return self._send(200, {"ok": True, **setup_view(root)["driver"]})
                 if "draft" in body:                # the owner keeps the AI's draft, or throws it away
-                    return self._send(200, {"ok": True, "profile": memory.drop_draft(root, use=bool(body["draft"]))})
-                return self._send(200, {"ok": True, "profile": memory.set_profile(root, body.get("text"))})
+                    got = memory.drop_draft(root, use=bool(body["draft"]))
+                else:
+                    got = memory.set_profile(root, body.get("text"))
+                from . import hymem   # 记忆增强: the owner's own account of who they are
+                if got.get("text"):
+                    hymem.remember(root, "profile", "关于本人：\n" + got["text"], ref="profile:" + got.get("at", ""))
+                return self._send(200, {"ok": True, "profile": got})
             if path == "/api/organize":  # 整理项目和版本: the AI sorts the work; the owner fixes what it got wrong
                 from . import versions
                 from .snapshot import _snapshot

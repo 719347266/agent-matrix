@@ -172,6 +172,9 @@ class Applier:
         try:
             from .memory import record_outcome
             record_outcome(self.client.root, row["record_id"], verdict, reason)
+            from . import hymem   # 记忆增强: what the owner thought of this deliverable
+            hymem.remember(self.client.root, "verdict", f"本人评审「{_title(row, 40)}」：{verdict}" + (f"，原因：{reason}" if reason else ""),
+                           ref=f"verdict:{row['record_id']}:{self.now.isoformat()}")
         except Exception as exc:
             activity.swallowed(self.client.root, "reply.verdict", exc)
 

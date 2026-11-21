@@ -45,6 +45,22 @@ def log(*parts):
     print(datetime.now(TZ).strftime("%m-%d %H:%M:%S"), *parts, flush=True)
 
 
+def hymem_loop(root, path):
+    """记忆增强: writes what is queued into Hy Memory in the background (the model calls take seconds each)."""
+    from . import hymem
+    while True:
+        time.sleep(30)
+        try:
+            config = load(path)
+            hymem.mark(root, hymem.ready(config))   # writers in other processes check this flag
+            if hymem.ready(config):
+                written, failed = hymem.flush(root, config)
+                if written or failed:
+                    log("hymem", f"写入 {written}，失败 {failed}")
+        except Exception as exc:
+            log("hymem failed", type(exc).__name__, str(exc)[:200])
+
+
 def wechat_loop(root, path, wake=None):
     """WeChat is read in its own thread: the command takes minutes, so nothing waits for it and the project lock
     is only held for the moment the result is filed."""
@@ -474,6 +490,7 @@ class Listener:
         served = start_background(self.root, config)
         threading.Thread(target=backup_loop, args=(self.root, self.path), daemon=True, name="xinxiang-backup").start()
         threading.Thread(target=wechat_loop, args=(self.root, self.path, self.wake_worker), daemon=True, name="xinxiang-wechat").start()
+        threading.Thread(target=hymem_loop, args=(self.root, self.path), daemon=True, name="xinxiang-hymem").start()
         log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:

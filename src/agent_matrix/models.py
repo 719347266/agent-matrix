@@ -73,6 +73,15 @@ class Config(BaseModel):
     worker_gemini: str = ""          # path to the gemini command; empty = find it on PATH (本机 Gemini)
     worker_gemini_model: str = ""    # e.g. gemini-2.5-pro; empty = the Gemini CLI's default
     worker_gemini_api_key: str = ""  # optional Gemini API key (GEMINI_API_KEY); empty = however the gemini command is signed in
+    # 记忆增强 (optional): Tencent Hunyuan Hy Memory with the owner's own API. Kept in config.yaml on this computer only.
+    memory_boost_enabled: bool = False
+    memory_base_url: str = ""            # OpenAI-compatible endpoint for the language model
+    memory_api_key: str = ""
+    memory_llm_model: str = ""
+    memory_embed_base_url: str = ""      # empty = the same endpoint and key as above
+    memory_embed_api_key: str = ""
+    memory_embed_model: str = ""
+    memory_embed_dims: int = Field(default=1024, ge=64, le=8192)
     worker_gemini_sandbox: bool = True  # macOS: run it in the system sandbox, so it only writes inside the job's folder
     # MCP tools the local Claude may use while working, e.g. ["mcp__claude_ai_Notion__notion-fetch"]. Empty = none
     # (safe mode). Non-empty: the owner's own hooks/plugins stay off, only these MCP tools are allowed.

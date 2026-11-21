@@ -89,6 +89,7 @@ button:disabled{opacity:.5;cursor:wait}
 .sec-h{display:flex;align-items:center;gap:8px;margin:20px 2px 8px;font-size:12.5px;font-weight:600;color:var(--ink2)}
 .sec-h:first-child{margin-top:4px}
 .prof-text{white-space:pre-wrap;line-height:1.65;font-size:13.5px}
+.boost-form label{display:block;margin-top:8px}.boost-form .d{font-size:12.5px}
 .rule-tag{display:inline-block;font-size:11.5px;padding:0 7px;margin:0 6px 0 0;border-radius:99px;background:var(--gray-soft);color:var(--ink2)}.rule-tag.bad{color:var(--red)}
 .ver-p{font-weight:600;font-size:14px;margin:2px 0 6px}.ver{border-top:1px solid var(--line2);padding:8px 0}.ver:first-of-type{border-top:0}
 .ver-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:default;list-style:none}details.ver>.ver-h{cursor:pointer}
@@ -1116,6 +1117,49 @@ async function saveProfile(){
     (D.memory ||= {}).profile=r.profile; S.profEdit=false; drafts.delete("prof"); toast("记下了，AI 做事前都会先读"); await load(); }
   catch(e){ toast("没保存成功，连不上本机服务"); }
 }
+/* 记忆增强（可选）：用你自己的大模型接口接上腾讯混元 Hy Memory，存得更全、找得更准；不开就用心响自己的记忆 */
+function boostSection(st){
+  const b=st.memory_boost||{}, f=S.boost||null, P=b.presets||{}, stt=b.status||{};
+  const on=b.enabled, state=!b.installed?`<span class="eng-state bad">这个版本还没带上</span>`:b.ready?`<span class="eng-state ok">在用</span>`:on?`<span class="eng-state bad">还没填全</span>`:`<span class="eng-state">关着</span>`;
+  const head=setRow("记忆增强",`接上腾讯混元的 Hy Memory：会议、交付、你的评审都会被它整理成长期记忆，AI 做事前按意思找回相关的。要用你自己的大模型接口（API Key 和地址），费用走你的账户；不开也能用，心响自己的记忆照常工作。${b.ready?`<br>已写入 ${stt.written||0} 条，排队 ${stt.waiting||0} 条${stt.stuck?`，${stt.stuck} 条写不进去`:""}${stt.error?`<br><span style="color:var(--red)">最近出错：${esc(stt.error)}</span>`:""}`:""}`,
+    `${state}${switchCtl(!!on,`boostSave({enabled:${!on}})`)}`);
+  if(!on) return setSec("boost","","",head);
+  const v=f||{base_url:b.base_url||"",llm:b.llm||"",embed:b.embed||"",embed_base_url:b.embed_base_url||"",dims:b.dims||1024};
+  const chips=Object.entries(P).map(([k,p])=>`<button class="chip ${v.preset===k?"on":""}" onclick="boostPreset('${k}')">${esc(p.name)}</button>`).join("")+`<button class="chip ${v.preset==="custom"?"on":""}" onclick="boostPreset('custom')">其他</button>`;
+  const pk=v.preset&&P[v.preset], inp=(id,val,ph,type="text")=>`<input id="${id}" type="${type}" value="${esc(val||"")}" placeholder="${esc(ph)}" autocomplete="off" style="width:100%;height:30px;padding:3px 8px;margin-top:4px">`;
+  const form=`<div class="boost-form">
+      <div class="d">选一家（或其他任何兼容 OpenAI 接口的服务），到它的网站拿一个 API Key 贴在下面。推荐硅基流动或阿里云百炼：一个 Key 同时管大模型和向量，便宜，中文好。${pk&&pk.key_url?` <a href="${esc(pk.key_url)}" target="_blank" rel="noopener">去 ${esc(pk.name)} 拿 Key ↗</a>`:""}</div>
+      <div class="chips" style="margin:8px 0">${chips}</div>
+      <label class="d">接口地址${inp("bz-base",v.base_url,"https://…/v1")}</label>
+      <label class="d">API Key${inp("bz-key","",b.has_key?"已填好（要换就贴新的）":"sk-…","password")}</label>
+      <label class="d">大模型${inp("bz-llm",v.llm,"比如 deepseek-chat、qwen-plus")}</label>
+      <label class="d">向量模型${inp("bz-embed",v.embed,"比如 text-embedding-v3、BAAI/bge-m3")}</label>
+      <details ${v.preset==="deepseek"||v.embed_base_url?"open":""}><summary class="d" style="cursor:pointer">向量用另一家（DeepSeek 没有向量模型时）</summary>
+        <label class="d">向量接口地址${inp("bz-ebase",v.embed_base_url,"空着 = 和上面同一家")}</label>
+        <label class="d">向量 API Key${inp("bz-ekey","",b.has_embed_key?"已填好":"空着 = 和上面同一个","password")}</label>
+        <label class="d">向量维度${inp("bz-dims",v.dims,"1024")}</label></details>
+      <div class="acts" style="justify-content:flex-end;margin-top:8px">${S.boostTest?`<span class="hint" style="margin:0 auto 0 0;${S.boostTest.ok?"":"color:var(--red)"}">${S.boostTest.busy?"正在试…":S.boostTest.ok?"接通了，能写进去也能找回来":esc(S.boostTest.error||"没接通")}</span>`:""}
+        <button class="btn" onclick="boostTest()">测试连接</button><button class="btn pri" onclick="boostSave()">保存</button></div></div>`;
+  return setSec("boost","","",head+setRow("","","",form));
+}
+function boostPreset(k){
+  const b=(D.settings||{}).memory_boost||{}, p=(b.presets||{})[k]||{}, cur=boostForm();
+  S.boost={...cur,preset:k,...(k==="custom"?{}:{base_url:p.base_url,llm:p.llm,embed:p.embed||"",dims:p.dims,embed_base_url:k==="deepseek"?cur.embed_base_url:""})}; render();
+}
+function boostForm(){ const g=id=>($(id)||{}).value; return {preset:(S.boost||{}).preset,base_url:g("#bz-base")??"",llm:g("#bz-llm")??"",embed:g("#bz-embed")??"",embed_base_url:g("#bz-ebase")??"",dims:Number(g("#bz-dims"))||1024,key:g("#bz-key")||"",embed_key:g("#bz-ekey")||""}; }
+async function boostSave(only){
+  if(!LIVE) return toast("原型里不能保存");
+  const body=only||(()=>{ const f=boostForm(); return {enabled:true,base_url:f.base_url,llm:f.llm,embed:f.embed,embed_base_url:f.embed_base_url,dims:f.dims,key:f.key,embed_key:f.embed_key}; })();
+  try{ const r=await api("/api/hymem",{save:body},20000); if(!only) S.boost=null;
+    toast(body.enabled===false?"记忆增强关了，心响自己的记忆照常工作":r.ready?(r.queued?`接上了，先把已有的 ${r.queued} 条记忆写进去`:"保存好了"):"保存了，还没填全"); await load(); }
+  catch(e){ toast("没保存成功，连不上本机服务"); }
+}
+async function boostTest(){
+  if(!LIVE) return toast("原型里不能测试");
+  await boostSave(); S.boostTest={busy:true}; render();
+  try{ S.boostTest=await api("/api/hymem",{test:true},120000); }catch(e){ S.boostTest={ok:false,error:"测试没完成，连不上本机服务"}; }
+  render();
+}
 /* 规矩：适用在哪、照着做通过/被退回几次 */
 function ruleMeta(r){ const tags=[r.scope?`<span class="rule-tag">${esc(r.scope_name)}</span>`:"",(r.wins||r.losses)?`<span class="rule-tag ${r.losses>r.wins?"bad":""}">通过 ${r.wins||0} · 退回 ${r.losses||0}</span>`:""].filter(Boolean).join("");
   return tags+esc(r.why||""); }
@@ -1452,7 +1496,7 @@ async function updateNow(){
 const SET_PAGES={
   ai:(st,s,w)=>["驱动心响的 AI","",aiPage(st,s)],
   tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收进来的事怎么处理</div>${modePage(st,s)}</div>`],
-  data:(st,s,w)=>["数据与通知","",dataSection(s)+setSec("notify","通知","",setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)+notifyRow(s))],
+  data:(st,s,w)=>["数据与通知","",dataSection(s)+boostSection(st)+setSec("notify","通知","",setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)+notifyRow(s))],
   bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条，攒几条再一起提交。提交时会附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。",bugsPage()],
   update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
   more:(st,s,w)=>["更多","",setSec("look","","",setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)

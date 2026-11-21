@@ -317,6 +317,12 @@ class Item:
             self.root, self.rid, summary=result.get("summary", ""), url=published["url"], confirm=result.get("confirmation", ""),
             assumptions=conversation.assumptions_of(doc), sources=[x for x in result.get("sources", []) if str(x).startswith("http")])
         add_note(self.root, self.rid, f"已交付 v{version}：{published['url']}；{result.get('note', '')}")
+        try:   # 记忆增强: what was delivered and its conclusions, for later work to build on
+            from . import hymem
+            hymem.remember(self.root, "deliverable", f"交付「{self.title}」第 {version} 版：{result.get('summary', '')}\n{doc[:1500]}",
+                           ref=f"deliverable:{self.rid}:{version}")
+        except Exception as exc:
+            activity.swallowed(self.root, "itemwork.publish", exc)
         self.done_status("已交付", result["summary"], tokens, url=published["url"])
         return {"record_id": self.rid, "result": "published", "url": published["url"]}
 

@@ -54,6 +54,17 @@ function reset(item) {
   for (const label of ["驱动心响的 AI","接入","数据与通知","问题反馈","版本与更新","更多","都没接","Cindy","只存本机"]) assert.ok(menu.includes(label), label);
   assert.equal((menu.match(/class="cell /g)||[]).length, 6, "six places in the settings, no more");
   assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
+  // 记忆增强: off by default; on → the owner's own endpoint and key, a few suggested providers, a test button
+  evaluate('D.settings.memory_boost={enabled:false,installed:true,presets:{siliconflow:{name:"硅基流动",base_url:"https://api.siliconflow.cn/v1",llm:"deepseek-ai/DeepSeek-V3",embed:"BAAI/bge-m3",dims:1024,key_url:"https://cloud.siliconflow.cn/account/ak"},deepseek:{name:"DeepSeek（向量另配）",base_url:"https://api.deepseek.com",llm:"deepseek-chat",embed:"",dims:1024}},status:{}}');
+  let boost = pane("data");
+  for (const label of ["记忆增强","Hy Memory","关着","boostSave({enabled:true})","心响自己的记忆照常工作"]) assert.ok(boost.includes(label), label);
+  assert.doesNotMatch(boost,/bz-key/, "off: no form");
+  evaluate('D.settings.memory_boost.enabled=true; D.settings.memory_boost.has_key=true; S.boost=null');
+  boost = pane("data");
+  for (const label of ["还没填全","硅基流动","DeepSeek（向量另配）","其他","bz-base","bz-key","已填好（要换就贴新的）","bz-embed","向量用另一家","boostTest()"]) assert.ok(boost.includes(label), label);
+  evaluate('D.settings.memory_boost={...D.settings.memory_boost,ready:true,status:{written:12,waiting:3,stuck:1,error:"401 key 不对"}}');
+  for (const label of ["在用","已写入 12 条，排队 3 条，1 条写不进去","最近出错：401 key 不对"]) assert.ok(pane("data").includes(label), label);
+  evaluate('delete D.settings.memory_boost');
   assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
   assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
   // the page is just who does what: 做事 and 整理 each with its own choice, and only the AIs in use show their own setup

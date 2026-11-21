@@ -350,6 +350,14 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
     docs = [d for d in related_docs(client, _one(row.get("标题")), exclude=skip_urls) if d["url"] not in known]
     if docs:
         sections.append((DOCS, "## 可能相关的飞书文档（按标题相近程度排）", [f"- {d['title']} {d['url']} {d['updated']}" for d in docs]))
+    try:  # 记忆增强 (Hy Memory, when switched on): what it recalls about this item, asked through the listener
+        from . import hymem
+        if hymem.on(root):
+            recalled = hymem.search_via_app(root, _one(row.get("标题")) + " " + _one(row.get("下一步动作")), limit=8)
+            if recalled:
+                sections.append((EXAMPLES, "## 记忆增强想起来的（Hy Memory 从以往会议、交付和评审里找的，供参考）", [f"- {x}" for x in recalled]))
+    except Exception:
+        pass
     try:  # 记忆层: earlier meetings on the same topic (decisions, open questions, what it was waiting for)
         from .memory import recall_lines
         talked = recall_lines(root, _one(row.get("标题")) + " " + _one(row.get("下一步动作")), limit=5,
