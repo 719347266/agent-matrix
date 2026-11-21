@@ -308,15 +308,24 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
         before, after = linked_items(root, rows, row)
     except Exception:
         before, after = [], []
-    if before:
-        sections.append((MUST, "## 这件事接着前面这些事做（本人串起来的，离得最近的在前；先读它们的交付，在它们的基础上往下做，口径保持一致）", before))
     try:
         from .pastwork import upstream_results
         done_before = upstream_results(root, rows, row)
     except Exception:
         done_before = []
-    if done_before:
-        sections.append((MUST, "## 前置事项的成果（沿用里面的口径和结论，不要另起一套）", done_before))
+    if before or done_before:   # one list: what was delivered comes with its summary and copy, the rest as before
+        rich, key = {}, None   # "#11" → that item's lines with its result (an entry may run over several lines)
+        for ln in done_before:
+            if ln.startswith("- #"):
+                key = ln.split(" ", 2)[1]
+            if key:
+                rich.setdefault(key, []).append(ln)
+        lines = []
+        for ln in before:   # nearest first, as strung
+            n = ln.split(" ", 2)[1] if ln.startswith("- #") else None
+            lines += rich.pop(n) if n in rich else [ln]
+        lines += [x for entry in rich.values() for x in entry]
+        sections.append((MUST, "## 这件事接着前面这些事做（离得最近的在前；先读它们的交付，沿用里面的口径和结论，在它们的基础上往下做）", lines))
     if after:
         sections.append((MUST, "## 后面还有这些事要接着做（这次的成果要能让它们直接用）", after))
     excerpt, transcript = transcript_excerpt(root, row)

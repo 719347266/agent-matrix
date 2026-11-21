@@ -33,13 +33,14 @@ class PackTests(unittest.TestCase):
         itemlinks.link(self.root, "b", "c")
         self.deliver("a", "# 标签体系\n分三大类", summary="标签分三大类，口径按月活")
         text = background.build(self.root, None, rows, rows[2], NOW)
-        self.assertIn("## 前置事项的成果", text)
-        part = text.split("## 前置事项的成果", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("## 这件事接着前面这些事做", text)
+        part = text.split("## 这件事接着前面这些事做", 1)[1].split("\n## ", 1)[0]
         self.assertIn("#1 标签体系调研（第 1 版）：标签分三大类，口径按月活", part)
         self.assertIn("https://x.feishu.cn/docx/a", part)
         self.assertIn(str(self.root / "state/work/a/交付.md"), part)
-        self.assertNotIn("#2 标签需求文档", part)  # nothing delivered yet: not a result
-        self.assertNotIn("前置事项的成果", background.build(self.root, None, rows, rows[0], NOW))  # nothing before it
+        self.assertIn("#2 标签需求文档（进行中）", part)  # nothing delivered yet: listed once, without a result
+        self.assertEqual(part.count("#1 标签体系调研"), 1, "a delivered item is listed once, with its result")
+        self.assertNotIn("这件事接着前面这些事做", background.build(self.root, None, rows, rows[0], NOW))  # nothing before it
 
     def test_passed_examples_of_the_same_kind_and_rejection_reasons(self):
         rows = [{"record_id": "w1", "编号": 1, "标题": "第45周周报"},
@@ -85,7 +86,7 @@ class PackTests(unittest.TestCase):
         self.deliver("w1", "## 本周完成", template="周报")
         text = background.build(self.root, None, rows, rows[1], NOW)
         self.assertNotIn("被通过的同类交付", text)
-        self.assertNotIn("前置事项的成果", text)
+        self.assertNotIn("这件事接着前面这些事做", text)
         memory.record_outcome(self.root, "w1", "通过")
         self.assertNotIn("被通过的同类交付", background.build(self.root, None, [rows[1]], rows[1] | {"标题": "报销"}, NOW))
 

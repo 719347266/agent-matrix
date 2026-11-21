@@ -53,6 +53,16 @@ class TriageRelations(unittest.TestCase):
                          {60: (2, 1), 61: (1, None), 62: (None, None)})
         self.assertIn("串上了 2 件前后的事", thread.history(self.root)["r60"]["messages"][0]["text"])
 
+    def test_a_new_item_is_put_in_an_existing_version_and_then_gets_its_expected_things(self):
+        items = [{"n": 61, "record_id": "r61", "who": "我"}, {"n": 62, "record_id": "r62", "who": "我"}]
+        self.submit([{"n": 61, "decision": "ai", "reason": "起草", "version": {"project": "观己 App", "version": "2.3"},
+                      "expected": [{"title": "配套帮助文档", "why": "新功能要说明"}]},
+                     {"n": 62, "decision": "ai", "reason": "起草", "version": {"project": "观己 App", "version": "9.9"}}],   # no such version
+                    {"items": items, "numbers": {}})
+        self.assertEqual((versions.of(self.root, "r61") or {}).get("name"), "2.3")
+        self.assertIsNone(versions.of(self.root, "r62"), "only a version that exists")
+        self.assertIn("配套帮助文档", [e["title"] for e in next(v for v in versions.all(self.root) if v["id"] == self.vid)["expected"]])
+
     def test_old_format_and_old_jobs_still_go_through(self):
         items = [{"n": 60, "record_id": "r60", "who": "我"}, {"n": 61, "record_id": "r61", "who": "我"}]
         out = self.submit([{"n": 60, "decision": "ai", "reason": "起草"},

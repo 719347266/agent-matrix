@@ -149,6 +149,9 @@ def _prepare_triage(root, config, driver):
     (folder / "items.json").write_text(json.dumps([{k: v for k, v in i.items() if k != "record_id"} for i in items],
                                                  ensure_ascii=False, indent=1), encoding="utf-8")
     (folder / "open.json").write_text(json.dumps(others, ensure_ascii=False, indent=1), encoding="utf-8")
+    from . import versions as version_store   # the versions a new item may belong to
+    (folder / "versions.json").write_text(json.dumps([{"project": v["project"], "version": v["name"], "status": v["status_label"], "note": v["note"]}
+                                                      for v in version_store.all(root) if v["status"] != "done"], ensure_ascii=False, indent=1), encoding="utf-8")
     return {"id": f"triage-{stamp}", "kind": "triage", "title": f"判断新进来的 {len(items)} 件事", "folder": str(folder),
             "ref": {"items": items, "numbers": numbers}, "output": ["triage.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
             "instructions": promptfile.read(root, "triage.md")}
@@ -198,6 +201,11 @@ def _triage_relations(root, job, item, verdict):
     numbers = dict(job["ref"].get("numbers") or {})   # older jobs carry none: only the new items themselves
     numbers.update({str(i["n"]): i["record_id"] for i in job["ref"]["items"]})
     me, links, expected = item["record_id"], 0, 0
+    put = verdict.get("version")   # a new item not in a version yet: the one it belongs to, if it is one that exists
+    if isinstance(put, dict) and not versions.of(root, me):
+        found = next((v for v in versions.all(root) if v["project"] == put.get("project") and v["name"] == str(put.get("version") or "")), None)
+        if found:
+            versions.place(root, me, found["id"], by="AI")
     for key, mine_is_later in (("before", True), ("after", False)):
         for n in _numbers(verdict.get(key))[:5]:
             other = numbers.get(n)
@@ -430,6 +438,12 @@ def _submit_tidy(root, job):
     tidy.done(root)
     _close(root, job, "done")
     activity.log(root, "learn", f"整理记忆：{added} 条更新等你确认" if added else "整理记忆：没有要改的", detail=job.get("driver") or "")
+    if added:   # told once, like the other finished work: the list waits on top of 记忆
+        try:
+            from . import inbox
+            inbox.add(root, f"tidy:{job['id']}", f"✓ {job.get('driver') or 'AI'} 整理了一遍记忆：{added} 条更新等你确认，在「记忆」最上面。", kind="system")
+        except Exception as exc:
+            activity.swallowed(root, "drive._submit_tidy", exc)
     return {"ok": True, "status": "done", "proposed": added}
 
 
