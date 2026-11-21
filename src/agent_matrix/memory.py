@@ -91,7 +91,7 @@ def recall(root, topic, *, limit=5, exclude_source_id=None, kinds=("decision", "
     """Moments about the same topic, best match first (ties: most recent). Cheap; no model call."""
     scored = []
     for m in moments(root, limit=800):
-        if m["kind"] not in kinds or (exclude_source_id and m["source_id"] == exclude_source_id):
+        if m["kind"] not in kinds or m["status"] == "stale" or (exclude_source_id and m["source_id"] == exclude_source_id):
             continue
         s = max(similarity(topic, m["text"]), similarity(m["text"], topic))
         if s >= RECALL_MIN:

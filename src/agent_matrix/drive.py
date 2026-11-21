@@ -328,6 +328,43 @@ def _submit_organize(root, job):
     return {"ok": True, "status": "done", **counts}
 
 
+def _prepare_tidy(root, config, driver):
+    """Once a day, when something new came in: the AI reads the whole memory and proposes changes (tidy.py)."""
+    from . import tidy
+    from .workenv import scratch
+    if _busy(root, "tidy"):
+        return None
+    new = tidy.due(root)
+    if not new:
+        return None
+    tidy.tried(root)
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "tidy", stamp)
+    tidy.prepare(root, folder)
+    return {"id": f"tidy-{stamp}", "kind": "tidy", "title": "整理记忆", "folder": str(folder), "ref": new,
+            "output": ["tidy.json"], "lease_until": _lease(OTHER_LEASE_MINUTES), "instructions": promptfile.read(root, "tidy.md")}
+
+
+def _submit_tidy(root, job):
+    """Nothing in the memory changes here: every proposal waits in 记忆更新 for the owner's 用 / 不要."""
+    from . import tidy
+    try:
+        plan = json.loads((Path(job["folder"]) / "tidy.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        plan = None
+    proposals, problems = tidy.check(root, plan)
+    if plan is None or (problems and job["rounds"] < MAX_FIX_ROUNDS):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": ("没有找到有效的 tidy.json（格式见说明里的例子）。" if plan is None
+                                                          else "；".join(problems)[:600] + "。改好或删掉这几条再交。")}
+    added = tidy.save(root, proposals, job["id"])
+    tidy.done(root)
+    _close(root, job, "done")
+    activity.log(root, "learn", f"整理记忆：{added} 条更新等你确认" if added else "整理记忆：没有要改的", detail=job.get("driver") or "")
+    return {"ok": True, "status": "done", "proposed": added}
+
+
 def _prepare_learn(root, config, driver):
     """Now and then: turn the owner's recent feedback into standing rules (偏好快照)."""
     from . import memory, thread as conversation
@@ -602,7 +639,7 @@ def local_kinds(root):
     (all of them when a local AI is chosen in settings, else only those handed to a local AI one by one)."""
     from .aidrivers import LOCAL
     from .thread import setting
-    return [*(("profile", "organize") if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sort_runner(root) == "local" else ()), "item"]
+    return [*(("profile", "organize", "tidy") if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sort_runner(root) == "local" else ()), "item"]
 
 
 def kinds_for(root, driver):
@@ -610,7 +647,7 @@ def kinds_for(root, driver):
     from .aidrivers import is_mine
     from .thread import setting
     work, sort = setting(Path(root), "engine", "codex"), setting(Path(root), "engine_sort", "")
-    return [*(("setup", "profile", "organize") if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
+    return [*(("setup", "profile", "organize", "tidy") if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
 
 
 def item_filter(root, driver, *, builtin=False):
@@ -677,6 +714,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
             return _open(root, job, driver)
     if "organize" in wanted:
         job = _prepare_organize(root, config, driver)
+        if job:
+            return _open(root, job, driver)
+    if "tidy" in wanted:
+        job = _prepare_tidy(root, config, driver)
         if job:
             return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
@@ -861,6 +902,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_profile(root, job)
     if kind == "organize":
         return _submit_organize(root, job)
+    if kind == "tidy":
+        return _submit_tidy(root, job)
     from . import activity
     from .workenv import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
@@ -1129,7 +1172,7 @@ def main(argv=None):
     p.add_argument("--part", choices=["all", "work", "sort"], default="all", help="hello：接手全部，或只接「做事」/「整理」")
     p.add_argument("--n", type=int, help="next：领交给你的这一件（编号）")
     p.add_argument("--to", help="handoff：交给哪个 AI"); p.add_argument("--why", default="", help="handoff：为什么")
-    p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn")
+    p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn,tidy")
     p.add_argument("--driver", default=os.environ.get("XINXIANG_DRIVER") or "外部 AI")
     p.add_argument("--job"); p.add_argument("--text"); p.add_argument("--question"); p.add_argument("--tried")
     p.add_argument("--session", default=os.environ.get("XINXIANG_SESSION"), help="你这段对话的编号或能打开它的链接")
@@ -1177,6 +1220,10 @@ def main(argv=None):
             from . import versions
             if versions.organize_asked(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "organize"):
                 print(json.dumps({"ok": True, "work": "organize"}, ensure_ascii=False))
+                return 0
+            from . import tidy
+            if is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "tidy") and tidy.due(root):
+                print(json.dumps({"ok": True, "work": "tidy"}, ensure_ascii=False))
                 return 0
             if has_items_for(root, config, "Cindy"):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))

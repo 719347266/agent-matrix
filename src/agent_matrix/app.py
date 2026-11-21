@@ -301,7 +301,7 @@ def memory_view(root, items):
                     "quote": (m.get("quote") or "")[:200], "source": m.get("source_title") or "", "at": str(m["at"])[5:16],
                     "wait_for": m.get("wait_for"), "due": (m.get("due") or "")[:10] or None, "status": m.get("status")}
         waiting = [moment(m) for m in memory.moments(root, kind="waiting", limit=40) if m["status"] in {"open", "alerted"}]
-        recent = [moment(m) for m in memory.moments(root, limit=60) if m["kind"] in {"decision", "open_question"}][:20]
+        recent = [moment(m) for m in memory.moments(root, limit=60) if m["kind"] in {"decision", "open_question"} and m["status"] != "stale"][:20]
         history = {}
         for i in items:
             if i["hidden"] or i["status"] in {"完成", "取消"}:
@@ -312,7 +312,7 @@ def memory_view(root, items):
         from .jobstore import open_jobs
         jobs = open_jobs(root)
         scanning = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "profile"), None)
-        from . import versions
+        from . import tidy, versions
         n_of = {i["rid"]: i for i in items}
         archive = [{**v, "items": [{"n": n_of[x["rid"]]["n"], "title": n_of[x["rid"]]["title"], "status": n_of[x["rid"]]["status"], "by": x["by"]}
                                    for x in v["items"] if x["rid"] in n_of]} for v in versions.all(root)]
@@ -322,7 +322,10 @@ def memory_view(root, items):
         return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent,
                            "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning},
                            "versions": archive, "organize": {"asked": versions.organize_asked(root), "doing": organizing},
-                           "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")}},
+                           "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")},
+                           "updates": [{k: u[k] for k in ("id", "type", "label", "content", "why", "created")} | {"old": u["data"].get("old") or ""}
+                                       for u in tidy.updates(root)],
+                           "tidying": next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "tidy"), None)},
                 "history": history}
     except Exception as exc:
         return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
@@ -553,6 +556,14 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
                 return self._send(200, {"ok": True, "rules": memory.rules(root)})
+            if path == "/api/memory/updates":  # 记忆更新: 用 applies what the daily tidy proposed, 不要 leaves the memory alone
+                from . import tidy
+                pick = lambda v: [u["id"] for u in tidy.updates(root)] if v == "all" else [int(x) for x in (v if isinstance(v, list) else [v])]
+                used, failed = tidy.use(root, pick(body["use"])) if body.get("use") else ([], {})
+                if body.get("drop"):
+                    tidy.drop(root, pick(body["drop"]))
+                return self._send(200, {"ok": not failed, "used": len(used), "failed": {str(k): v for k, v in failed.items()},
+                                        "reply": "；".join(failed.values())[:200], "left": len(tidy.updates(root))})
             if path == "/api/item/new":  # the owner adds an item by hand
                 from . import manual
                 from .models import MatrixBusy, MatrixError

@@ -117,6 +117,10 @@ SCHEMAS = {
         "CREATE TABLE IF NOT EXISTS item_versions (record_id TEXT PRIMARY KEY, version_id INTEGER NOT NULL, by TEXT NOT NULL, created TEXT NOT NULL)",
         """CREATE TABLE IF NOT EXISTS expected (id INTEGER PRIMARY KEY AUTOINCREMENT, version_id INTEGER NOT NULL, title TEXT NOT NULL,
             why TEXT, due TEXT, status TEXT NOT NULL DEFAULT 'open', created TEXT NOT NULL, UNIQUE(version_id, title))""",
+    ], [
+        # 记忆更新: what the daily tidy proposes, waiting for the owner's 用 / 不要 (tidy.py)
+        """CREATE TABLE IF NOT EXISTS memory_updates (id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT, kind TEXT NOT NULL,
+            content TEXT NOT NULL, why TEXT, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL, decided TEXT)""",
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
