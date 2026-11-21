@@ -201,6 +201,22 @@ function reset(item) {
   let ver = evaluate("memPage()");
   for (const label of ["项目与版本","观己 App","2.3","当前","会员改版","#45","AI 归的","1/1 件做完","预计会遇到","上线前验收","organize({expected:7,status:'done'})","<details class=\"ver\">","重新整理","做「方案」时","通过 2 · 退回 1","近 30 天评审：通过 3 · 退回 1 · 要改 0"]) assert.ok(ver.includes(label), label);
   evaluate('D.memory.versions=[]; D.memory.verdicts={}; D.memory.rules=globalThis.keptRules');
+  // 效果: below the rules; nothing reviewed yet → one plain line, no chart
+  let eff0 = evaluate("memPage()");
+  assert.match(eff0,/在用的规矩[\s\S]*效果[\s\S]*等你验收几件交付后，这里会显示 AI 做得怎么样/); assert.doesNotMatch(eff0,/一次通过率|<svg/);
+  evaluate(`D.memory.effect={has:true,recent:{total:5,first:4,rate:80},before:{total:4,first:2,rate:50},rounds:0.6,blocked:2,failed:1,
+    weeks:[{start:"09-28",total:0,first:0,rate:null},{start:"10-05",total:1,first:0,rate:0},{start:"10-12",total:2,first:1,rate:50},{start:"10-19",total:1,first:1,rate:100},
+           {start:"10-26",total:1,first:1,rate:100},{start:"11-02",total:2,first:1,rate:50},{start:"11-09",total:1,first:1,rate:100},{start:"11-16",total:1,first:1,rate:100}],
+    by_type:[{name:"方案",total:4,first:3,rate:75,few:false},{name:"报告<b>",total:1,first:1,rate:100,few:true}],by_ai:[{name:"Claude",total:5,first:4,rate:80,few:false}],by_project:[],
+    reasons:[{kind:"太长/格式",count:3,example:"写得太长"},{kind:"方向不对",count:2,example:""},{kind:"缺数据/背景",count:1,example:"没数据"},{kind:"其他",count:1,example:""}]}`);
+  let eff = evaluate("memPage()");
+  for (const label of ["最近 4 周一次通过率 80%","（前 4 周 50%）","<svg","11-16","按交付类型","方案","75%","样本太少","按 AI","Claude","通过前平均要改 0.6 轮","AI 卡住问你 2 次","没做成 1 次","太长/格式","比如「写得太长」","缺数据/背景"]) assert.ok(eff.includes(label), label);
+  assert.ok(!eff.includes("报告<b>") && eff.includes("报告&lt;b&gt;"), "names are escaped");
+  assert.doesNotMatch(eff,/其他 <span/, "only the top three reasons");
+  assert.equal((eff.match(/<rect /g)||[]).length, 8, "one mark per week");
+  evaluate('D.memory.effect={has:true,recent:{total:2,first:1,rate:50},before:{total:0,first:0,rate:null},weeks:[],by_type:[],by_ai:[],reasons:[],blocked:0,failed:0}');
+  assert.match(evaluate("memPage()"),/最近 4 周一次通过率 50%.*（前 4 周 没有验收）/);
+  evaluate('delete D.memory.effect');
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items

@@ -1058,7 +1058,7 @@ function memPage(){
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
    +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span>${verdictLine()}</div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,ruleMeta(r),
       `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
-    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
+    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`+effectView();
 }
 const PROFILE_HINT="写几句就行，AI 会照着做得更像你要的：\n岗位：比如 观己 App 的产品经理，负责会员和增长\n公司和产品：做什么、用户是谁\n常一起干活的人：张三（设计）、李四（后端）\n交付习惯：方案用飞书文档、先给结论再展开、表格优先\n常用工具和地方：需求在飞书多维表格，代码在 GitHub 的 xxx 仓库";
 /* 让 AI 认识我：你勾选它能看的地方，同意后它去看，写一份草稿给你确认 */
@@ -1104,6 +1104,22 @@ function ruleMeta(r){ const tags=[r.scope?`<span class="rule-tag">${esc(r.scope_
   return tags+esc(r.why||""); }
 function verdictLine(){ const v=(D.memory||{}).verdicts||{}, n=(v["通过"]||0)+(v["退回"]||0)+(v["要改"]||0);
   return n?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">近 30 天评审：通过 ${v["通过"]||0} · 退回 ${v["退回"]||0} · 要改 ${v["要改"]||0}</span>`:""; }
+/* 效果：AI 交付一次就通过的比例，按周看有没有进步（后端 stats.py，约 10 分钟算一次） */
+function effectView(){
+  const E=(D.memory||{}).effect||{}, head=`<div class="sec-h">效果</div>`;
+  if(!E.has) return head+`<div class="list"><div class="empty">等你验收几件交付后，这里会显示 AI 做得怎么样</div></div>`;
+  const pct=v=>v==null?"—":v+"%", r=E.recent||{}, b=E.before||{}, W=E.weeks||[];
+  const big=`<div style="font-size:20px;font-weight:650;line-height:1.35">最近 4 周一次通过率 ${pct(r.rate)}<span style="font-size:13px;font-weight:400;color:var(--ink3)">（前 4 周 ${b.rate==null?"没有验收":b.rate+"%"}）</span></div>`;
+  const bw=28, gap=12, H=60, chart=`<svg viewBox="0 0 ${W.length*(bw+gap)} ${H+30}" style="display:block;width:100%;max-width:${W.length*(bw+gap)*1.4}px;height:auto;margin:10px 0 4px" role="img" aria-label="最近 8 周每周一次通过率">${W.map((w,i)=>{
+      const x=i*(bw+gap)+gap/2, h=w.rate==null?0:Math.max(2,w.rate*H/100);
+      return `<g><title>${esc(w.start)} 那周：${w.total?`验收 ${w.total} 件，一次通过 ${w.first} 件`:"没有验收"}</title>`
+        +(w.rate==null?`<rect x="${x}" y="${H-1}" width="${bw}" height="1" fill="var(--line)"/>`:`<rect x="${x}" y="${H-h}" width="${bw}" height="${h}" rx="3" fill="var(--brand)" opacity="${i>=W.length-4?1:.45}"/><text x="${x+bw/2}" y="${H-h-4}" text-anchor="middle" font-size="10" fill="var(--ink2)">${w.rate}%</text>`)
+        +`<text x="${x+bw/2}" y="${H+14}" text-anchor="middle" font-size="9.5" fill="var(--ink3)">${esc(w.start)}</text></g>`; }).join("")}</svg>`;
+  const facts=[E.rounds!=null?`通过前平均要改 ${E.rounds} 轮`:"",`AI 卡住问你 ${E.blocked||0} 次`,`没做成 ${E.failed||0} 次`].filter(Boolean).join(" · ");
+  const table=(title,G)=>G&&G.length?`<div style="min-width:0"><div class="k" style="font-weight:600;font-size:12.5px;margin:12px 0 4px">${title}</div><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px">${G.slice(0,6).map(g=>`<tr style="border-top:1px solid var(--line2)"><td style="padding:4px 0;overflow-wrap:anywhere">${esc(g.name)}</td><td style="width:4.5em;color:var(--ink3);text-align:right">${g.total} 件</td><td style="width:6.5em;text-align:right">${g.few?`<span class="rule-tag" style="margin:0">样本太少</span>`:pct(g.rate)}</td></tr>`).join("")}</table></div>`:"";
+  const R=(E.reasons||[]).slice(0,3), why=R.length?`<div class="k" style="font-weight:600;font-size:12.5px;margin:12px 0 4px">退回/要改的主要原因</div>${R.map((x,i)=>`<div style="font-size:12.5px;padding:2px 0;overflow-wrap:anywhere">${i+1}. ${esc(x.kind)} <span style="color:var(--ink3)">${x.count} 次${x.example?`，比如「${esc(x.example)}」`:""}</span></div>`).join("")}`:"";
+  return head+`<div class="list" style="padding:12px 14px;min-width:0">${big}${chart}<div class="hint" style="margin:0">近 8 周 · ${facts}</div>${table("按交付类型",E.by_type)}${table("按 AI",E.by_ai)}${why}</div>`;
+}
 /* 项目与版本：每个版本里有哪些事、做到哪了、预计还会遇到什么；AI 整理，你改它弄错的 */
 function versionsView(){
   const M=D.memory||{}, V=M.versions||[], O=M.organize||{}, who=esc(((D.settings||{}).setup||{}).driver?.name||"你的 AI");

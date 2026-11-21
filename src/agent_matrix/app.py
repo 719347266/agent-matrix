@@ -322,10 +322,21 @@ def memory_view(root, items):
         return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent,
                            "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning},
                            "versions": archive, "organize": {"asked": versions.organize_asked(root), "doing": organizing},
-                           "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")}},
+                           "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")},
+                           "effect": _effect(root)},
                 "history": history}
     except Exception as exc:
         return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
+
+
+def _effect(root):
+    """效果: how the AI's deliverables fared, week by week (stats.py, cached ~10 minutes)."""
+    try:
+        from . import stats
+        return stats.cached(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.effect", exc)
+        return {"has": False}
 
 
 def system_info(root):
