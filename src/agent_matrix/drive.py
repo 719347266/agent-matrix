@@ -798,23 +798,20 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = _prepare_organize(root, config, driver)
         if job:
             return _open(root, job, driver)
-    if "tidy" in wanted:
-        job = _prepare_tidy(root, config, driver)
-        if job:
-            return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
             continue
         job = prepare(root, config, driver)
         if job:
             return _open(root, job, driver)
+    tidy_now = lambda: (_open(root, job, driver) if "tidy" in wanted and (job := _prepare_tidy(root, config, driver)) else None)
     if "item" not in wanted:
-        return None
+        return tidy_now()   # tidying the memory is for idle time: after the owner's own work, never before it
     tried = set(skip)
     for _ in range(5):
         job = _prepare_item(root, config, driver, skip=tried, allow=allow, name_for=name_for)
         if not job:
-            return None
+            return tidy_now()
         if "skip" in job:
             tried.add(job["skip"])
             continue

@@ -39,7 +39,7 @@ class Tidy(unittest.TestCase):
 
     def job(self, plan):
         with snap():
-            job = drive.next_job(self.root, None, "Antigravity", kinds=["tidy"])
+            job = take(self.root)
         self.assertEqual(job["kind"], "tidy")
         (Path(job["folder"]) / "tidy.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
         with snap():
@@ -49,11 +49,11 @@ class Tidy(unittest.TestCase):
         self.assertIn("tidy", drive.kinds_for(self.root, "Antigravity"))
         with snap([]):
             self.assertIsNone(tidy.due(self.root), "nothing new: no tidy")
-            self.assertIsNone(drive.next_job(self.root, None, "Antigravity", kinds=["tidy"]))
+            self.assertIsNone(take(self.root))
         memory.record_outcome(self.root, "r1", "退回", "太长了")
         with snap():
             self.assertEqual(tidy.due(self.root), {"verdicts": 1, "moments": 0, "items": 3})
-            job = drive.next_job(self.root, None, "Antigravity", kinds=["tidy"])
+            job = take(self.root)
             for name in ("rules.json", "moments.json", "versions.json", "profile.md", "outcomes.json", "unplaced.json"):
                 self.assertTrue((Path(job["folder"]) / name).is_file(), name)
             self.assertIn("第几步/共几步", job["instructions"])
@@ -175,3 +175,29 @@ class Tidy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def take(root):
+    """The tidy job alone (in next_job it waits behind any other work: see TidyWaitsForRealWork)."""
+    job = drive._prepare_tidy(root, None, "Antigravity")
+    return drive._open(root, job, "Antigravity") if job else None
+
+
+class TidyWaitsForRealWork(unittest.TestCase):
+    def test_an_item_waiting_goes_first_and_tidying_comes_when_idle(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from agent_matrix import aidrivers, drive
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "state").mkdir()
+            aidrivers.hello(root, "Antigravity")
+            order = []
+            fake_item = lambda root, config, driver, **k: order.append("item") or None
+            fake_tidy = lambda root, config, driver: order.append("tidy") or None
+            with patch.object(drive, "_prepare_item", fake_item), patch.object(drive, "_prepare_tidy", fake_tidy), \
+                 patch.object(drive, "_prepare_triage", lambda *a: None), patch.object(drive, "_prepare_meeting", lambda *a: None), \
+                 patch.object(drive, "_prepare_chat", lambda *a: None), patch.object(drive, "_prepare_learn", lambda *a: None):
+                drive.next_job(root, None, "Antigravity")
+            self.assertEqual(order, ["item", "tidy"])
