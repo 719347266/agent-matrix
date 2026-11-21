@@ -201,3 +201,23 @@ class TidyWaitsForRealWork(unittest.TestCase):
                  patch.object(drive, "_prepare_chat", lambda *a: None), patch.object(drive, "_prepare_learn", lambda *a: None):
                 drive.next_job(root, None, "Antigravity")
             self.assertEqual(order, ["item", "tidy"])
+
+
+class PlaceMatchesExisting(unittest.TestCase):
+    def test_a_near_project_name_lands_in_the_existing_project_and_settled_proposals_close(self):
+        import tempfile
+        from agent_matrix import projects, versions
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "state").mkdir()
+            pid = projects.create(root, "观己 App")
+            self.assertEqual(projects.find(root, "观己")["id"], pid)
+            self.assertIsNone(projects.find(root, "心响"))
+            tidy._apply(root, "place_item", {"rid": "r1", "project": "观己", "version": ""})
+            self.assertEqual(projects.chosen(root)["r1"], pid)
+            self.assertEqual([p["name"] for p in projects.all(root)], ["观己 App"], "no second project")
+            tidy.save(root, [("place_item", "#2 x → 观己", "y", {"n": 2, "rid": "r2", "project": "观己", "version": ""}),
+                             ("place_item", "#3 x → 观己", "y", {"n": 3, "rid": "r3", "project": "观己", "version": ""})], "tidy-1")
+            vid = versions.upsert(root, "观己 App", "2.3", "当前")
+            versions.place(root, "r2", vid)   # 整理项目和版本 placed it meanwhile
+            self.assertEqual([u["data"]["rid"] for u in tidy.updates(root)], ["r3"])

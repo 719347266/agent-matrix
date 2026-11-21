@@ -94,6 +94,19 @@ def assign(root, record_ids, project_id):
         db.close()
 
 
+def find(root, name):
+    """An existing project by the name an AI wrote: exact, or one name inside the other ("观己" ↔ "观己 App"). None if none."""
+    name = " ".join(str(name or "").split()).lower()
+    if not name:
+        return None
+    live = all(root)
+    exact = next((p for p in live if p["name"].lower() == name), None)
+    if exact:
+        return exact
+    near = [p for p in live if name in p["name"].lower() or p["name"].lower() in name]
+    return near[0] if len(near) == 1 else None
+
+
 def chosen(root):
     """{record_id: project_id} as the owner placed them (0 = the owner said none)."""
     db = _db(root)

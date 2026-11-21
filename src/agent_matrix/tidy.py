@@ -196,6 +196,17 @@ def save(root, proposals, job=""):
     return added
 
 
+def _settled(root, rows):
+    """A proposal to place an item that has been placed since (by the owner, or by 整理项目和版本) asks for nothing
+    any more: it is closed quietly instead of waiting for a click."""
+    from . import projects
+    placed = projects.chosen(root)
+    done = [i for i, k, c, w, d, s, at in rows if s == "pending" and k == "place_item" and json.loads(d).get("rid") in placed]
+    for uid in done:
+        _mark(root, uid, "dropped")
+    return [r for r in rows if r[0] not in set(done)]
+
+
 def updates(root, status="pending"):
     db = _db(root)
     try:
@@ -203,6 +214,7 @@ def updates(root, status="pending"):
         rows = db.execute(q, (status,) if status else ()).fetchall()
     finally:
         db.close()
+    rows = _settled(root, rows)
     return [{"id": i, "type": k, "label": LABEL.get(k, k), "content": c, "why": w or "", "data": json.loads(d), "status": s,
              "state": STATE.get(s, s), "created": str(at)[5:16].replace("T", " ")} for i, k, c, w, d, s, at in rows]
 
@@ -237,12 +249,14 @@ def _apply(root, kind, d):
     elif kind == "stale_moment":
         memory.set_status(root, d["id"], "stale")
     elif kind == "place_item":
+        known = projects.find(root, d["project"])   # "观己" when the project is called "观己 App": the same one, not a new one
+        name = known["name"] if known else d["project"]
         if d.get("version"):
-            have = next((v for v in versions.all(root) if v["project"] == d["project"] and v["name"] == d["version"]), None)
-            vid = have["id"] if have else versions.upsert(root, d["project"], d["version"])
+            have = next((v for v in versions.all(root) if v["project"] == name and v["name"] == d["version"]), None)
+            vid = have["id"] if have else versions.upsert(root, name, d["version"])
             versions.place(root, d["rid"], vid, by=versions.OWNER)
         else:
-            projects.assign(root, [d["rid"]], projects.create(root, d["project"]))
+            projects.assign(root, [d["rid"]], known["id"] if known else projects.create(root, name))
     elif kind == "version_status":
         if not any(v["project"] == d["project"] and v["name"] == d["version"] for v in versions.all(root)):
             return "这个版本已经不在了"
