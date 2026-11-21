@@ -6,8 +6,10 @@ For one item it collects, cheapest first:
   3. the chat around the message the item came from;
   4. Feishu documents whose titles match the subject;
   5. similar items, open or finished, with their deliverables;
-  6. the item's own notebook and the previous draft.
-The model reads this first and digs further itself (commands listed at the end) until it has enough.
+  6. the item's own notebook and the previous draft;
+  7. what the items before it delivered, and deliverables of the same kind the owner passed (pastwork).
+The whole pack is kept under BUDGET characters (fit). The model reads this first and digs further itself
+(commands listed at the end) until it has enough.
 """
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -249,21 +251,74 @@ DIG_MORE = """## 不够就自己继续扒（只读，扒到够为止）
 """
 
 
-def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=(), copy_to=None):
+HEAD = "# 背景（程序替你找好的，先读完再动手）\n"
+BUDGET = 24000   # characters for the whole 背景.md; past it the least needed sections are cut first
+# What survives when it is too long: the owner's own pointers and the line of work > examples > documents > old talk.
+MUST, EXAMPLES, DOCS, PAST = 0, 1, 2, 3
+
+
+def _close_fence(lines):
+    return lines + ["```"] if sum(1 for x in lines if x.startswith("```")) % 2 else lines
+
+
+def fit(sections, budget=BUDGET, fixed=0):
+    """Join (priority, heading, body_lines) sections into one text of at most `budget` characters (plus `fixed`
+    already spent elsewhere). Over budget, the lowest priority goes first (the later section first among equals):
+    its body is cut at a line end and ends with a note saying how much was left out. Headings always stay."""
+    blocks = [[p, h, "\n".join(body).split("\n")] for p, h, body in sections]
+
+    def size(b):
+        return len(b[1]) + 1 + len("\n".join(b[2])) + 2
+    over = fixed + len(HEAD) + sum(size(b) for b in blocks) - budget
+    order = sorted(range(len(blocks)), key=lambda i: (-blocks[i][0], -i))
+    for b in (blocks[i] for i in order):
+        if over <= 0:
+            break
+        body = "\n".join(b[2])
+        if not body:
+            continue
+        note = "（太长，省略了 {} 字，需要时用下面的命令自己去读）"
+        room = max(0, len(body) - over - len(note) - 12)
+        kept, used = [], 0
+        for line in b[2]:
+            if used + len(line) + 1 > room:
+                if room - used > 200:  # one long line (a pasted transcript): keep its start
+                    kept.append(line[:room - used - 1])
+                break
+            kept.append(line)
+            used += len(line) + 1
+        kept = _close_fence(kept)
+        cut = len(body) - len("\n".join(kept))
+        b[2] = kept + [note.format(cut)]
+        over -= len(body) - len("\n".join(b[2]))
+    text = [HEAD]
+    for _, heading, body in blocks:
+        text += [heading, *body, ""]
+    return "\n".join(text)
+
+
+def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=(), copy_to=None, budget=BUDGET):
     """Return the 背景.md text for one item. Every section is optional; missing ones are simply left out."""
-    parts = ["# 背景（程序替你找好的，先读完再动手）", ""]
+    sections = []   # (priority, heading, lines)
     links = [(k, u) for k, u in given_links(row, notes) if not any(x and x in u for x in skip_urls)]
     if links:
-        parts += ["## 本人给过的链接（先读这些；里面有上一版就在它基础上改）",
-                  *[f"- {u}（出自{k}）" for k, u in links[:10]], ""]
+        sections.append((MUST, "## 本人给过的链接（先读这些；里面有上一版就在它基础上改）",
+                         [f"- {u}（出自{k}）" for k, u in links[:10]]))
     try:  # the owner strung these together: this item continues the ones before it
         before, after = linked_items(root, rows, row)
     except Exception:
         before, after = [], []
     if before:
-        parts += ["## 这件事接着前面这些事做（本人串起来的，离得最近的在前；先读它们的交付，在它们的基础上往下做，口径保持一致）", *before, ""]
+        sections.append((MUST, "## 这件事接着前面这些事做（本人串起来的，离得最近的在前；先读它们的交付，在它们的基础上往下做，口径保持一致）", before))
+    try:
+        from .pastwork import upstream_results
+        done_before = upstream_results(root, rows, row)
+    except Exception:
+        done_before = []
+    if done_before:
+        sections.append((MUST, "## 前置事项的成果（沿用里面的口径和结论，不要另起一套）", done_before))
     if after:
-        parts += ["## 后面还有这些事要接着做（这次的成果要能让它们直接用）", *after, ""]
+        sections.append((MUST, "## 后面还有这些事要接着做（这次的成果要能让它们直接用）", after))
     excerpt, transcript = transcript_excerpt(root, row)
     if excerpt:
         where = str(transcript)
@@ -271,33 +326,39 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
             import shutil
             shutil.copyfile(transcript, Path(copy_to) / "逐字稿.md")
             where = "逐字稿.md（当前文件夹）"
-        parts += ["## 会议原话前后文", f"完整逐字稿：`{where}`", "", "```", excerpt, "```", ""]
+        sections.append((MUST, "## 会议原话前后文", [f"完整逐字稿：`{where}`", "", "```", excerpt, "```"]))
     chat = chat_excerpt(client, row, now)
     if chat:
-        parts += ["## 来源聊天前后文", "```", chat, "```", ""]
+        sections.append((MUST, "## 来源聊天前后文", ["```", chat, "```"]))
+    try:
+        from .pastwork import example_lines
+        shown = example_lines(root, rows, row)
+    except Exception:
+        shown = []
+    if shown:
+        sections.append((EXAMPLES, "## 被通过的同类交付（范例）", shown))
     known = {u for _, u in links}
     docs = [d for d in related_docs(client, _one(row.get("标题")), exclude=skip_urls) if d["url"] not in known]
     if docs:
-        parts += ["## 可能相关的飞书文档（按标题相近程度排）", *[f"- {d['title']} {d['url']} {d['updated']}" for d in docs], ""]
+        sections.append((DOCS, "## 可能相关的飞书文档（按标题相近程度排）", [f"- {d['title']} {d['url']} {d['updated']}" for d in docs]))
     try:  # 记忆层: earlier meetings on the same topic (decisions, open questions, what it was waiting for)
         from .memory import recall_lines
-        before = recall_lines(root, _one(row.get("标题")) + " " + _one(row.get("下一步动作")), limit=5,
+        talked = recall_lines(root, _one(row.get("标题")) + " " + _one(row.get("下一步动作")), limit=5,
                               exclude_source_id=_meeting_id(row))
     except Exception:
-        before = []
-    if before:
-        parts += ["## 这个话题以前讨论过（按相关程度排）", *before, ""]
+        talked = []
+    if talked:
+        sections.append((PAST, "## 这个话题以前讨论过（按相关程度排）", talked))
     similar = related_items(rows, row)
     if similar:
-        parts += ["## 以前和现在的同类事项（做过的交付可以直接参考）", *similar, ""]
+        sections.append((DOCS, "## 以前和现在的同类事项（做过的交付可以直接参考）", similar))
     if notes:
-        parts += ["## 这件事的工作笔记（之前做到哪、卡在哪）", notes, ""]
+        sections.append((MUST, "## 这件事的工作笔记（之前做到哪、卡在哪）", notes.splitlines()))
     if previous:
-        parts += ["## 上一版交付", f"`{previous}`：在它的基础上改，不要从头写。", ""]
-    if len(parts) == 2:  # nothing found at all
-        parts += ["程序没找到现成的背景。按下面的办法自己去扒，至少查一次文档和一次聊天再下结论。", ""]
-    parts.append(DIG_MORE)
-    return "\n".join(parts)
+        sections.append((MUST, "## 上一版交付", [f"`{previous}`：在它的基础上改，不要从头写。"]))
+    if not sections:  # nothing found at all
+        return HEAD + "\n程序没找到现成的背景。按下面的办法自己去扒，至少查一次文档和一次聊天再下结论。\n\n" + DIG_MORE
+    return fit(sections, budget, fixed=len(DIG_MORE) + 1) + "\n" + DIG_MORE
 
 
 # ---- what happened after the item was picked up (for judging new items) ---------------------------------
