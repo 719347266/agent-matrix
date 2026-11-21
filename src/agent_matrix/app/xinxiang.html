@@ -88,6 +88,7 @@ button:disabled{opacity:.5;cursor:wait}
 /* sections and rows */
 .sec-h{display:flex;align-items:center;gap:8px;margin:20px 2px 8px;font-size:12.5px;font-weight:600;color:var(--ink2)}
 .sec-h:first-child{margin-top:4px}
+.prof-text{white-space:pre-wrap;line-height:1.65;font-size:13.5px}
 .said{margin-top:6px;padding:8px 10px;border-radius:9px;background:var(--amber-soft,rgba(255,159,10,.12));color:var(--ink);font-weight:500}
 .sec-h .n{color:var(--ink3);font-weight:500}
 .sec-h .aside{font-weight:400;color:var(--ink3)}
@@ -1031,12 +1032,24 @@ const noteLine=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><sp
 function memPage(){
   const R=(D.memory||{}).rules||[], mine=r=>r.source==="seed"||r.source==="本人";
   const fresh=R.filter(r=>r.fresh), rest=R.filter(r=>!r.fresh);
-  return `<p class="hint">这里是心响做事的规矩：所有 AI 干活前都会先读。</p>`
+  const P=(D.memory||{}).profile||{}, editing=S.profEdit||!P.text;
+  const about=`<div class="sec-h">关于你${P.at?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">${esc(P.at)} 更新</span>`:""}</div>`
+    +(editing?`<div class="list" style="padding:12px 14px"><textarea id="prof" data-draft="prof" rows="9" style="width:100%" placeholder="${esc(PROFILE_HINT)}">${esc(P.text||"")}</textarea>
+        <div class="acts" style="margin-top:8px;justify-content:flex-end">${P.text?`<button class="btn" onclick="S.profEdit=false;render()">取消</button>`:""}<button class="btn pri" onclick="saveProfile()">保存</button></div></div>`
+      :`<div class="list" style="padding:12px 14px"><div class="prof-text">${esc(P.text)}</div><div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.profEdit=true;render()">改</button></div></div>`);
+  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你的规矩。</p>`+about
    +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
    +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
       `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
     <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
+}
+const PROFILE_HINT="写几句就行，AI 会照着做得更像你要的：\n岗位：比如 观己 App 的产品经理，负责会员和增长\n公司和产品：做什么、用户是谁\n常一起干活的人：张三（设计）、李四（后端）\n交付习惯：方案用飞书文档、先给结论再展开、表格优先\n常用工具和地方：需求在飞书多维表格，代码在 GitHub 的 xxx 仓库";
+async function saveProfile(){
+  const text=String($("#prof")?.value||"").trim();
+  if(!LIVE){ (D.memory ||= {}).profile={text,at:"刚刚"}; S.profEdit=false; drafts.delete("prof"); return render(); }
+  try{ const r=await api("/api/profile",{text},15000); (D.memory ||= {}).profile=r.profile; S.profEdit=false; drafts.delete("prof"); toast("记下了，AI 做事前都会先读"); render(); }
+  catch(e){ toast("没保存成功，连不上本机服务"); }
 }
 /* what is not decided yet and will have to be confirmed later: left waiting on a condition, or left open in a meeting */
 function laterList(){

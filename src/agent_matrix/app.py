@@ -302,7 +302,7 @@ def memory_view(root, items):
             lines = [moment(m) for m in memory.recall(root, f"{i['title']} {i.get('next') or ''}", limit=4)]
             if lines:
                 history[i["n"]] = lines
-        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent}, "history": history}
+        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent, "profile": memory.profile(root)}, "history": history}
     except Exception as exc:
         return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
 
@@ -491,6 +491,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/commands/dismiss":
                 self.server.commands.dismiss(str(body.get("id") or ""))
                 return self._send(200, {"ok": True})
+            if path == "/api/profile":  # 关于你: the owner writes or corrects it; every AI reads it before work
+                from . import memory
+                return self._send(200, {"ok": True, "profile": memory.set_profile(root, body.get("text"))})
             if path == "/api/rules":
                 from . import memory
                 if body.get("add"):

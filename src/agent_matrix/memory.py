@@ -220,3 +220,39 @@ def rules_text(root):
     """The block every AI gets on top of its instructions."""
     lines = [f"- {r['rule']}" for r in rules(root)]
     return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准）\n" + "\n".join(lines) + "\n\n") if lines else ""
+
+
+# ---- 关于你: who the owner is, what they do, how they like work done -----------------------------------------
+# One plain Markdown file the owner can read and edit (state/profile.md). Every AI reads it before any work, so a
+# deliverable fits the owner's job, products, people and habits instead of a generic answer.
+
+PROFILE_MAX = 6000
+
+
+def _profile_path(root):
+    return Path(root) / "state" / "profile.md"
+
+
+def profile(root):
+    path = _profile_path(root)
+    if not path.is_file():
+        return {"text": "", "at": ""}
+    return {"text": path.read_text(encoding="utf-8"), "at": datetime.fromtimestamp(path.stat().st_mtime, TZ).strftime("%m-%d %H:%M")}
+
+
+def set_profile(root, text):
+    text = str(text or "").strip()[:PROFILE_MAX]
+    path = _profile_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if text:
+        path.write_text(text + "\n", encoding="utf-8")
+    elif path.exists():
+        path.unlink()
+    return profile(root)
+
+
+def profile_text(root):
+    """The block every AI gets on top of its instructions, right after the rules."""
+    text = profile(root)["text"].strip()
+    return ("## 本人是谁、在做什么（先读：按他的岗位、产品和习惯来做，用他的说法，交付要能直接拿去用）\n"
+            + text + "\n\n") if text else ""

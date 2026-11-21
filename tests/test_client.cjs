@@ -184,6 +184,10 @@ function reset(item) {
   // rules the AI learned wait on top for the owner's yes or no
   evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
   let mem = evaluate("memPage()");
+  assert.match(mem,/关于你/); assert.match(mem,/<textarea id="prof"/, "nothing written yet: a box to write it, with an example");
+  evaluate('D.memory.profile={text:"岗位：产品经理",at:"11-21 10:00"}'); let mem2 = evaluate("memPage()");
+  assert.match(mem2,/岗位：产品经理/); assert.doesNotMatch(mem2,/<textarea id="prof"/); assert.match(mem2,/S\.profEdit=true/);
+  evaluate('D.memory.profile=null');
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items

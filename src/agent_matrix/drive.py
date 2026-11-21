@@ -548,8 +548,8 @@ def _open(root, job, driver):
     finally:
         db.close()
     try:  # 记忆层: every AI reads the owner's standing rules before any work
-        from .memory import rules_text
-        head = rules_text(root)
+        from .memory import profile_text, rules_text
+        head = rules_text(root) + profile_text(root)
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]
