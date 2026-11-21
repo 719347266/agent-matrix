@@ -188,6 +188,71 @@ def _prepare_setup(root, config, driver):
 - 只做配置这一件事，不要改别的东西。"""}
 
 
+SCAN_STEPS = {
+    "feishu": """### 飞书近 30 天（全部用 `--as user`，只读）
+- 他自己写的和常看的文档：`lark-cli docs +search --query "<产品名/项目名/周报/方案>" --page-size 20 --as user --format json`，挑他是作者或最近编辑的几篇，用 `lark-cli docs +fetch --doc <链接> --doc-format markdown --as user` 看结构和写法（只看开头和小标题）。
+- 常在的群：`lark-cli im +chat-list --as user --format json`，看群名就能知道在做哪些项目、和谁合作。
+- 会议：`lark-cli vc --help`、`lark-cli minutes --help` 找最近的会议和纪要，看主题和结论。
+- 任务：`lark-cli task +get-my-tasks --complete=false --as user --format json`。
+- 不清楚某个命令怎么用就加 `--help`。""",
+    "folders": """### 本机项目文件夹（只看名字和说明，不看内容细节）
+- 列出 桌面、文稿、下载 以及 ~/Projects、~/code、~/work 这类目录下两层以内的文件夹名。
+- 找代码仓库（有 `.git` 的文件夹）：看 README 的前 20 行、package.json / pyproject.toml / go.mod 这类清单，知道每个仓库是什么、用什么语言。
+- 看文件夹里最近改过的文档类型（.docx/.pptx/.xlsx/.md/.fig），推断他常产出什么。不要打开个人照片、证件、财务文件。""",
+    "wechat": """### 微信近期聊天（只在本机读）
+- `wechat-cli sessions --limit 40` 看最近的会话；只挑明显是工作的群和常聊工作的人。
+- 对这几个会话：`wechat-cli history "<会话名>" --limit 60`，只归纳在推进什么事、他在里面是什么角色。
+- 家人、朋友、闲聊群一律跳过，不写进画像。
+- 没装 wechat-cli 或读不到：跳过这一项，在画像里说一声即可，不要为此去配置微信。""",
+    "ai_memory": """### 他在别的 AI 里留下的说明和记忆（只读）
+- Claude：`~/.claude/CLAUDE.md`、`~/.claude/projects/*/memory/*.md`。
+- Codex：`~/.codex/AGENTS.md`、`~/.codex/memories/` 下的文件。
+- Cindy：`~/Library/Application Support/Cindy` 下各工作区里的 CLAUDE.md / AGENTS.md（Windows 在 `%APPDATA%\\Cindy`）。
+- 从这些里提取他的岗位、项目、偏好和规矩；里面的 Token、密钥、账号一律不写。""",
+}
+
+
+def _prepare_profile(root, config, driver):
+    """The owner ticked where the AI may look to get to know them: it writes a draft of 关于你 for the owner to keep."""
+    from . import memory
+    from .promptfile import read
+    from .workenv import scratch
+    asked = memory.scan_asked(root)
+    if not asked or _busy(root, "profile"):
+        return None
+    sources = [s for s in asked.get("sources") or [] if s in SCAN_STEPS]
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    current = memory.profile(root)["text"].strip() or "（还没有，本人没写过）"
+    text = read(root, "profile_scan.md").format(sources="、".join(memory.SCAN_SOURCES[s] for s in sources),
+                                                 current=current, steps="\n\n".join(SCAN_STEPS[s] for s in sources))
+    return {"id": f"profile-{stamp}", "kind": "profile", "title": "认识你：写一份「关于你」", "folder": str(scratch(root, "profile", stamp)),
+            "ref": {"sources": sources}, "output": ["画像.md"], "lease_until": _lease(ITEM_LEASE_MINUTES), "instructions": text}
+
+
+def _submit_profile(root, job):
+    from . import inbox, memory
+    path = Path(job["folder"]) / "画像.md"
+    text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+    sections = [x for x in text.split("\n## ")[1:] if x.split("\n", 1)[-1].strip()]
+    problem = ("没找到 画像.md" if not text else "画像太短，至少要写出岗位、在做的事、交付习惯这几节" if len(text) < 200 or len(sections) < 4
+               else "画像太长，压到 6000 字以内，只写结论" if len(text) > memory.PROFILE_MAX
+               else "里面还有占位文字（TODO/待补充/XX），写实或写「还看不出来」" if any(w in text for w in ("TODO", "待补充", "XX")) else "")
+    if problem:
+        job["rounds"] += 1
+        if job["rounds"] > MAX_FIX_ROUNDS + 2:
+            return fail(root, job, problem)
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": problem}
+    memory.save_draft(root, text, by=job.get("driver") or "AI")
+    _close(root, job, "done")
+    activity.log(root, "learn", "认识你：「关于你」草稿写好了", detail=job.get("driver") or "")
+    try:
+        inbox.add(root, f"profile-draft:{job['id']}", f"✓ {job.get('driver') or 'AI'} 写好了一份「关于你」的草稿，到「记忆」里看看，对的话点「用这份」。", kind="system")
+    except Exception as exc:
+        activity.swallowed(root, "drive._submit_profile", exc)
+    return {"ok": True, "status": "done"}
+
+
 def _prepare_learn(root, config, driver):
     """Now and then: turn the owner's recent feedback into standing rules (偏好快照)."""
     from . import memory, thread as conversation
@@ -442,7 +507,9 @@ def cindy_kinds(root):
 def local_kinds(root):
     """What the built-in driver takes: the sorting unless it was handed to someone else, and the items that are its own
     (all of them when a local AI is chosen in settings, else only those handed to a local AI one by one)."""
-    return [*(SORTING if sort_runner(root) == "local" else ()), "item"]
+    from .aidrivers import LOCAL
+    from .thread import setting
+    return [*(("profile",) if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sort_runner(root) == "local" else ()), "item"]
 
 
 def kinds_for(root, driver):
@@ -450,7 +517,7 @@ def kinds_for(root, driver):
     from .aidrivers import is_mine
     from .thread import setting
     work, sort = setting(Path(root), "engine", "codex"), setting(Path(root), "engine_sort", "")
-    return [*(("setup",) if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
+    return [*(("setup", "profile") if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
 
 
 def item_filter(root, driver, *, builtin=False):
@@ -509,6 +576,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
     wanted = set(kinds or (*SORTING, "item"))
     if "setup" in wanted:   # the owner is waiting on this one: it goes before anything else
         job = _prepare_setup(root, config, driver)
+        if job:
+            return _open(root, job, driver)
+    if "profile" in wanted:
+        job = _prepare_profile(root, config, driver)
         if job:
             return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
@@ -682,6 +753,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_learn(root, job)
     if kind == "setup":
         return _submit_setup(root, job)
+    if kind == "profile":
+        return _submit_profile(root, job)
     from . import activity
     from .workenv import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
@@ -825,6 +898,9 @@ def release(root, config, job_id, reason="驱动方放回"):
         return {"ok": True, "status": job["status"]}
     if job["kind"] == "item":
         _item(root, config, job).release()
+    if job["kind"] == "profile":   # the AI could not do it: the ask goes away (else it comes straight back); the owner can ask again
+        from . import memory
+        memory.cancel_scan(root)
     if job["kind"] == "setup":   # the AI could not do it: the owner sees why, and can ask again
         from . import setupasks, thread as conversation
         what = job["ref"]["what"]
@@ -984,6 +1060,10 @@ def main(argv=None):
             from .thread import setting
             if setupasks.pending(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "setup"):
                 print(json.dumps({"ok": True, "work": "setup"}, ensure_ascii=False))
+                return 0
+            from . import memory
+            if memory.scan_asked(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "profile"):
+                print(json.dumps({"ok": True, "work": "profile"}, ensure_ascii=False))
                 return 0
             if has_items_for(root, config, "Cindy"):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))

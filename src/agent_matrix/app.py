@@ -302,7 +302,11 @@ def memory_view(root, items):
             lines = [moment(m) for m in memory.recall(root, f"{i['title']} {i.get('next') or ''}", limit=4)]
             if lines:
                 history[i["n"]] = lines
-        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent, "profile": memory.profile(root)}, "history": history}
+        from .jobstore import open_jobs
+        scanning = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in open_jobs(root) if j["kind"] == "profile"), None)
+        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent,
+                           "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning}},
+                "history": history}
     except Exception as exc:
         return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
 
@@ -493,6 +497,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if path == "/api/profile":  # 关于你: the owner writes or corrects it; every AI reads it before work
                 from . import memory
+                if body.get("scan") is not None:   # 让 AI 认识我: the places the owner ticked
+                    if not body["scan"]:
+                        memory.cancel_scan(root)
+                        return self._send(200, {"ok": True})
+                    try:
+                        memory.ask_scan(root, list(body["scan"]))
+                    except ValueError as exc:
+                        return self._send(400, {"ok": False, "reply": str(exc)})
+                    return self._send(200, {"ok": True, **setup_view(root)["driver"]})
+                if "draft" in body:                # the owner keeps the AI's draft, or throws it away
+                    return self._send(200, {"ok": True, "profile": memory.drop_draft(root, use=bool(body["draft"]))})
                 return self._send(200, {"ok": True, "profile": memory.set_profile(root, body.get("text"))})
             if path == "/api/rules":
                 from . import memory

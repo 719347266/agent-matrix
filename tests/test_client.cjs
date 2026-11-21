@@ -187,6 +187,12 @@ function reset(item) {
   assert.match(mem,/关于你/); assert.match(mem,/<textarea id="prof"/, "nothing written yet: a box to write it, with an example");
   evaluate('D.memory.profile={text:"岗位：产品经理",at:"11-21 10:00"}'); let mem2 = evaluate("memPage()");
   assert.match(mem2,/岗位：产品经理/); assert.doesNotMatch(mem2,/<textarea id="prof"/); assert.match(mem2,/S\.profEdit=true/);
+  // 让 AI 认识我: tick the places, agree, the AI looks; its draft waits for the owner
+  evaluate('D.memory.profile={text:""}; S.scanPick=SCAN.filter(x=>scanReady(x[0])).map(x=>x[0])'); let pick = evaluate("memPage()");
+  for (const label of ["让 AI 看哪些地方","飞书近 30 天","本机项目文件夹","微信近期聊天","Cindy/Claude 记忆","同意，开始看","不保存聊天原文"]) assert.ok(pick.includes(label), label);
+  evaluate('S.scanPick=null; D.memory.profile={text:"",scanning:{by:"Antigravity",step:"2/4 看飞书文档"}}'); assert.match(evaluate("memPage()"),/Antigravity 正在认识你<\/b>：2\/4 看飞书文档/);
+  evaluate('D.memory.profile={text:"",draft:{text:"## 岗位和职责\\n产品经理",by:"Antigravity",at:"11-21 10:00"}}'); let dr = evaluate("memPage()");
+  for (const label of ["Antigravity 写好了一份「关于你」草稿","产品经理","useDraft(true)","editDraft()","useDraft(false)"]) assert.ok(dr.includes(label), label);
   evaluate('D.memory.profile=null');
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);

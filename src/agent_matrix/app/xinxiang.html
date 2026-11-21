@@ -89,6 +89,7 @@ button:disabled{opacity:.5;cursor:wait}
 .sec-h{display:flex;align-items:center;gap:8px;margin:20px 2px 8px;font-size:12.5px;font-weight:600;color:var(--ink2)}
 .sec-h:first-child{margin-top:4px}
 .prof-text{white-space:pre-wrap;line-height:1.65;font-size:13.5px}
+.scan-pick{display:flex;gap:10px;align-items:flex-start;padding:8px 2px;cursor:pointer}.scan-pick input{margin-top:3px}.scan-pick span{font-size:13px;color:var(--ink2)}.scan-pick b{color:var(--ink);font-weight:600}.scan-pick.off{opacity:.5;cursor:default}
 .said{margin-top:6px;padding:8px 10px;border-radius:9px;background:var(--amber-soft,rgba(255,159,10,.12));color:var(--ink);font-weight:500}
 .sec-h .n{color:var(--ink3);font-weight:500}
 .sec-h .aside{font-weight:400;color:var(--ink3)}
@@ -1032,12 +1033,12 @@ const noteLine=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><sp
 function memPage(){
   const R=(D.memory||{}).rules||[], mine=r=>r.source==="seed"||r.source==="本人";
   const fresh=R.filter(r=>r.fresh), rest=R.filter(r=>!r.fresh);
-  const P=(D.memory||{}).profile||{}, editing=S.profEdit||!P.text;
+  const P=(D.memory||{}).profile||{}, editing=S.profEdit||(!P.text&&!P.draft);   // an AI draft waiting: decide on it first
   const about=`<div class="sec-h">关于你${P.at?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">${esc(P.at)} 更新</span>`:""}</div>`
-    +(editing?`<div class="list" style="padding:12px 14px"><textarea id="prof" data-draft="prof" rows="9" style="width:100%" placeholder="${esc(PROFILE_HINT)}">${esc(P.text||"")}</textarea>
+    +(!editing&&!P.text?"":editing?`<div class="list" style="padding:12px 14px"><textarea id="prof" data-draft="prof" rows="9" style="width:100%" placeholder="${esc(PROFILE_HINT)}">${esc(P.text||"")}</textarea>
         <div class="acts" style="margin-top:8px;justify-content:flex-end">${P.text?`<button class="btn" onclick="S.profEdit=false;render()">取消</button>`:""}<button class="btn pri" onclick="saveProfile()">保存</button></div></div>`
       :`<div class="list" style="padding:12px 14px"><div class="prof-text">${esc(P.text)}</div><div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.profEdit=true;render()">改</button></div></div>`);
-  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你的规矩。</p>`+about
+  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你的规矩。</p>`+about+scanView(P)
    +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
    +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
@@ -1045,10 +1046,42 @@ function memPage(){
     <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
 }
 const PROFILE_HINT="写几句就行，AI 会照着做得更像你要的：\n岗位：比如 观己 App 的产品经理，负责会员和增长\n公司和产品：做什么、用户是谁\n常一起干活的人：张三（设计）、李四（后端）\n交付习惯：方案用飞书文档、先给结论再展开、表格优先\n常用工具和地方：需求在飞书多维表格，代码在 GitHub 的 xxx 仓库";
+/* 让 AI 认识我：你勾选它能看的地方，同意后它去看，写一份草稿给你确认 */
+const SCAN=[["feishu","飞书近 30 天","文档、群、会议、任务"],["folders","本机项目文件夹","项目名、代码仓库、常产出的文件"],["wechat","微信近期聊天","只看工作群和常聊工作的人"],["ai_memory","Cindy/Claude 记忆","你在别的 AI 里写过的说明"]];
+function scanReady(k){ const s=D.system||{}; return k==="feishu"?!!(s.record||{}).feishu_ready:k==="wechat"?wxOn(s):true; }
+function scanView(P){
+  const who=esc(((D.settings||{}).setup||{}).driver?.name||"你的 AI");
+  if(P.draft) return `<div class="callout" style="margin-top:12px"><div class="what"><b>${esc(P.draft.by||"AI")} 写好了一份「关于你」草稿</b>　${esc(P.draft.at||"")}<div class="prof-text" style="margin-top:8px;max-height:320px;overflow:auto">${esc(P.draft.text)}</div></div>
+    <div class="acts"><button class="btn pri" onclick="useDraft(true)">用这份</button><button class="btn" onclick="editDraft()">改一改再用</button><button class="btn ghost" onclick="useDraft(false)">不要</button></div></div>`;
+  if(P.scanning) return `<div class="callout" style="margin-top:12px"><div class="what"><b>${esc(P.scanning.by||"AI")} 正在认识你</b>${P.scanning.step?`：${esc(P.scanning.step)}`:""}<br><span class="hint" style="margin:0">看完会写一份草稿放在这里，你确认了才生效。</span></div></div>`;
+  if(P.asked) return `<div class="callout" style="margin-top:12px"><div class="what">等 ${who} 来看：${esc((P.asked.sources||[]).map(k=>(SCAN.find(x=>x[0]===k)||[])[1]).filter(Boolean).join("、"))}</div><div class="acts"><button class="btn ghost" onclick="askScan([])">不看了</button></div></div>`;
+  if(!S.scanPick) return `<div class="acts" style="margin-top:10px;justify-content:flex-end"><button class="btn" onclick="S.scanPick=SCAN.filter(x=>scanReady(x[0])).map(x=>x[0]);render()">让 AI 认识我</button></div>`;
+  return `<div class="list" style="margin-top:12px;padding:12px 14px"><div class="k" style="font-weight:600">让 AI 看哪些地方</div>
+    <p class="hint" style="margin:4px 0 10px">${who} 会按你勾的地方看一遍，整理成一份「关于你」草稿给你确认。只写摘要，不保存聊天原文和文档内容。</p>
+    ${SCAN.map(([k,l,d])=>{ const ok=scanReady(k), on=S.scanPick.includes(k); return `<label class="scan-pick ${ok?"":"off"}"><input type="checkbox" ${on?"checked":""} ${ok?"":"disabled"} onchange="scanToggle('${k}')"><span><b>${l}</b>　${ok?d:"还没接入"}</span></label>`; }).join("")}
+    <div class="acts" style="margin-top:10px;justify-content:flex-end"><button class="btn" onclick="S.scanPick=null;render()">取消</button><button class="btn pri" ${S.scanPick.length?"":"disabled"} onclick="askScan(S.scanPick)">同意，开始看</button></div></div>`;
+}
+function scanToggle(k){ S.scanPick=S.scanPick.includes(k)?S.scanPick.filter(x=>x!==k):[...S.scanPick,k]; render(); }
+async function askScan(list){
+  if(!LIVE) return toast("原型里不能扫");
+  try{ const r=await api("/api/profile",{scan:list},15000); S.scanPick=null;
+    if(!list.length) toast("好，不看了");
+    else if(r.name&&r.online) toast(`已交给 ${r.name}，看完会把草稿放在这里`);
+    else { copySetupPrompt(); toast(r.name?`${r.name} 现在不在：已复制那段话，再发给它一次`:"还没有 AI 在驱动心响：已复制一段话，发给你常用的 AI，它报到后就会来看"); }
+    await load(); }
+  catch(e){ toast(e.message||"没交出去，连不上本机服务"); }
+}
+async function useDraft(use){
+  try{ const r=await api("/api/profile",{draft:use},15000); (D.memory ||= {}).profile=r.profile; toast(use?"用上了，AI 做事前都会先读":"扔掉了"); await load(); }
+  catch(e){ toast("没保存成功，连不上本机服务"); }
+}
+function editDraft(){ const P=(D.memory||{}).profile||{}; drafts.set("prof",P.draft.text); S.profEdit=true; render(); setTimeout(()=>$("#prof")?.focus(),30); }
 async function saveProfile(){
   const text=String($("#prof")?.value||"").trim();
   if(!LIVE){ (D.memory ||= {}).profile={text,at:"刚刚"}; S.profEdit=false; drafts.delete("prof"); return render(); }
-  try{ const r=await api("/api/profile",{text},15000); (D.memory ||= {}).profile=r.profile; S.profEdit=false; drafts.delete("prof"); toast("记下了，AI 做事前都会先读"); render(); }
+  try{ const had=!!((D.memory||{}).profile||{}).draft, r=await api("/api/profile",{text},15000);
+    if(had) await api("/api/profile",{draft:false},15000);   // the AI's draft went into what was just saved
+    (D.memory ||= {}).profile=r.profile; S.profEdit=false; drafts.delete("prof"); toast("记下了，AI 做事前都会先读"); await load(); }
   catch(e){ toast("没保存成功，连不上本机服务"); }
 }
 /* what is not decided yet and will have to be confirmed later: left waiting on a condition, or left open in a meeting */

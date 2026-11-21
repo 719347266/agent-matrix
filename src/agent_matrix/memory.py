@@ -256,3 +256,64 @@ def profile_text(root):
     text = profile(root)["text"].strip()
     return ("## 本人是谁、在做什么（先读：按他的岗位、产品和习惯来做，用他的说法，交付要能直接拿去用）\n"
             + text + "\n\n") if text else ""
+
+
+# ---- 让 AI 认识我: the owner ticks where the AI may look, the AI writes a draft, the owner decides ----------------
+
+SCAN_SOURCES = {"feishu": "飞书近 30 天", "folders": "本机项目文件夹", "wechat": "微信近期聊天", "ai_memory": "Cindy/Claude 记忆"}
+
+
+def _scan_path(root):
+    return Path(root) / "state" / "profile_scan.json"
+
+
+def _draft_path(root):
+    return Path(root) / "state" / "profile_draft.md"
+
+
+def ask_scan(root, sources):
+    sources = [s for s in sources if s in SCAN_SOURCES]
+    if not sources:
+        raise ValueError("至少选一个地方")
+    path = _scan_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"sources": sources, "at": datetime.now(TZ).isoformat(timespec="seconds")}, ensure_ascii=False), encoding="utf-8")
+
+
+def scan_asked(root):
+    try:
+        return json.loads(_scan_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def cancel_scan(root):
+    _scan_path(root).unlink(missing_ok=True)
+
+
+def save_draft(root, text, by=""):
+    path = _draft_path(root)
+    path.write_text(str(text).strip() + "\n", encoding="utf-8")
+    (path.with_suffix(".json")).write_text(json.dumps({"by": by, "at": datetime.now(TZ).strftime("%m-%d %H:%M")}, ensure_ascii=False), encoding="utf-8")
+    cancel_scan(root)
+
+
+def draft(root):
+    path = _draft_path(root)
+    if not path.is_file():
+        return None
+    try:
+        meta = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    return {"text": path.read_text(encoding="utf-8"), **meta}
+
+
+def drop_draft(root, use=False):
+    """The owner decided: use the draft as 关于你 (use=True), or throw it away."""
+    d = draft(root)
+    if d and use:
+        set_profile(root, d["text"])
+    _draft_path(root).unlink(missing_ok=True)
+    _draft_path(root).with_suffix(".json").unlink(missing_ok=True)
+    return profile(root)
