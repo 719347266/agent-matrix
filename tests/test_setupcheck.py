@@ -73,7 +73,7 @@ class SetupCheckTests(unittest.TestCase):
         on = {**BARE, "wechat": {"installed": True, "enabled": True, "status": {"ok": True, "behind": True}}}
         w = {x["key"]: x for x in self.report(on)["items"]}["wechat"]
         self.assertFalse(w["need"])                                          # it works, only less well: not a blocker
-        self.assertIn("最后一条", w["say"]); self.assertIn("wechat-cli init", w["steps"][0])
+        self.assertIn("最后一条", w["say"]); self.assertIn("guide wechat", w["steps"][0]); self.assertIn("wechat-cli init", w["steps"][1])
         broken = {**BARE, "wechat": {"installed": True, "enabled": True, "status": {"ok": False, "error": "微信没有打开"}}}
         w = {x["key"]: x for x in self.report(broken)["items"]}["wechat"]
         self.assertTrue(w["need"] and "微信没有打开" in w["say"])
@@ -170,3 +170,15 @@ class SetupCheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GuideTests(unittest.TestCase):
+    def test_any_ai_can_read_how_to_connect_wechat(self):
+        import io, tempfile
+        from contextlib import redirect_stdout
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()) as out:
+            (Path(d) / "config.yaml").write_text("item_store: device\n", encoding="utf-8")
+            self.assertEqual(setupcheck.main(["guide", "wechat", "--config", str(Path(d) / "config.yaml")]), 0)
+        text = out.getvalue()
+        for part in ("github.com/freestylefly/wechat-cli", "npm install -g @canghe_ai/wechat-cli", "完全磁盘访问权限", "管理员", "init --force", "sessions --limit 3", "重新签名"):
+            self.assertIn(part, text)
