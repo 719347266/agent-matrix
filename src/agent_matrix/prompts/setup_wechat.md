@@ -1,8 +1,9 @@
 # 接入微信（给 AI 看的完整步骤）
 
-心响用开源的微信命令行 wechat-cli 在**这台电脑上**读本人自己的微信聊天，只读、不上传、不发消息。
+心响不自己读微信：读微信全部交给开源项目 wechat-cli（它在本机读微信自己的聊天库，不登录、不调用微信接口，所以不碰风控）。
+心响只是调用它的命令（`sessions`、`history`、`new-messages`），只读、不上传、不发消息。
 
-- 源码与说明：https://github.com/freestylefly/wechat-cli
+- 源码与说明（安装和初始化以这里的 README 为准，下面是按我们踩过的坑补充的）：https://github.com/freestylefly/wechat-cli
 - npm 包：`@canghe_ai/wechat-cli`（会按系统自动带上对应的程序：macOS Apple 芯片 / Intel、Windows x64、Linux）
 - 数据位置：`~/.wechat-cli/config.json`（配置）、`~/.wechat-cli/all_keys.json`（读取钥匙，**绝不打印、不外传**）
 
