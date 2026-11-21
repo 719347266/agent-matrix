@@ -5,9 +5,10 @@ Items sit in one version; each version also keeps what is expected to come up in
 drives 心响 proposes all of this from the owner's project table and items (drive: kind "organize"); the owner's own
 placing always wins over the AI's. Kept on this computer only (state/xinxiang.db).
 """
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 
 from . import db as database
 from . import projects as project_store
@@ -77,15 +78,64 @@ def place(root, record_id, version_id, by=AI):
         db.close()
 
 
+def due_date(text, today=None):
+    """"2026-11-25" / "11-25" / "11月25日" → a date (no year: this year, or next year if that is long past). Else None."""
+    text = str(text or "").strip()
+    today = today or datetime.now(TZ).date()
+    try:
+        if m := re.match(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})", text):
+            return date(int(m[1]), int(m[2]), int(m[3]))
+        if m := re.match(r"(\d{1,2})[-/.月](\d{1,2})", text):
+            day = date(today.year, int(m[1]), int(m[2]))
+            return day.replace(year=today.year + 1) if (today - day).days > 180 else day
+    except ValueError:
+        return None
+    return None
+
+
 def expect(root, version_id, title, why="", due=""):
+    """Something expected to come up in a version. Said again: a new reason or date fills in what was missing
+    or out of date; whether it is still open is left alone."""
     title = " ".join(str(title or "").split())[:80]
     if not title or not version_id:
         return
+    day = due_date(due)
+    due = day.isoformat() if day else str(due or "").strip()[:20]
     db = _db(root)
     try:
         with db:
-            db.execute("INSERT OR IGNORE INTO expected (version_id, title, why, due, created) VALUES (?,?,?,?,?)",
-                       (int(version_id), title, str(why or "")[:200], str(due or "")[:20], _now()))
+            db.execute("INSERT INTO expected (version_id, title, why, due, created) VALUES (?,?,?,?,?) ON CONFLICT(version_id, title) "
+                       "DO UPDATE SET why=coalesce(nullif(excluded.why,''), why), due=coalesce(nullif(excluded.due,''), due)",
+                       (int(version_id), title, str(why or "")[:200], due, _now()))
+    finally:
+        db.close()
+
+
+def expected_due(root, today=None):
+    """Open expected things whose date is tomorrow or today: one message in 心响 the day before and one on the day.
+    Each (thing, day) is noted in meta once told, so running this often still tells each only once a day."""
+    from . import inbox
+    today = today or datetime.now(TZ).date()
+    db = _db(root)
+    try:
+        rows = db.execute("SELECT e.id, e.title, e.why, e.due, v.name, p.name FROM expected e JOIN versions v ON v.id=e.version_id "
+                          "JOIN projects p ON p.id=v.project_id WHERE e.status='open' AND coalesce(e.due,'')<>''").fetchall()
+        told = []
+        for eid, title, why, due, version, project in rows:
+            day = due_date(due, today)
+            if day not in (today, today + timedelta(days=1)):
+                continue
+            key = f"expected-due:{eid}:{today.isoformat()}"
+            if db.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
+                continue
+            when = "今天" if day == today else "明天"
+            inbox.add(root, key,
+                      f"预计会遇到的事{when}到期：{title}\n{project} · {version}，{day.month} 月 {day.day} 日" + (f"\n为什么：{why}" if why else ""),
+                      kind="system")
+            with db:
+                db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES (?,?)", (key, _now()))
+            told.append(eid)
+        return told
     finally:
         db.close()
 

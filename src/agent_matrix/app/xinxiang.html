@@ -1901,7 +1901,8 @@ function dvRemove(n,v){ return dvSend(n,{op:"remove",v},"删掉了"); }
 /* ---------- 串起来的事：这件事前面接着哪件、后面还有哪件 ---------- */
 function chainView(i){
   const tag=(n,dir)=>{ const x=byN(n); if(!x) return ""; const [e,l]=dir==="before"?[n,i.n]:[i.n,n];
-    return `<span class="chain-item"><a href="#" onclick="openItem(${n});return false">#${n} ${esc(x.title)}</a><em>${esc(statusOf(x)[0])}${(i.ai_linked||[]).includes(n)?" · AI 串的":""}</em><button class="x" title="解开" aria-label="解开和 #${n} 的关联" onclick="setLink(${e},${l},false)">×</button></span>`; };
+    const ai=(i.ai_linked||[]).includes(n);  /* AI 加的关系：标出来，一键去掉 */
+    return `<span class="chain-item${ai?" maybe":""}"><a href="#" onclick="openItem(${n});return false">#${n} ${esc(x.title)}</a><em>${esc(statusOf(x)[0])}${ai?" · AI 加的":""}</em>${ai?`<button class="btn link" title="AI 加错了就去掉" aria-label="去掉 AI 加的和 #${n} 的关联" onclick="setLink(${e},${l},false)">去掉</button>`:`<button class="x" title="解开" aria-label="解开和 #${n} 的关联" onclick="setLink(${e},${l},false)">×</button>`}</span>`; };
   const before=(i.before||[]).map(n=>tag(n,"before")).join(""), after=(i.after||[]).map(n=>tag(n,"after")).join("");
   const maybe=(i.related||[]).map(byN).filter(Boolean).filter(x=>!(i.before||[]).includes(x.n)&&!(i.after||[]).includes(x.n));
   const picking=S.linking===i.n;
