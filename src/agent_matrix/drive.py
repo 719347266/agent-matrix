@@ -253,6 +253,81 @@ def _submit_profile(root, job):
     return {"ok": True, "status": "done"}
 
 
+def _prepare_organize(root, config, driver):
+    """The owner asked for the work to be sorted into project → version, with what comes before, after and next."""
+    from . import itemlinks, memory, projects, versions
+    from .snapshot import _snapshot
+    from .workenv import scratch
+    if not versions.organize_asked(root) or _busy(root, "organize"):
+        return None
+    rows = _snapshot(root).get("rows") or []
+    placed = projects.place(root, rows)
+    names = {p["id"]: p["name"] for p in projects.all(root)}
+    n_of = {r["record_id"]: r.get("编号") for r in rows}
+    one = lambda v: (v[0] if isinstance(v, list) and v else v) or ""
+    items = [{"n": r.get("编号"), "title": r.get("标题"), "status": one(r.get("状态")), "who": one(r.get("执行方")),
+              "project": names.get((placed.get(r["record_id"]) or (None,))[0], ""),
+              "version": (versions.of(root, r["record_id"]) or {}).get("name", ""),
+              "before": [n_of.get(x) for x in itemlinks.upstream(root, r["record_id"], 3) if n_of.get(x)]}
+             for r in rows if r.get("编号")][-300:]
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "organize", stamp)
+    (folder / "items.json").write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+    (folder / "projects.json").write_text(json.dumps([{"project": v["project"], "version": v["name"], "status": v["status_label"]}
+                                                      for v in versions.all(root)] or [{"projects": list(names.values())}], ensure_ascii=False, indent=1), encoding="utf-8")
+    (folder / "profile.md").write_text(memory.profile(root)["text"] or "（还没有）", encoding="utf-8")
+    return {"id": f"organize-{stamp}", "kind": "organize", "title": "整理项目和版本", "folder": str(folder), "ref": {},
+            "output": ["organize.json"], "lease_until": _lease(ITEM_LEASE_MINUTES), "instructions": promptfile.read(root, "organize.md")}
+
+
+def _submit_organize(root, job):
+    from . import inbox, itemlinks, versions
+    from .snapshot import _snapshot
+    try:
+        plan = json.loads((Path(job["folder"]) / "organize.json").read_text(encoding="utf-8"))
+        assert isinstance(plan, dict)
+    except (OSError, ValueError, AssertionError):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "没有找到有效的 organize.json（格式见说明里的例子）。"}
+    rid_of = {str(r.get("编号")): r["record_id"] for r in _snapshot(root).get("rows") or [] if r.get("编号")}
+    vid, counts = {}, {"versions": 0, "items": 0, "links": 0, "expected": 0}
+    for v in plan.get("versions") or []:
+        if isinstance(v, dict) and v.get("project") and v.get("name"):
+            vid[(v["project"], str(v["name"]))] = versions.upsert(root, str(v["project"]), str(v["name"]), v.get("status"), v.get("period", ""),
+                                                                  v.get("note", ""), source=str(v.get("source") or "AI"))
+            counts["versions"] += 1
+    def version_id(project, name):
+        key = (project, str(name))
+        if key not in vid and project and name:
+            vid[key] = versions.upsert(root, str(project), str(name))
+        return vid.get(key)
+    for it in plan.get("items") or []:
+        if isinstance(it, dict) and str(it.get("n")) in rid_of and version_id(it.get("project"), it.get("version")):
+            counts["items"] += bool(versions.place(root, rid_of[str(it["n"])], version_id(it.get("project"), it.get("version"))))
+    for ln in plan.get("links") or []:
+        a, b = (rid_of.get(str((ln or {}).get("earlier"))), rid_of.get(str((ln or {}).get("later")))) if isinstance(ln, dict) else (None, None)
+        if a and b and a != b:
+            try:
+                itemlinks.link(root, a, b, by="AI")
+                counts["links"] += 1
+            except Exception as exc:
+                activity.swallowed(root, "drive._submit_organize", exc)
+    for e in plan.get("expected") or []:
+        if isinstance(e, dict) and e.get("title") and version_id(e.get("project"), e.get("version")):
+            versions.expect(root, version_id(e.get("project"), e.get("version")), e["title"], e.get("why", ""), e.get("due", ""))
+            counts["expected"] += 1
+    versions.organize_done(root)
+    _close(root, job, "done")
+    said = f"{counts['versions']} 个版本、{counts['items']} 件事归好了，补了 {counts['links']} 条前后关系、{counts['expected']} 件预计会遇到的事"
+    activity.log(root, "learn", "整理项目和版本：" + said, detail=job.get("driver") or "")
+    try:
+        inbox.add(root, f"organize:{job['id']}", f"✓ {job.get('driver') or 'AI'} 整理好了项目和版本：{said}。到「记忆 → 项目与版本」里看看。", kind="system")
+    except Exception as exc:
+        activity.swallowed(root, "drive._submit_organize", exc)
+    return {"ok": True, "status": "done", **counts}
+
+
 def _prepare_learn(root, config, driver):
     """Now and then: turn the owner's recent feedback into standing rules (偏好快照)."""
     from . import memory, thread as conversation
@@ -272,17 +347,23 @@ def _prepare_learn(root, config, driver):
         for m in h.get("messages", []):
             if m["from"] == "me" and m["kind"] == "feedback" and len(m["text"]) >= 6 and m["at"] > (since[5:16].replace("T", " ") if since else ""):
                 feedback.append({"item": str((snap.get(rid) or {}).get("标题") or ""), "at": m["at"], "said": m["text"][:400]})
-    if not feedback:
+    verdicts = []
+    for o in memory.outcomes(root, since=since):
+        row = snap.get(o["record_id"]) or {}
+        verdicts.append({**{k: v for k, v in o.items() if k != "record_id"}, "n": row.get("编号"), "item": str(row.get("标题") or "")})
+    if not feedback and not verdicts:
         return None
-    fresh_enough = len(feedback) >= LEARN_MIN_NEW
+    fresh_enough = len(feedback) + len(verdicts) >= LEARN_MIN_NEW
     stale = not since or now() - datetime.fromisoformat(since) > timedelta(hours=LEARN_EVERY_HOURS)
     if not (fresh_enough or stale):
         return None
     stamp = now().strftime("%Y%m%d%H%M%S")
     folder = scratch(root, "learn", stamp)
     (folder / "feedback.json").write_text(json.dumps(feedback[-60:], ensure_ascii=False, indent=1), encoding="utf-8")
+    (folder / "outcomes.json").write_text(json.dumps(verdicts[-80:], ensure_ascii=False, indent=1), encoding="utf-8")
     (folder / "rules.json").write_text(json.dumps(memory.rules(root), ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {len(feedback)} 条反馈里学规矩", "folder": str(folder),
+    what = "、".join(x for x in (f"{len(verdicts)} 次评审" if verdicts else "", f"{len(feedback)} 条反馈" if feedback else "") if x)
+    return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {what}里学规矩", "folder": str(folder),
             "ref": {"count": len(feedback)}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
             "instructions": promptfile.read(root, "learn.md")}
 
@@ -296,10 +377,22 @@ def _submit_learn(root, job):
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": "没有找到有效的 learned.json（格式见说明里的例子）。"}
     added = []
+    from . import projects as project_store
+    known = {x["id"] for x in memory.rules(root)}
+    projects = {str(p["id"]) for p in project_store.all(root)}
     for r in (learned.get("add") or [])[:3]:
-        rule = memory.add_rule(root, r.get("rule"), r.get("why", ""), source="AI 学的")
+        if not isinstance(r, dict):
+            continue
+        scope = str(r.get("scope") or "")
+        if not (scope == "" or (scope.startswith("project:") and scope[8:] in projects) or (scope.startswith("type:") and 1 < len(scope) <= 15)):
+            scope = ""   # a scope that names nothing known: the rule holds everywhere
+        rule = memory.add_rule(root, r.get("rule"), r.get("why", ""), source="AI 学的", scope=scope)
         if rule:
             added.append(rule)
+    for key, won in (("wins", True), ("losses", False)):
+        for rid in learned.get(key) or []:
+            if isinstance(rid, int) and rid in known:
+                memory.credit(root, rid, won)
     ai_rules = {x["id"] for x in memory.rules(root) if x["source"] == "AI 学的"}
     for rid in learned.get("retire") or []:
         if rid in ai_rules:
@@ -509,7 +602,7 @@ def local_kinds(root):
     (all of them when a local AI is chosen in settings, else only those handed to a local AI one by one)."""
     from .aidrivers import LOCAL
     from .thread import setting
-    return [*(("profile",) if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sort_runner(root) == "local" else ()), "item"]
+    return [*(("profile", "organize") if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sort_runner(root) == "local" else ()), "item"]
 
 
 def kinds_for(root, driver):
@@ -517,7 +610,7 @@ def kinds_for(root, driver):
     from .aidrivers import is_mine
     from .thread import setting
     work, sort = setting(Path(root), "engine", "codex"), setting(Path(root), "engine_sort", "")
-    return [*(("setup", "profile") if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
+    return [*(("setup", "profile", "organize") if is_mine(work, driver) else ()), *(SORTING if is_mine(sort, driver) else ()), "item"]
 
 
 def item_filter(root, driver, *, builtin=False):
@@ -582,6 +675,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = _prepare_profile(root, config, driver)
         if job:
             return _open(root, job, driver)
+    if "organize" in wanted:
+        job = _prepare_organize(root, config, driver)
+        if job:
+            return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
             continue
@@ -620,7 +717,14 @@ def _open(root, job, driver):
         db.close()
     try:  # 记忆层: every AI reads the owner's standing rules before any work
         from .memory import profile_text, rules_text
-        head = rules_text(root) + profile_text(root)
+        project_id, version = None, ""
+        if job["kind"] == "item" and (job.get("ref") or {}).get("record_id"):
+            from . import projects, versions
+            rid = job["ref"]["record_id"]
+            project_id = projects.chosen(root).get(rid)
+            from .snapshot import _snapshot
+            version = versions.context_text(root, rid, {r.get("record_id"): r for r in _snapshot(root).get("rows") or []})
+        head = rules_text(root, project_id) + profile_text(root) + version
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]
@@ -755,6 +859,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_setup(root, job)
     if kind == "profile":
         return _submit_profile(root, job)
+    if kind == "organize":
+        return _submit_organize(root, job)
     from . import activity
     from .workenv import _cli
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
@@ -901,6 +1007,9 @@ def release(root, config, job_id, reason="驱动方放回"):
     if job["kind"] == "profile":   # the AI could not do it: the ask goes away (else it comes straight back); the owner can ask again
         from . import memory
         memory.cancel_scan(root)
+    if job["kind"] == "organize":
+        from . import versions
+        versions.organize_done(root)
     if job["kind"] == "setup":   # the AI could not do it: the owner sees why, and can ask again
         from . import setupasks, thread as conversation
         what = job["ref"]["what"]
@@ -1064,6 +1173,10 @@ def main(argv=None):
             from . import memory
             if memory.scan_asked(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "profile"):
                 print(json.dumps({"ok": True, "work": "profile"}, ensure_ascii=False))
+                return 0
+            from . import versions
+            if versions.organize_asked(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "organize"):
+                print(json.dumps({"ok": True, "work": "organize"}, ensure_ascii=False))
                 return 0
             if has_items_for(root, config, "Cindy"):
                 print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))

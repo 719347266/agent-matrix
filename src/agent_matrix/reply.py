@@ -165,6 +165,16 @@ class Applier:
         except Exception:
             return ""
 
+    def verdict(self, row, verdict, reason=""):
+        """The owner's verdict on a deliverable is kept: the AI learns from what passed and what came back."""
+        if self.client is None:
+            return
+        try:
+            from .memory import record_outcome
+            record_outcome(self.client.root, row["record_id"], verdict, reason)
+        except Exception as exc:
+            activity.swallowed(self.client.root, "reply.verdict", exc)
+
     def write(self, row, patch, op, n):
         receipt = self.gateway.update(row, patch, self.key(op, n), f"reply:{self.source}:{self.ref}")
         # What the owner says about an item goes into its notebook, so whoever works on it next sees it.
@@ -233,6 +243,8 @@ class Applier:
             if st in {"完成", "待验收"}:
                 patch.update({"验收结果": ["退回"], "完成时间": None})
             self.write(row, patch, op, n)
+            if st in {"完成", "待验收"}:
+                self.verdict(row, "要改", op.arg)
             return f"#{n} {name} → AI 在原来的对话里接着改，改好出新版本 ✓"
         if st == "取消" and op.verb == "cancel":
             return f"#{n} {name} 已经标为不做 ✓" + self.stop_ai(row)
@@ -247,6 +259,7 @@ class Applier:
             self.write(row, {"状态": ["完成"], "验收结果": ["通过"], "完成时间": self.now.isoformat(), "进度": "完成",
                              "交付情况": ["有交付" if _draft_url(row.get("交付物链接")) else "待补交付"]}, op, n)
             self.closed(row, "验收通过")
+            self.verdict(row, "通过")
             unlocked = self.unlock_parent(row, n)
             return f"#{n} {name} → 完成 ✓" + (f"；#{unlocked} 可以开始了" if unlocked else "")
         if op.verb == "reject":
@@ -254,6 +267,7 @@ class Applier:
                 return f"#{n} {name} 现在是{st}，没有待验收的结果可退。"
             self.write(row, {"状态": ["进行中"], "验收结果": ["退回"], "进度": "按意见修改",
                              "退回意见": _append(row.get("退回意见"), f"{self.now:%m-%d} {op.arg}")}, op, n)
+            self.verdict(row, "退回", op.arg)
             return f"#{n} {name} → 退回修改 ✓"
         if op.verb in {"complete", "no_deliverable"}:
             return self.complete(row, op, n, name, st, no_file=op.verb == "no_deliverable") + self.stop_ai(row)

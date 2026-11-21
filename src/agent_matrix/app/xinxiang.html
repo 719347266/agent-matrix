@@ -89,6 +89,11 @@ button:disabled{opacity:.5;cursor:wait}
 .sec-h{display:flex;align-items:center;gap:8px;margin:20px 2px 8px;font-size:12.5px;font-weight:600;color:var(--ink2)}
 .sec-h:first-child{margin-top:4px}
 .prof-text{white-space:pre-wrap;line-height:1.65;font-size:13.5px}
+.rule-tag{display:inline-block;font-size:11.5px;padding:0 7px;margin:0 6px 0 0;border-radius:99px;background:var(--gray-soft);color:var(--ink2)}.rule-tag.bad{color:var(--red)}
+.ver-p{font-weight:600;font-size:14px;margin:2px 0 6px}.ver{border-top:1px solid var(--line2);padding:8px 0}.ver:first-of-type{border-top:0}
+.ver-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:default;list-style:none}details.ver>.ver-h{cursor:pointer}
+.ver-item{display:flex;align-items:center;gap:8px;padding:4px 0 4px 4px;font-size:13px}.ver-item .t{flex:1;min-width:0;overflow-wrap:anywhere}.ver-item .btn{height:24px;padding:0 8px}
+.ver-exp-h{font-size:12px;color:var(--ink2);margin:8px 0 2px 4px}
 .scan-pick{display:flex;gap:10px;align-items:flex-start;padding:8px 2px;cursor:pointer}.scan-pick input{margin-top:3px}.scan-pick span{font-size:13px;color:var(--ink2)}.scan-pick b{color:var(--ink);font-weight:600}.scan-pick.off{opacity:.5;cursor:default}
 .said{margin-top:6px;padding:8px 10px;border-radius:9px;background:var(--amber-soft,rgba(255,159,10,.12));color:var(--ink);font-weight:500}
 .sec-h .n{color:var(--ink3);font-weight:500}
@@ -1048,10 +1053,10 @@ function memPage(){
     +(!editing&&!P.text?"":editing?`<div class="list" style="padding:12px 14px"><textarea id="prof" data-draft="prof" rows="9" style="width:100%" placeholder="${esc(PROFILE_HINT)}">${esc(P.text||"")}</textarea>
         <div class="acts" style="margin-top:8px;justify-content:flex-end">${P.text?`<button class="btn" onclick="S.profEdit=false;render()">取消</button>`:""}<button class="btn pri" onclick="saveProfile()">保存</button></div></div>`
       :`<div class="list" style="padding:12px 14px"><div class="prof-text">${esc(P.text)}</div><div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.profEdit=true;render()">改</button></div></div>`);
-  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你的规矩。</p>`+about+scanView(P)
+  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你手上的项目和版本、你的规矩。</p>`+about+scanView(P)+versionsView()
    +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
-   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span></div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,esc(r.why||""),
+   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span>${verdictLine()}</div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,ruleMeta(r),
       `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
     <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`;
 }
@@ -1093,6 +1098,35 @@ async function saveProfile(){
     if(had) await api("/api/profile",{draft:false},15000);   // the AI's draft went into what was just saved
     (D.memory ||= {}).profile=r.profile; S.profEdit=false; drafts.delete("prof"); toast("记下了，AI 做事前都会先读"); await load(); }
   catch(e){ toast("没保存成功，连不上本机服务"); }
+}
+/* 规矩：适用在哪、照着做通过/被退回几次 */
+function ruleMeta(r){ const tags=[r.scope?`<span class="rule-tag">${esc(r.scope_name)}</span>`:"",(r.wins||r.losses)?`<span class="rule-tag ${r.losses>r.wins?"bad":""}">通过 ${r.wins||0} · 退回 ${r.losses||0}</span>`:""].filter(Boolean).join("");
+  return tags+esc(r.why||""); }
+function verdictLine(){ const v=(D.memory||{}).verdicts||{}, n=(v["通过"]||0)+(v["退回"]||0)+(v["要改"]||0);
+  return n?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">近 30 天评审：通过 ${v["通过"]||0} · 退回 ${v["退回"]||0} · 要改 ${v["要改"]||0}</span>`:""; }
+/* 项目与版本：每个版本里有哪些事、做到哪了、预计还会遇到什么；AI 整理，你改它弄错的 */
+function versionsView(){
+  const M=D.memory||{}, V=M.versions||[], O=M.organize||{}, who=esc(((D.settings||{}).setup||{}).driver?.name||"你的 AI");
+  const head=`<div class="sec-h">项目与版本${V.length?`<span class="n">${new Set(V.map(v=>v.project_id)).size}</span>`:""}</div>`;
+  const status=O.doing?`<div class="callout" style="margin:0 0 10px"><div class="what"><b>${esc(O.doing.by||"AI")} 正在整理</b>${O.doing.step?`：${esc(O.doing.step)}`:""}</div></div>`
+    :O.asked?`<div class="callout" style="margin:0 0 10px"><div class="what">等 ${who} 来整理项目和版本</div><div class="acts"><button class="btn ghost" onclick="organize({cancel:true})">不整理了</button></div></div>`:"";
+  if(!V.length) return head+status+(O.doing||O.asked?"":`<div class="list" style="padding:12px 14px"><div class="d" style="margin:0 0 10px">让 AI 找到你的项目管理表格（需求池、排期、版本计划），把手上的事按「项目 → 版本」归好，补上谁先谁后，再列出这个版本和下个版本预计会遇到的事。之后 AI 做每件事都会带上它所在版本的背景。</div><div class="acts" style="justify-content:flex-end"><button class="btn pri" onclick="organize({ask:true})">让 AI 整理项目和版本</button></div></div>`);
+  const byProject={}; for(const v of V) (byProject[v.project] ||= []).push(v);
+  const item=x=>`<div class="ver-item"><a href="#" onclick="openItem(${x.n});return false">#${x.n}</a><span class="t">${esc(x.title)}</span><span class="pill ${x.status==="完成"?"green":x.status==="待验收"?"amber":""}">${esc(x.status)}</span>${x.by==="AI"?'<span class="hint" style="margin:0">AI 归的</span>':""}</div>`;
+  const card=v=>{ const done=v.items.filter(x=>["完成","取消"].includes(x.status)).length, open=v.expected.filter(e=>e.status==="open");
+    const body=`${v.note?`<div class="d" style="margin:2px 0 6px">${esc(v.note)}</div>`:""}${v.items.map(item).join("")||'<div class="hint" style="margin:4px 0">还没有事归进来</div>'}
+      ${open.length?`<div class="ver-exp-h">预计会遇到</div>${open.map(e=>`<div class="ver-item"><span class="t">${esc(e.title)}${e.why?`<span class="hint" style="margin:0 0 0 6px">${esc(e.why)}</span>`:""}</span><button class="btn ghost" onclick="organize({expected:${e.id},status:'done'})">已发生</button><button class="btn ghost" onclick="organize({expected:${e.id},status:'dropped'})">不会有</button></div>`).join("")}`:""}`;
+    const title=`<b>${esc(v.name)}</b><span class="pill ${v.status==="current"?"blue":v.status==="done"?"green":""}">${esc(v.status_label)}</span>${v.period?`<span class="hint" style="margin:0">${esc(v.period)}</span>`:""}<span class="hint" style="margin:0 0 0 auto">${v.items.length?`${done}/${v.items.length} 件做完`:""}</span>`;
+    return v.status==="done"?`<details class="ver"><summary class="ver-h">${title}</summary>${body}</details>`:`<div class="ver"><div class="ver-h">${title}</div>${body}</div>`; };
+  return head+status+Object.entries(byProject).map(([p,list])=>`<div class="list" style="padding:10px 14px;margin-bottom:10px"><div class="ver-p">${esc(p)}</div>${list.map(card).join("")}</div>`).join("")
+    +(O.doing||O.asked?"":`<div class="acts" style="justify-content:flex-end;margin-top:-2px"><button class="btn" onclick="organize({ask:true})">重新整理</button></div>`);
+}
+async function organize(body){
+  if(!LIVE) return toast("原型里不能整理");
+  try{ const r=await api("/api/organize",body,15000);
+    if(body.ask){ if(r.name&&r.online) toast(`已交给 ${r.name}，整理好会放在这里`); else { copySetupPrompt(); toast(r.name?`${r.name} 现在不在：已复制那段话，再发给它一次`:"还没有 AI 在驱动心响：已复制一段话，发给你常用的 AI"); } }
+    await load(); }
+  catch(e){ toast(e.message||"没成功，连不上本机服务"); }
 }
 /* what is not decided yet and will have to be confirmed later: left waiting on a condition, or left open in a meeting */
 function laterList(){
@@ -1776,6 +1810,7 @@ function itemView(i){
   const pj=projOf(i.project), guessed=pj&&i.project_by==="猜";
   const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
     ...(i.who==="AI"&&!["完成","取消"].includes(i.status)?[["哪个 AI",aiOfItem(i)]]:[]),
+    ...(i.version?[["版本",`<a href="#" class="quiet-link" style="margin:0" onclick="go('mem');return false">${esc(i.version.name)}</a><span class="hint" style="margin:0 0 0 6px">${esc(i.version.status)}</span>`]]:[]),
     ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="quiet-link" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
     ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
     [i.status==="取消"?"关闭":"完成",closedText(i)],

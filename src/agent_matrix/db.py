@@ -105,6 +105,18 @@ SCHEMAS = {
         # what went wrong while using 心响, written down until it is handed in (bugs.py)
         """CREATE TABLE IF NOT EXISTS bugs (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, text TEXT NOT NULL,
             diag TEXT, status TEXT NOT NULL DEFAULT 'open')""",
+    ], [
+        # the owner's verdict on each deliverable: what passed, what came back and why (memory.py)
+        """CREATE TABLE IF NOT EXISTS outcomes (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, at TEXT NOT NULL,
+            verdict TEXT NOT NULL, reason TEXT, version INTEGER, template TEXT, project_id INTEGER)""",
+        # a rule holds for everything, one project or one kind of deliverable, and keeps count of how it fared
+        _add_columns("preferences", "scope TEXT NOT NULL DEFAULT ''", "wins INTEGER NOT NULL DEFAULT 0", "losses INTEGER NOT NULL DEFAULT 0"),
+        # project → version → items, and what each version is expected to bring (versions.py)
+        """CREATE TABLE IF NOT EXISTS versions (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'planned', period TEXT, note TEXT, source TEXT, created TEXT NOT NULL, UNIQUE(project_id, name))""",
+        "CREATE TABLE IF NOT EXISTS item_versions (record_id TEXT PRIMARY KEY, version_id INTEGER NOT NULL, by TEXT NOT NULL, created TEXT NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS expected (id INTEGER PRIMARY KEY AUTOINCREMENT, version_id INTEGER NOT NULL, title TEXT NOT NULL,
+            why TEXT, due TEXT, status TEXT NOT NULL DEFAULT 'open', created TEXT NOT NULL, UNIQUE(version_id, title))""",
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

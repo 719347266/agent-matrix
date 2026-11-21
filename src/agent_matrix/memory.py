@@ -176,24 +176,80 @@ def rules(root):
             with db:
                 for rule, why in SEED_RULES:
                     db.execute("INSERT OR IGNORE INTO preferences (rule, why, source, created) VALUES (?,?,?,?)", (rule, why, "seed", _now()))
+        names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
         return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " "),
-                 "fresh": s not in OWNER_SOURCES and not ok}   # learned by the AI, the owner has not said it is right yet
-                for i, r, w, s, c, ok in db.execute(
-                    "SELECT id, rule, why, source, created, confirmed FROM preferences WHERE active=1 ORDER BY id")]
+                 "fresh": s not in OWNER_SOURCES and not ok,   # learned by the AI, the owner has not said it is right yet
+                 "scope": sc or "", "scope_name": scope_name(sc, names), "wins": wn or 0, "losses": ls or 0}
+                for i, r, w, s, c, ok, sc, wn, ls in db.execute(
+                    "SELECT id, rule, why, source, created, confirmed, scope, wins, losses FROM preferences WHERE active=1 ORDER BY id")]
     finally:
         db.close()
 
 
-def add_rule(root, rule, why="", source="本人"):
+def scope_name(scope, names=None):
+    """"" → 全部；"project:3" → 项目「观己 2.0」；"type:方案" → 做「方案」时."""
+    scope = str(scope or "")
+    if scope.startswith("project:"):
+        name = (names or {}).get(int(scope[8:]) if scope[8:].isdigit() else -1)
+        return f"项目「{name}」" if name else "某个项目"
+    if scope.startswith("type:"):
+        return f"做「{scope[5:]}」时"
+    return "全部"
+
+
+def add_rule(root, rule, why="", source="本人", scope=""):
     rule = " ".join(str(rule or "").split())[:120]
     if not rule:
         return None
     db = _db(root)
     try:
         with db:
-            db.execute("INSERT INTO preferences (rule, why, source, created) VALUES (?,?,?,?) "
-                       "ON CONFLICT(rule) DO UPDATE SET active=1, why=excluded.why", (rule, str(why)[:200], source, _now()))
+            db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
+                       "ON CONFLICT(rule) DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope",
+                       (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
         return rule
+    finally:
+        db.close()
+
+
+def credit(root, rule_id, won):
+    """A deliverable that followed this rule passed (won) or came back for breaking it / despite it (lost)."""
+    db = _db(root)
+    try:
+        with db:
+            db.execute(f"UPDATE preferences SET {'wins' if won else 'losses'}={'wins' if won else 'losses'}+1 WHERE id=?", (int(rule_id),))
+    finally:
+        db.close()
+
+
+# ---- 评审结果: every verdict on a deliverable is kept, so the AI learns what passes -----------------------------
+
+def record_outcome(root, record_id, verdict, reason=""):
+    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind and its project."""
+    work = Path(root) / "state" / "work" / record_id
+    try:
+        template = json.loads((work / "结果.json").read_text(encoding="utf-8")).get("template") or ""
+    except (OSError, ValueError, AttributeError):
+        template = ""
+    db = _db(root)
+    try:
+        version = (db.execute("SELECT max(version) FROM deliverables WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
+        project = (db.execute("SELECT project_id FROM item_projects WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
+        with db:
+            db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id) VALUES (?,?,?,?,?,?,?)",
+                       (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project))
+    finally:
+        db.close()
+
+
+def outcomes(root, since=""):
+    db = _db(root)
+    try:
+        names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
+        return [{"record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
+                 "template": t or "", "project": names.get(p, "")}
+                for r, a, v, why, ver, t, p in db.execute(
+                    "SELECT record_id, at, verdict, reason, version, template, project_id FROM outcomes WHERE at>? ORDER BY id", (since,))]
     finally:
         db.close()
 
@@ -216,9 +272,16 @@ def remove_rule(root, rule_id):
         db.close()
 
 
-def rules_text(root):
-    """The block every AI gets on top of its instructions."""
-    lines = [f"- {r['rule']}" for r in rules(root)]
+def rules_text(root, project_id=None):
+    """The block every AI gets on top of its instructions: the rules for everything, the ones for this item's project,
+    and the ones for a kind of deliverable (marked, so the AI applies them only when it makes that kind)."""
+    lines = []
+    for r in rules(root):
+        scope = r.get("scope") or ""
+        if scope.startswith("project:") and scope != f"project:{project_id}":
+            continue
+        tag = f"（{r['scope_name']}）" if scope else ""
+        lines.append(f"- {r['rule']}{tag}")
     return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准）\n" + "\n".join(lines) + "\n\n") if lines else ""
 
 

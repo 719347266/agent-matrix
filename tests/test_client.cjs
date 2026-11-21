@@ -194,6 +194,13 @@ function reset(item) {
   evaluate('D.memory.profile={text:"",draft:{text:"## 岗位和职责\\n产品经理",by:"Antigravity",at:"11-21 10:00"}}'); let dr = evaluate("memPage()");
   for (const label of ["Antigravity 写好了一份「关于你」草稿","产品经理","useDraft(true)","editDraft()","useDraft(false)"]) assert.ok(dr.includes(label), label);
   evaluate('D.memory.profile=null');
+  // 项目与版本 and scoped rules
+  assert.match(evaluate("memPage()"),/让 AI 整理项目和版本/, "nothing sorted yet: one button");
+  evaluate("globalThis.keptRules=D.memory.rules");
+  evaluate(`D.memory.versions=[{id:1,project_id:1,project:"观己 App",name:"2.3",status:"current",status_label:"当前",period:"11 月",note:"会员改版",items:[{n:45,title:"定积分规则",status:"完成",by:"AI"}],expected:[{id:7,title:"上线前验收",why:"每个版本都要",status:"open"}]},{id:2,project_id:1,project:"观己 App",name:"2.2",status:"done",status_label:"已完成",items:[],expected:[]}]; D.memory.verdicts={"通过":3,"退回":1,"要改":0}; D.memory.rules=[{id:9,rule:"方案控制在一屏",why:"#1 退回",source:"AI 学的",scope:"type:方案",scope_name:"做「方案」时",wins:2,losses:1,fresh:false}]`);
+  let ver = evaluate("memPage()");
+  for (const label of ["项目与版本","观己 App","2.3","当前","会员改版","#45","AI 归的","1/1 件做完","预计会遇到","上线前验收","organize({expected:7,status:'done'})","<details class=\"ver\">","重新整理","做「方案」时","通过 2 · 退回 1","近 30 天评审：通过 3 · 退回 1 · 要改 0"]) assert.ok(ver.includes(label), label);
+  evaluate('D.memory.versions=[]; D.memory.verdicts={}; D.memory.rules=globalThis.keptRules');
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items

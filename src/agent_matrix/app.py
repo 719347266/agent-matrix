@@ -164,7 +164,13 @@ def build_state(root):
     pickups = cindy_pickup.latest(root)
     from . import aidrivers
     handed = aidrivers.assignments(root)
+    from . import versions as version_store
+    in_version = {}
+    for v in version_store.all(root):
+        for x in v["items"]:
+            in_version[x["rid"]] = {"id": v["id"], "name": f"{v['project']} · {v['name']}", "status": v["status_label"]}
     for item in items:
+        item["version"] = in_version.get(item["rid"])
         item["cindy_pickup"] = pickups.get(item["rid"])
         item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
@@ -304,9 +310,19 @@ def memory_view(root, items):
             if lines:
                 history[i["n"]] = lines
         from .jobstore import open_jobs
-        scanning = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in open_jobs(root) if j["kind"] == "profile"), None)
+        jobs = open_jobs(root)
+        scanning = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "profile"), None)
+        from . import versions
+        n_of = {i["rid"]: i for i in items}
+        archive = [{**v, "items": [{"n": n_of[x["rid"]]["n"], "title": n_of[x["rid"]]["title"], "status": n_of[x["rid"]]["status"], "by": x["by"]}
+                                   for x in v["items"] if x["rid"] in n_of]} for v in versions.all(root)]
+        organizing = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "organize"), None)
+        since = (datetime.now(TZ) - timedelta(days=30)).isoformat(timespec="seconds")
+        verdicts = memory.outcomes(root, since=since)
         return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent,
-                           "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning}},
+                           "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning},
+                           "versions": archive, "organize": {"asked": versions.organize_asked(root), "doing": organizing},
+                           "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")}},
                 "history": history}
     except Exception as exc:
         return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
@@ -510,6 +526,22 @@ class Handler(BaseHTTPRequestHandler):
                 if "draft" in body:                # the owner keeps the AI's draft, or throws it away
                     return self._send(200, {"ok": True, "profile": memory.drop_draft(root, use=bool(body["draft"]))})
                 return self._send(200, {"ok": True, "profile": memory.set_profile(root, body.get("text"))})
+            if path == "/api/organize":  # 整理项目和版本: the AI sorts the work; the owner fixes what it got wrong
+                from . import versions
+                from .snapshot import _snapshot
+                if body.get("ask"):
+                    versions.ask_organize(root)
+                    return self._send(200, {"ok": True, **setup_view(root)["driver"]})
+                if body.get("cancel"):
+                    versions.organize_done(root)
+                if body.get("expected") and body.get("status"):
+                    versions.set_expected(root, body["expected"], body["status"])
+                if body.get("n") is not None and "version" in body:   # the owner moves one item (0 = out of any version)
+                    rid = next((r["record_id"] for r in _snapshot(root).get("rows") or [] if str(r.get("编号")) == str(body["n"])), None)
+                    if not rid:
+                        return self._send(400, {"ok": False, "reply": "找不到这件事。"})
+                    versions.place(root, rid, int(body["version"] or 0) or None, by=versions.OWNER)
+                return self._send(200, {"ok": True})
             if path == "/api/rules":
                 from . import memory
                 if body.get("add"):
