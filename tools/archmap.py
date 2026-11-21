@@ -14,7 +14,7 @@ PKG = Path(__file__).resolve().parents[1] / "src" / "agent_matrix"
 LAYERS = [
     ("基础", ["models", "config", "timeutil", "schema", "alerts", "cards", "digest", "reply_timing", "llm",
               "precheck", "db", "lifecycle", "values", "textmatch", "delivery", "setupshim", "promptfile", "localdoc", "procs"]),
-    ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory", "jobstore", "snapshot", "itemlinks", "projects", "bugs", "approvals", "setupasks", "versions", "stats"]),
+    ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory", "jobstore", "snapshot", "itemlinks", "projects", "bugs", "approvals", "setupasks", "versions", "stats", "tidy"]),
     ("外部连接", ["feishu", "bitable", "records", "notion", "storemode", "workenv", "sources.chats", "sources.slack", "sources.wechat", "sources"]),
     ("业务规则", ["workflow", "merge", "automation", "linked_sync", "sources.feishu_tasks", "manual", "deliverables", "automation_demo", "brief_migration", "brief_v1", "prework",
                   "reply", "meeting_watch", "meeting_review", "chat_review", "background", "pastwork", "proactive",

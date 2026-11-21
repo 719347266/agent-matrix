@@ -217,6 +217,15 @@ function reset(item) {
   evaluate('D.memory.effect={has:true,recent:{total:2,first:1,rate:50},before:{total:0,first:0,rate:null},weeks:[],by_type:[],by_ai:[],reasons:[],blocked:0,failed:0}');
   assert.match(evaluate("memPage()"),/最近 4 周一次通过率 50%.*（前 4 周 没有验收）/);
   evaluate('delete D.memory.effect');
+  // 记忆更新: what the daily tidy proposed waits on top, above 关于你; nothing when there is none
+  assert.doesNotMatch(evaluate("memPage()"),/记忆更新/);
+  evaluate(`D.memory.updates=[{id:4,type:"merge_rules",label:"合并规矩",content:"「先给两版」「两版挑」合并成「对外文案先给两版」",why:"说的是一件事"},{id:5,type:"profile",label:"关于你",content:"## 在做的事\\n年卡",why:"最近都在谈",old:"## 在做的事\\n会员"}]`);
+  let upd = evaluate("memPage()");
+  for (const label of ["记忆更新 · 2 条","合并规矩","合并成「对外文案先给两版」","说的是一件事","memUpdate({use:4})","memUpdate({drop:4})","原来：## 在做的事","memUpdate({use:'all'})","全部用上"]) assert.ok(upd.includes(label), label);
+  assert.ok(upd.indexOf("记忆更新") < upd.indexOf("关于你"), "above 关于你");
+  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">3</);
+  await evaluate("memUpdate({drop:4})"); assert.match(evaluate("memPage()"),/记忆更新 · 1 条/);
+  await evaluate("memUpdate({use:'all'})"); assert.doesNotMatch(evaluate("memPage()"),/记忆更新/);
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
