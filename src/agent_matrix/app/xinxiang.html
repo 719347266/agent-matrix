@@ -285,7 +285,16 @@ button:disabled{opacity:.5;cursor:wait}
 .ob-copy{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.ob-copy .btn{height:38px;padding:0 18px}.ob-copy span{font-size:12.5px;color:var(--ink2)}
 .ob-peek{margin:12px 0 0}.ob-peek summary{cursor:pointer;font-size:12.5px;color:var(--ink2)}.ob-peek pre{margin:8px 0 0;max-height:180px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .ob-wait{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
-.ob-wait span{font-size:12.5px;color:var(--ink2)}.ob-wait .live{width:7px;height:7px;border-radius:50%;background:var(--brand);animation:blink 1.4s infinite}.ob-wait.ok b{color:var(--green)}
+.ob-wait span{font-size:12.5px;color:var(--ink2)}
+.pg{margin:16px 0 0;padding:14px 16px;border:1px solid var(--line);border-radius:14px}
+.pg-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.pg-top span{font-size:12.5px;color:var(--ink2);margin-left:auto}
+.pg-bar{height:6px;border-radius:6px;background:var(--line);margin:10px 0 8px;overflow:hidden}.pg-bar i{display:block;height:100%;background:var(--brand);border-radius:6px;transition:width .4s}
+.pg-row{display:grid;grid-template-columns:20px auto 1fr;gap:8px;align-items:baseline;padding:5px 0;font-size:13px}.pg-row span:last-child{color:var(--ink2);min-width:0;overflow-wrap:anywhere}
+.pg-row .mark{color:var(--ink2);text-align:center}.pg-row.ok .mark{color:var(--green)}.pg-row.bad .mark,.pg-row.bad span:last-child{color:var(--red)}.pg-row.wait b{color:var(--ink2);font-weight:500}
+.pg-row .live{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand);animation:blink 1.4s infinite}
+.pg-card{cursor:pointer;margin:0 0 14px}.pg-card .pg{margin:0;background:var(--panel)}
+.ob-again{margin:12px 0 0;padding:10px 12px;border-radius:10px;background:var(--sel);font-size:12.5px;line-height:1.6}
+.news{margin:6px 0 0;padding-left:20px;line-height:1.8;font-size:13.5px}.ob-wait .live{width:7px;height:7px;border-radius:50%;background:var(--brand);animation:blink 1.4s infinite}.ob-wait.ok b{color:var(--green)}
 @media (max-width:560px){.ob-cards,.modes{grid-template-columns:1fr}}
 .set-sec{scroll-margin-top:70px}
 .set-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);gap:6px 28px;align-items:center;padding:14px 16px;border-top:1px solid var(--line2)}
@@ -526,7 +535,7 @@ async function load(){
   catch(e){ if(seq!==loadSequence)return; failing=true; }
   if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item or the inbox
   clearTimeout(refreshTimer);
-  refreshTimer=setTimeout(load,commands().some(waiting)||(D&&D.approvals||[]).length?1500:S.ob&&OB[S.ob.step]?.key==="ai"?2500:8000);   // waiting for the AI to say hello: look often
+  refreshTimer=setTimeout(load,commands().some(waiting)||(D&&D.approvals||[]).length?1500:S.ob&&OB[S.ob.step]?.key==="ai"||(D&&setupBusy())?2500:8000);   // waiting for the AI to say hello: look often
 }
 /* while the window is open, new things say so instead of waiting to be found */
 function announce(){
@@ -887,7 +896,8 @@ function todayPage(){
   const needRows=need.map(i=>row(i)).join("")+msgs.need.map(m=>inboxRow(m,box)).join("");
   const more=`<a class="aside" style="margin-left:auto" href="#" onclick="go('inbox');return false">全部消息${msgs.old.length?` ${msgs.old.length+msgs.today.length}`:""}</a>`;
   const left=setupProblems();
-  return `<p class="hint" style="margin:-4px 2px 14px">${date}</p>${left.length?`<div class="sum bad" style="cursor:pointer" onclick="S.setTab='ai';go('sys')"><div><b>还差 ${left.length} 步才能用</b><br><span>${left.map(x=>esc(x.title.split("：")[0])).join("、")}没配好</span></div><button class="btn pri">去看看</button></div>`:""}
+  const prog=setupBusy()?`<div class="pg-card" onclick="S.ob={step:OB.length-1,started:true};render()">${progressBoard(setupSteps())}</div>`:"";
+  return `<p class="hint" style="margin:-4px 2px 14px">${date}</p>${prog}${!prog&&left.length?`<div class="sum bad" style="cursor:pointer" onclick="S.setTab='ai';go('sys')"><div><b>还差 ${left.length} 步才能用</b><br><span>${left.map(x=>esc(x.title.split("：")[0])).join("、")}没配好</span></div><button class="btn pri">去看看</button></div>`:""}
     <div class="sec-h">要你处理<span class="n">${need.length+msgs.need.length||""}</span></div><div class="list">${needRows||'<div class="empty">现在没有要你处理的。</div>'}</div>`
    +section("你自己要做的：今天到期或已逾期",mine)
    +section("AI 正在做",working)+section("AI 排队",queued)
@@ -1118,39 +1128,93 @@ async function addSubmit(){
   catch(e){ a.busy=false; render(); toast(e.confirmed?e.message:"没创建成功，连不上本机服务"); }
 }
 /* ---------- 新手引导：第一次打开时走一遍，之后在 设置 → 通用 里能再打开 ---------- */
-function obOpen(){ S.ob={step:0}; render(); }
+/* 新手引导：你是谁 → 在哪收到工作 → 让 AI 认识你 → 交给你的 AI，然后看着它一步步配好（第几步、还剩几步、大约多久） */
+const GUIDE_VERSION=2;   // bump when the guide asks for something new: everyone who went through an older one is told
+const WHATS_NEW=["一个 AI 全包：把一段话发给你常用的 AI，它接手做事、整理和配置","接入飞书、微信、Slack：点一下就交给 AI 去配，每一步进度都看得到","让 AI 认识你：你勾选它能看的地方，它写一份「关于你」，之后做事更贴你的岗位和习惯","单独某一件可以换别的 AI 做；交付没接飞书也能在本机打开"];
+function obOpen(again){ S.ob={step:0,again:!!again}; S.news=false; render(); }
 async function obSaveMe(){
   const name=$("#ob-name"), alias=$("#ob-alias"); if(!name) return;
   const body={owner_name:name.value.trim(), owner_aliases:alias.value.split(/[,，、\s]+/).map(x=>x.trim()).filter(Boolean)};
   D.settings={...(D.settings||{}), me:{name:body.owner_name, aliases:body.owner_aliases}};
   if(LIVE){ try{ await api("/api/settings",body); }catch(e){ toast("称呼没保存成功，稍后在引导里再填一次"); } }
 }
-async function obGo(d){ if(OB[S.ob.step].key==="me") await obSaveMe(); S.ob.step=Math.max(0,Math.min(OB.length-1,S.ob.step+d)); render(); }
-async function obDone(){ if(OB[S.ob.step].key==="me") await obSaveMe(); S.ob=null; await setSetting("onboarded",true); }
-/* 三步：你是谁 → 在哪收到工作 → 把一段话交给你常用的 AI，它来报到后接手全部。别的（哪个 AI 做哪块）以后在设置里再分 */
+async function obGo(d){
+  if(OB[S.ob.step].key==="me") await obSaveMe();
+  S.ob.step=Math.max(0,Math.min(OB.length-1,S.ob.step+d));
+  if(OB[S.ob.step].key==="ai") await obStart();
+  render();
+}
+async function obStart(){   // what the owner chose goes to the AI as soon as the guide reaches its last step
+  const st=D.settings||{}, tools=["feishu","slack","wechat"].filter(t=>st["want_"+t]), scan=S.ob.scan||[];
+  if(!LIVE||S.ob.started) return; S.ob.started=true;
+  try{ await api("/api/onboard/start",{tools,scan},15000); await load(); }catch(e){ S.ob.started=false; toast("没交给 AI，连不上本机服务"); }
+}
+async function obDone(){ if(OB[S.ob.step].key==="me") await obSaveMe(); S.ob=null; await guideSeen(); await setSetting("onboarded",true); }
+async function guideSeen(){ D.settings={...(D.settings||{}),guide_version:GUIDE_VERSION}; if(LIVE){ try{ await api("/api/settings",{guide_version:GUIDE_VERSION}); }catch(e){} } }
 const obDriver=st=>{ const name=String(st.engine||"").startsWith("driver:")?st.engine.slice(7):""; return (st.drivers||[]).find(d=>d.name===name&&d.online)||null; };
 const obTool=(key,on,done,name)=>done?`<button class="chip on" disabled>${name} · 已接入</button>`:`<button class="chip ${on?"on":""}" onclick="setSetting('${key}',${!on})">${name}</button>`;
+const obCanScan=k=>{ const st=D.settings||{}; return scanReady(k)||(k==="feishu"&&st.want_feishu)||(k==="wechat"&&st.want_wechat); };   // chosen just now: it will be connected first
+/* everything the AI is doing for the owner right now, in order, with how long each usually takes */
+const EST={driver:1,listener:2,feishu:6,slack:5,wechat:6,know:8};
+function setupSteps(){
+  const st=D.settings||{}, s=D.system||{}, r=s.record||{}, v=st.setup||{}, P=(D.memory||{}).profile||{}, d=obDriver(st), out=[];
+  const tool=(k,name,done)=>{ const doing=(v.doing||{})[k], ask=(v.asks||{})[k], gave=(v.gave_up||{})[k];
+    if(!done&&!doing&&!ask&&!gave&&!st["want_"+k]) return;
+    out.push({k,name:`接入${k==="slack"?" ":""}${name}`,state:done?"ok":doing?"doing":gave?"bad":"wait",
+      text:done?"接好了":doing?(doing.step||"正在接")+(doing.said?`　要你做：${doing.said}`:""):gave?`没接成${gave.why?"："+gave.why:""}`:"排着队"}); };
+  out.push({k:"driver",name:"AI 接手",state:d?"ok":"wait",text:d?`${d.name} 在这儿`:"等你把那段话发给 AI"});
+  out.push({k:"listener",name:"后台程序",state:s.listener==="运行中"?"ok":"wait",text:s.listener==="运行中"?"在运行":"等 AI 启动"});
+  tool("feishu","飞书",!!r.feishu_ready); tool("slack","Slack",!!s.slack); tool("wechat","微信",wxOn(s));
+  if(P.asked||P.scanning||P.draft) out.push({k:"know",name:"认识你",state:P.draft?"ok":P.scanning?"doing":"wait",
+    text:P.draft?"草稿写好了，去「记忆」里确认":P.scanning?(P.scanning.step||"正在看"):"排着队"});
+  return out;
+}
+function progressBoard(list){
+  const open=x=>x.state==="wait"||x.state==="doing";   // one the AI gave up on is finished too: it says why, and can be asked again
+  const done=list.filter(x=>!open(x)).length, left=list.filter(open).reduce((n,x)=>n+(EST[x.k]||3),0), now=list.findIndex(open), bad=list.filter(x=>x.state==="bad").length;
+  const MARK={ok:"✓",doing:"",wait:"",bad:"!"};
+  return `<div class="pg"><div class="pg-top"><b>${done===list.length?(bad?`做完了，${bad} 项没接成`:"全部弄好了"):`第 ${now+1} 步，共 ${list.length} 步`}</b><span>${done===list.length?"":`大约还要 ${left} 分钟`}</span></div>
+    <div class="pg-bar"><i style="width:${Math.round(done/list.length*100)}%"></i></div>
+    ${list.map(x=>`<div class="pg-row ${x.state}"><span class="mark">${x.state==="doing"?'<i class="live"></i>':MARK[x.state]}</span><b>${esc(x.name)}</b><span>${esc(x.text)}${x.state==="bad"&&x.k!=="know"?`　<a href="#" onclick="event.stopPropagation();setupAsk('${x.k}');return false">再试一次</a>`:""}</span></div>`).join("")}</div>`;
+}
+const setupBusy=()=>setupSteps().some(x=>(x.state==="wait"||x.state==="doing")&&x.k!=="driver"&&x.k!=="listener");   // the AI still has something of the owner's to set up
 const OB=[
   {key:"me",title:"先认识一下你",sub:"心响把要做的事收进来，交给你的 AI 去做，做完你来验收。",body:st=>{ const me=st.me||{};
     return `<label class="ob-field"><span>你的名字</span><input id="ob-name" data-draft="ob-name" value="${esc(me.name||"")}" placeholder="和同事平时看到的名字一致"></label>
       <label class="ob-field"><span>同事还怎么叫你</span><input id="ob-alias" data-draft="ob-alias" value="${esc((me.aliases||[]).join("、"))}" placeholder="可以留空；多个用顿号隔开"></label>
       <p class="hint" style="margin:2px 2px 0">会议和聊天里提到这些称呼，才算是你的事。</p>`; }},
-  {key:"tools",title:"平时在哪收到工作",sub:"点选你用的，下一步你的 AI 会带你接好。都不选也能用，要做的事自己加。",body:(st,s)=>{ const r=s.record||{};
+  {key:"tools",title:"平时在哪收到工作",sub:"点选你用的，等会儿你的 AI 会一个个帮你接好。都不选也能用，要做的事自己加。",body:(st,s)=>{ const r=s.record||{};
     return `<div class="chips ob-tools">${obTool("want_feishu",st.want_feishu,r.feishu_ready,"飞书")}${obTool("want_slack",st.want_slack,!!s.slack,"Slack")}${obTool("want_wechat",st.want_wechat,wxOn(s),"微信")}</div>`; }},
-  {key:"ai",title:"交给你常用的 AI",sub:"复制这段话，发给你平时用的 AI。它会把心响配好，之后所有的事都由它来做。",body:st=>{ const d=obDriver(st), left=d?setupProblems().filter(x=>x.key!=="engine"):[];
-    return `<div class="ob-copy"><button class="btn pri" onclick="copySetupPrompt()">复制给 AI 的话</button><span>Claude Code、Codex、Cursor、Antigravity、Gemini、Cindy… 能运行命令的都行</span></div>
-      <details class="ob-peek"><summary>看看这段话</summary><pre>${esc(st.setup_prompt||"")}</pre></details>
-      <div class="ob-wait ${d?"ok":""}">${d?`<b>✓ ${esc(d.name)} 已经接手</b><span>${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${left.length?`　它还在配：${left.map(x=>esc(x.title.replace(/：.*/,""))).join("、")}`:"　都配好了"}</span>`
-        :`<i class="live"></i><b>等你的 AI 来报到</b><span>发出去之后，这里会自动变成它的名字。</span>`}</div>`; }},
+  {key:"know",title:"让 AI 认识你",sub:"勾选 AI 能看的地方，它会写一份「关于你」：你的岗位、在做的事、和谁合作、喜欢怎样的交付。之后做事会更贴你的意图。",body:()=>{
+    if(!S.ob.scan) S.ob.scan=SCAN.filter(x=>obCanScan(x[0])).map(x=>x[0]);
+    return SCAN.map(([k,l,d])=>{ const ok=obCanScan(k), on=S.ob.scan.includes(k); return `<label class="scan-pick ${ok?"":"off"}"><input type="checkbox" ${on&&ok?"checked":""} ${ok?"":"disabled"} onchange="obScan('${k}')"><span><b>${l}</b>　${ok?d:"没选这个工具"}</span></label>`; }).join("")
+      +`<p class="hint" style="margin:10px 2px 0">只整理成摘要存在这台电脑上，不保存聊天原文和文档内容；写好后你确认了才生效。都不勾也可以。</p>`; }},
+  {key:"ai",title:"交给你常用的 AI",sub:"复制这段话，发给你平时用的 AI。它会按你刚才选的一件件做好，每一步这里都看得到。",body:st=>{ const d=obDriver(st);
+    return `<div class="ob-copy"><button class="btn ${d?"":"pri"}" onclick="copySetupPrompt()">复制给 AI 的话</button><span>Claude Code、Codex、Cursor、Antigravity、Gemini、Cindy… 能运行命令的都行</span></div>
+      <details class="ob-peek"><summary>看看这段话</summary><pre>${esc(st.setup_prompt||"")}</pre></details>${progressBoard(setupSteps())}
+      <p class="hint" style="margin:10px 2px 0">可以先进去用，进度在「今天」最上面也看得到。</p>`; }},
 ];
+function obScan(k){ S.ob.scan=S.ob.scan.includes(k)?S.ob.scan.filter(x=>x!==k):[...S.ob.scan,k]; render(); }
 function obView(){
-  const i=S.ob.step, step=OB[i], last=i===OB.length-1, st=D.settings||{};
+  const i=S.ob.step, step=OB[i], last=i===OB.length-1, st=D.settings||{}, all=last&&setupSteps().every(x=>x.state==="ok");
   return `<div class="ob-mask"><div class="ob" role="dialog" aria-modal="true" aria-label="开始使用心响">
     <div class="ob-steps" aria-label="第 ${i+1} 步，共 ${OB.length} 步">${OB.map((_,k)=>`<i class="${k<i?"done":k===i?"on":""}"></i>`).join("")}</div>
+    ${S.ob.again&&i===0?`<div class="ob-again">心响更新了：${esc(WHATS_NEW.slice(0,2).join("；"))}。花一分钟重新走一遍，之前填的都还在。</div>`:""}
     <h2>${step.title}</h2><p class="ob-sub">${step.sub}</p><div class="ob-body">${step.body(st,D.system||{})}</div>
     <div class="ob-foot">${last?"":`<button class="btn ghost" onclick="obDone()">跳过</button>`}<span style="flex:1"></span>
-      ${i?`<button class="btn" onclick="obGo(-1)">上一步</button>`:""}<button class="btn ${last&&!obDriver(st)?"":"pri"}" onclick="${last?"obDone()":"obGo(1)"}">${last?(obDriver(st)?"开始使用":"先进去看看"):"下一步"}</button></div></div></div>`;
+      ${i?`<button class="btn" onclick="obGo(-1)">上一步</button>`:""}<button class="btn ${last&&!all?"":"pri"}" onclick="${last?"obDone()":"obGo(1)"}">${last?(all?"开始使用":"先进去用"):"下一步"}</button></div></div></div>`;
 }
+/* new: the guide. Went through an older guide and the AI never got to know them: the guide again. Already known: only what is new */
+function guideFor(st,P){ P=P||{}; const known=!!(P.text||P.draft), old=(st.guide_version||0)<GUIDE_VERSION;
+  return {ob:!st.onboarded||(old&&!known), news:!!st.onboarded&&old&&known}; }
+/* an older guide was gone through: someone who already let the AI get to know them just hears what is new */
+function newsView(){
+  return `<div class="ob-mask" onclick="if(event.target===this)newsClose()"><div class="ob" role="dialog" aria-modal="true" aria-label="心响新增了什么" style="width:min(520px,100%)">
+    <h2 style="margin-top:0">心响新增了这些</h2><ul class="news">${WHATS_NEW.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>
+    <p class="hint" style="margin:10px 2px 0">AI 做的事和你想的不太一样？可以重新走一遍新手引导，让它重新认识你。</p>
+    <div class="ob-foot"><button class="btn ghost" onclick="newsClose();obOpen(true)">重新走一遍</button><span style="flex:1"></span><button class="btn pri" onclick="newsClose()">知道了</button></div></div></div>`;
+}
+async function newsClose(){ S.news=false; render(); await guideSeen(); }
 /* ---------- 设置: AI / 消息来源 / 数据 / 通用 ---------- */
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
 const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?`<div class="sec-h">${title}</div>`:""}${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
@@ -1319,7 +1383,7 @@ const SET_PAGES={
   bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条，攒几条再一起提交。提交时会附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。",bugsPage()],
   update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
   more:(st,s,w)=>["更多","",setSec("look","","",setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)
-      +setRow("新手引导","重新走一遍：称呼、在哪收到工作、交给你的 AI。",`<button class="btn" onclick="obOpen()">打开引导</button>`))
+      +setRow("新手引导","重新走一遍：称呼、在哪收到工作、让 AI 认识你、交给你的 AI。",`<button class="btn" onclick="obOpen()">打开引导</button>`))
     +talkSection(st)+`<div class="set-sec"><div class="sec-h">高级</div>${advancedSection(st,s,w)}</div>`],
 };
 function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{}, menu=setMenu(st,s);
@@ -1989,7 +2053,7 @@ function render(){
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
   if(!S.view) S.view="today";
-  if(S.ob===undefined&&D.settings) S.ob=(LIVE&&!D.settings.onboarded)?{step:0}:null;   // decided once the settings are read
+  if(S.ob===undefined&&D.settings){ const g=guideFor(D.settings,(D.memory||{}).profile); S.ob=LIVE&&g.ob?{step:0,again:!!D.settings.onboarded}:null; S.news=LIVE&&g.news; }   // decided once the settings are read
   if(S.item&&!byN(S.item)) S.item=null;
   const item=S.item&&byN(S.item), split=!!item&&wide(), solo=!!item&&!split;
   $("#app").classList.toggle("with-detail",split);
@@ -2000,7 +2064,7 @@ function render(){
   const page=S.q?searchPage:{today:todayPage,inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
   let changed=putHTML("#main",approvalView()+(solo?`<div class="solo">${itemView(item)}</div>`:page()));
   changed=putHTML("#detail",split?itemView(item):"")||changed;
-  changed=putHTML("#onboard",S.ob?obView():"")||changed;
+  changed=putHTML("#onboard",S.ob?obView():S.news?newsView():"")||changed;
   changed=putHTML("#adder",S.adding?addView():S.moving?moveView():S.bugging?bugView():"")||changed;
   if(changed) alignRows();
   if(changed){

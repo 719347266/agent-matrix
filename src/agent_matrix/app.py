@@ -194,6 +194,7 @@ def build_state(root):
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
                 "engine": thread.setting(root, "engine", "codex"),
                 "onboarded": bool(thread.setting(root, "onboarded", False)),
+                "guide_version": int(thread.setting(root, "guide_version", 0) or 0),   # which first-run guide the owner went through
                 "prework_enabled": _config_flag(root, "prework_enabled"),
                 "worker_mcp": _config_flag(root, "worker_mcp_tools")}
     settings["engine_sort"] = thread.setting(root, "engine_sort", settings["engine"] if settings["engine"] != "cindy" else "codex")
@@ -551,6 +552,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, update.start(root))
                 update.check(root, force=True)
                 return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/onboard/start":  # the guide's last step: what the owner chose goes to the AI, in order
+                from . import memory, setupasks, thread
+                s = system_info(root)
+                have = {"feishu": bool((s.get("record") or {}).get("feishu_ready")), "slack": bool(s.get("slack")),
+                        "wechat": bool((s.get("wechat") or {}).get("enabled") and (s.get("wechat") or {}).get("installed"))}
+                for tool in [t for t in body.get("tools") or [] if t in have]:
+                    thread.set_setting(root, "want_" + tool, True)
+                    if not have[tool]:
+                        setupasks.ask(root, tool)
+                scan = [x for x in body.get("scan") or [] if x in memory.SCAN_SOURCES]
+                if scan:
+                    memory.ask_scan(root, scan)
+                return self._send(200, {"ok": True, **setup_view(root)["driver"]})
             if path == "/api/setup":  # 接入飞书 / Slack / 微信, or 剩下没配好的: the AI that drives 心响 does it
                 from . import setupasks, thread
                 what = str(body.get("what") or "")
@@ -679,6 +693,8 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if "onboarded" in body:
                     thread.set_setting(root, "onboarded", bool(body["onboarded"]))
+                if isinstance(body.get("guide_version"), int):
+                    thread.set_setting(root, "guide_version", body["guide_version"])
                 switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled", "wechat_enabled")
                 if (body.get("intake_mode") in ("all", "accepted", "manual") or body.get("brief_channel") in ("feishu", "local")
                         or any(k in body for k in switches)):

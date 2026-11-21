@@ -107,7 +107,7 @@ function reset(item) {
   evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(evaluate("checkList()"),/你想接飞书/);
   evaluate('D.settings.want_feishu=false');
-  assert.deepEqual(plain("OB.map(o=>o.key)"),["me","tools","ai"], "who you are, where work comes from, then one message to your AI");
+  assert.deepEqual(plain("OB.map(o=>o.key)"),["me","tools","know","ai"], "who you are, where work comes from, what the AI may look at, then one message to your AI");
   // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself
   evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,kind:"client",checked:"11-20 12:00"}');
   let up = pane("update");
@@ -166,8 +166,8 @@ function reset(item) {
   assert.deepEqual(plain("setupProblems()"),[]);
   let any = pane("ai");
   for (const label of ["做事","整理","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","copyPart('work')","copyPart('sort')"]) assert.ok(any.includes(label), label);
-  let guide = evaluate('S.ob={step:2}; obView()');
-  for (const label of ["Antigravity 已经接手","gemini-3","开始使用","copySetupPrompt()"]) assert.ok(guide.includes(label), label);
+  let guide = evaluate('S.ob={step:3,started:true}; obView()');
+  for (const label of ["AI 接手","Antigravity 在这儿","copySetupPrompt()","共 ","pg-bar"]) assert.ok(guide.includes(label), label);
   assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">Antigravity</);
   assert.match(evaluate("checkList()"),/做事的 AI：Antigravity/); assert.match(evaluate("checkList()"),/正在领活（gemini-3）/);
   evaluate('D.settings.drivers[0].online=false');
@@ -245,8 +245,21 @@ function reset(item) {
     evaluate(`S.ob={step:${step}}`);
     assert.ok(evaluate("obView()").includes(evaluate(`OB[${step}].title`)));
   }
+  // the guide's last step and 今天 show each step the AI is on, how many are left and about how long
+  evaluate('D.settings={...D.settings,engine:"driver:Antigravity",drivers:[{name:"Antigravity",online:true,model:"gemini-3"}],want_feishu:true,setup:{driver:{name:"Antigravity",online:true},asks:{feishu:{at:"x"}},doing:{feishu:{by:"Antigravity",step:"2/4 登录飞书",said:"请在浏览器里点授权"}},gave_up:{}}}; D.system={...D.system,listener:"运行中",record:{feishu_ready:false}}; D.memory={...D.memory,profile:{text:"",asked:{sources:["folders"]}}}');
+  let board = evaluate("progressBoard(setupSteps())");
+  for (const label of ["第 3 步，共 4 步","大约还要 14 分钟","接入飞书","2/4 登录飞书","要你做：请在浏览器里点授权","认识你","排着队"]) assert.ok(board.includes(label), label);
+  assert.match(evaluate("todayPage()"),/pg-card/, "today shows the progress while the AI works");
+  evaluate('D.settings.setup={driver:{},asks:{},doing:{},gave_up:{}}; D.settings.want_feishu=false; D.memory.profile={text:"x"}');
+  assert.doesNotMatch(evaluate("todayPage()"),/pg-card/, "nothing going on: no progress card");
+  // who sees the guide: a new owner; an owner from an older guide who was never got to know; the rest only hear what is new
+  for (const [st, known, ob, news] of [[{onboarded:false},false,true,false],[{onboarded:true,guide_version:1},false,true,false],[{onboarded:true,guide_version:1},true,false,true],[{onboarded:true,guide_version:2},true,false,false]]) {
+    const g = plain(`guideFor(${JSON.stringify(st)}, ${known?'{text:"岗位"}':'{text:""}'})`);
+    assert.deepEqual([g.ob, g.news], [ob, news], JSON.stringify(st)+known);
+  }
+  assert.match(evaluate("newsView()"),/重新走一遍/); evaluate("S.ob=null; S.news=false");
   const last = evaluate('D.settings.drivers=[]; D.settings.engine="codex"; S.ob={step:OB.length-1}; obView()');
-  for (const label of ["等你的 AI 来报到","先进去看看","copySetupPrompt()"]) assert.ok(last.includes(label), label);
+  for (const label of ["等你把那段话发给 AI","先进去用","copySetupPrompt()","大约还要"]) assert.ok(last.includes(label), label);
   assert.doesNotMatch(last,/本机 GPT|本机 Claude|测试连接/, "the newcomer does not choose an engine");
   evaluate("S.ob=null");
   evaluate('S.item=45; byN(45).status="进行中"; document.querySelector("#saybox").value="电话确认了"; sendNote(true)');
