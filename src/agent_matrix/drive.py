@@ -141,13 +141,81 @@ def _prepare_triage(root, config, driver):
     by_id = {r["record_id"]: r for r in rows}
     for i in items:
         i["after"] = after_context(client, by_id[i["record_id"]], now())
+    others, numbers = _triage_others(root, rows)
+    for i in items:   # which version the new item is in (预计会遇到的事 go there); "" when it is in none
+        i["version"] = next((o["version"] for o in others if o["n"] == i["n"]), "")
     stamp = now().strftime("%Y%m%d%H%M%S")
     folder = scratch(root, "triage", stamp)
     (folder / "items.json").write_text(json.dumps([{k: v for k, v in i.items() if k != "record_id"} for i in items],
                                                  ensure_ascii=False, indent=1), encoding="utf-8")
+    (folder / "open.json").write_text(json.dumps(others, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"id": f"triage-{stamp}", "kind": "triage", "title": f"判断新进来的 {len(items)} 件事", "folder": str(folder),
-            "ref": {"items": items}, "output": ["triage.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "ref": {"items": items, "numbers": numbers}, "output": ["triage.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
             "instructions": promptfile.read(root, "triage.md")}
+
+
+TRIAGE_OTHERS = 200
+
+
+def _triage_others(root, rows):
+    """The owner's items that are not finished (newest last), for the AI to see what a new item comes after or
+    leads to: [{n, title, status, version}], and {"n": record_id} to check the numbers it gives back."""
+    from . import versions
+    one = lambda v: (v[0] if isinstance(v, list) and v else v) or ""
+    try:
+        of = {x["rid"]: f"{v['project']} · {v['name']}" for v in versions.all(root) for x in v["items"]}
+    except Exception as exc:
+        activity.swallowed(root, "drive._triage_others", exc)
+        of = {}
+    out, numbers = [], {}
+    for r in rows:
+        try:
+            n = int(str(r.get("编号")).strip())
+        except (TypeError, ValueError):
+            continue
+        if one(r.get("状态")) in ("完成", "取消") or r.get("排除本人提醒"):
+            continue
+        out.append({"n": n, "title": str(one(r.get("标题")))[:60], "status": one(r.get("状态")), "version": of.get(r["record_id"], "")})
+        numbers[str(n)] = r["record_id"]
+    out = out[-TRIAGE_OTHERS:]
+    return out, {str(o["n"]): numbers[str(o["n"])] for o in out}
+
+
+def _numbers(value):
+    """[12, "#15", "16"] / 12 / "12、15" → ["12", "15", "16"]."""
+    if isinstance(value, (int, str)):
+        value = re.findall(r"\d{1,6}", str(value))
+    return [str(x).strip().lstrip("#") for x in value or [] if isinstance(x, (int, str)) and str(x).strip().lstrip("#").isdigit()]
+
+
+def _triage_relations(root, job, item, verdict):
+    """What the AI proposed next to its verdict: which items come before / after this one (linked by="AI") and what
+    the item's version is expected to bring. Only known numbers, never the item itself; the item must be in a
+    version for expected things. A wrong guess is dropped quietly: it must not hold up the verdict.
+    Returns (links made, expected written)."""
+    from . import itemlinks, versions
+    from .models import MatrixError
+    numbers = dict(job["ref"].get("numbers") or {})   # older jobs carry none: only the new items themselves
+    numbers.update({str(i["n"]): i["record_id"] for i in job["ref"]["items"]})
+    me, links, expected = item["record_id"], 0, 0
+    for key, mine_is_later in (("before", True), ("after", False)):
+        for n in _numbers(verdict.get(key))[:5]:
+            other = numbers.get(n)
+            if not other or other == me:
+                continue
+            try:
+                itemlinks.link(root, *((other, me) if mine_is_later else (me, other)), by="AI")
+                links += 1
+            except MatrixError:
+                pass
+    proposed = verdict.get("expected") or []
+    version = versions.of(root, me) if proposed else None
+    for e in (proposed if isinstance(proposed, list) else [])[:5]:
+        e = {"title": e} if isinstance(e, str) else e
+        if version and isinstance(e, dict) and str(e.get("title") or "").strip():
+            versions.expect(root, version["id"], e["title"], e.get("why", ""), e.get("due", ""))
+            expected += 1
+    return links, expected
 
 
 LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
@@ -976,9 +1044,16 @@ def _submit_triage(root, job):
         if not ok:
             continue  # not applied: judged again next time
         conversation.judge(root, item["record_id"], decision, reason)
+        links = expected = 0
+        if decision not in {"done", "skip"}:   # only for work still to do: what comes before, after and is expected
+            try:
+                links, expected = _triage_relations(root, job, item, v)
+            except Exception as exc:
+                activity.swallowed(root, "drive._submit_triage", exc)
+        extra = "、".join(x for x in (f"串上了 {links} 件前后的事" if links else "", f"记下 {expected} 件这个版本预计会遇到的事" if expected else "") if x)
         conversation.add(root, item["record_id"], "ai", "say", f"判断：{TRIAGE_LABEL[decision]}。{reason}" +
-                         (f"\n依据：{evidence}" if evidence else ""), driver=job.get("driver"))
-        applied.append({"n": item["n"], "decision": decision})
+                         (f"\n依据：{evidence}" if evidence else "") + (f"\n{extra}。" if extra else ""), driver=job.get("driver"))
+        applied.append({"n": item["n"], "decision": decision, **({"links": links} if links else {}), **({"expected": expected} if expected else {})})
     if applied:
         activity.log(root, "detect", "AI 判断新进来的事：" + "、".join(f"#{a['n']} {TRIAGE_LABEL[a['decision']][:6]}" for a in applied))
     _close(root, job, "done")

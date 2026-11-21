@@ -447,6 +447,14 @@ class Listener:
                     log("memory", "waiting due", told)
             except Exception as exc:
                 log("memory failed", type(exc).__name__, str(exc)[:200])
+        if self.every("expected", 600):
+            try:  # 预计会遇到的事: told the day before and on the day (local only; once per day per thing)
+                from . import versions
+                told = versions.expected_due(self.root)
+                if told:
+                    log("expected", "due", told)
+            except Exception as exc:
+                log("expected failed", type(exc).__name__, str(exc)[:200])
         for name, job in jobs:
             try:
                 result = self.locked(job)
