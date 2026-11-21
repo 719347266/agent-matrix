@@ -280,12 +280,17 @@ function reset(item) {
   // the guide's last step and 今天 show each step the AI is on, how many are left and about how long
   evaluate('D.settings={...D.settings,engine:"driver:Antigravity",drivers:[{name:"Antigravity",online:true,model:"gemini-3"}],want_feishu:true,setup:{driver:{name:"Antigravity",online:true},asks:{feishu:{at:"x"}},doing:{feishu:{by:"Antigravity",step:"2/4 登录飞书",said:"请在浏览器里点授权"}},gave_up:{}}}; D.system={...D.system,listener:"运行中",record:{feishu_ready:false}}; D.memory={...D.memory,profile:{text:"",asked:{sources:["folders"]}}}');
   let board = evaluate("progressBoard(setupSteps())");
-  for (const label of ["第 3 步，共 4 步","大约还要 14 分钟","接入飞书","2/4 登录飞书","要你做：请在浏览器里点授权","认识你","排着队"]) assert.ok(board.includes(label), label);
+  for (const label of ["第 3 步，共 4 步","大约还要 10 分钟","接入飞书","2/4 登录飞书","要你做：请在浏览器里点授权","认识你","排着队"]) assert.ok(board.includes(label), label);
+  evaluate('D.memory.organize={asked:{at:"x"}}'); board = evaluate("progressBoard(setupSteps())");
+  for (const label of ["共 5 步","整理项目和版本","大约还要 14 分钟"]) assert.ok(board.includes(label), label);
+  evaluate('D.memory.organize={}; D.memory.versions=[{id:1}]'); board = evaluate("progressBoard(setupSteps())");
+  assert.match(board,/go\('mem'\)[^>]*>理出 1 个版本，去「记忆」里看/, "finished: one click to see it");
+  evaluate('D.memory.versions=[]; S.organizedNow=false');
   assert.match(evaluate("todayPage()"),/pg-card/, "today shows the progress while the AI works");
   evaluate('D.settings.setup={driver:{},asks:{},doing:{},gave_up:{}}; D.settings.want_feishu=false; D.memory.profile={text:"x"}');
   assert.doesNotMatch(evaluate("todayPage()"),/pg-card/, "nothing going on: no progress card");
   // who sees the guide: a new owner; an owner from an older guide who was never got to know; the rest only hear what is new
-  for (const [st, known, ob, news] of [[{onboarded:false},false,true,false],[{onboarded:true,guide_version:1},false,true,false],[{onboarded:true,guide_version:1},true,false,true],[{onboarded:true,guide_version:2},true,false,false]]) {
+  for (const [st, known, ob, news] of [[{onboarded:false},false,true,false],[{onboarded:true,guide_version:1},false,true,false],[{onboarded:true,guide_version:1},true,false,true],[{onboarded:true,guide_version:3},true,false,false],[{onboarded:true,guide_version:2},true,false,true]]) {
     const g = plain(`guideFor(${JSON.stringify(st)}, ${known?'{text:"岗位"}':'{text:""}'})`);
     assert.deepEqual([g.ob, g.news], [ob, news], JSON.stringify(st)+known);
   }

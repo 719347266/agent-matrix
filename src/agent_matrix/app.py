@@ -618,6 +618,9 @@ class Handler(BaseHTTPRequestHandler):
                 scan = [x for x in body.get("scan") or [] if x in memory.SCAN_SOURCES]
                 if scan:
                     memory.ask_scan(root, scan)
+                if body.get("organize"):   # after 认识你: sort the work into project → version
+                    from . import versions
+                    versions.ask_organize(root)
                 return self._send(200, {"ok": True, **setup_view(root)["driver"]})
             if path == "/api/setup":  # 接入飞书 / Slack / 微信, or 剩下没配好的: the AI that drives 心响 does it
                 from . import setupasks, thread
