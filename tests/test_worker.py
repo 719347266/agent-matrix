@@ -326,7 +326,19 @@ class ConversationTests(unittest.TestCase):
             self.assertTrue(ask(f"rm {other}/old.go"))                       # the owner's file
             self.assertTrue(ask(f"cd {other} && rm -f old.go"))
             self.assertFalse(ask(f"cd {other} && rm -f old.go", time.time() - 60))   # born during this turn
-            self.assertTrue(ask(f"cd {other} && rm -rf *"))                  # globs are never guessed
+            self.assertTrue(ask(f"cd {other} && rm -rf *"))                  # the glob hits the owner's old.go
+            (work / "a.js").write_text("x")
+            self.assertFalse(ask("rm -f *.js; rm -f *.none"))                 # only the item's own files / nothing
+            self.assertTrue(ask(f"cd $SOMEWHERE && rm -f x.txt"))             # after a cd we cannot follow
+            # hidden in loops, $(…), `…`, bash -c, xargs: still seen
+            for cmd in (f"for f in a b; do rm {other}/old.go; done", "x=$(aws s3 rm s3://b/k)", f"echo $(rm -rf {other})",
+                        f"echo `git push`", "bash -c 'git reset --hard'", "if true; then kubectl delete pod x; fi",
+                        f"ls | xargs rm", "nohup git push &"):
+                self.assertTrue(ask(cmd), cmd)
+            self.assertFalse(ask("for i in 1 2; do aws codebuild batch-get-builds --ids a; sleep 30; done"))   # polling
+            self.assertFalse(ask("ids=$(aws codebuild list-builds-for-project --project-name p --query ids --output text)"))
+            self.assertFalse(ask("aws configure list 2>&1"))
+            self.assertTrue(ask("aws configure get aws_secret_access_key"))
             self.assertTrue(ask('rm -rf "$SOMEWHERE"'))
             self.assertTrue(ask("rm -rf ."))                                 # the item's folder itself
             self.assertTrue(ask("git push origin dev"))

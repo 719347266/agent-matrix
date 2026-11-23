@@ -2,6 +2,7 @@
 
 One JSON file per request under state/approvals/, so the worker (asks, polls) and the app server (lists,
 decides) share it without a lock: each side only ever replaces a whole file."""
+import glob
 import json
 import os
 import re
@@ -49,16 +50,38 @@ def needs_owner(root, tool, tool_input, workdir=None, since=None):
         return False
     # ponytail: naive split on shell separators, quotes are not parsed; a risky word inside a quoted string asks once too many
     cwd = Path(workdir or ".").resolve()
-    for part in re.split(r"&&|\|\||[;|\n]", str((tool_input or {}).get("command") or "")):
+    for part in _parts(str((tool_input or {}).get("command") or "")):
         cd = re.match(r"\s*cd\s+(\S+)\s*$", part)
         if cd:
-            cwd = cwd / _expand(cd.group(1).strip("'\""))
+            target = _expand(cd.group(1).strip("'\""))
+            # a folder we cannot work out ($VAR, `…`): relative paths after it are unknown, so rm there asks
+            cwd = None if cwd is None or re.search(r"[$`*?]", target) else cwd / target
             continue
         hit = _RISKY_START.match(part)
         if not hit or (hit.group(2) in ("rm", "rmdir") and _ai_made(part, cwd, workdir, since)) or _read_only(hit.group(2), part):
             continue
         return True
     return False
+
+
+# Words that start a command without being it: `for …; do rm x; done`, `if …; then kubectl delete …`, `xargs rm`.
+_LEAD = re.compile(r"^\s*(?:(?:do|then|else|elif|if|while|until|time|exec|nohup|env|command|builtin|!|\{|\(|xargs(?:\s+-\S+)*)\s+)+")
+
+
+def _parts(command, depth=0):
+    """Every simple command in a shell line, the ones inside $(…), `…` and bash/sh -c "…" included, each without the
+    keywords in front of it. A risky command hidden in any of them is seen."""
+    out = []
+    inner = re.findall(r"\$\(([^()]*(?:\([^()]*\)[^()]*)*)\)|`([^`]*)`", command)
+    for piece in re.split(r"&&|\|\||[;|\n]", command):
+        out.append(_LEAD.sub("", re.sub(r"^\s*\w+=\$\(", "", piece)))   # x=$(aws …: the command after "x=$("
+        c = re.search(r"\b(?:ba|z)?sh\s+-c\s+(\"[^\"]*\"|'[^']*')", piece)
+        if c and depth < 3:
+            out += _parts(c.group(1)[1:-1], depth + 1)
+    if depth < 3:
+        for a, b in inner:
+            out += _parts(a or b, depth + 1)
+    return out
 
 
 # ---- 只读放行: a risky command whose sub-command only reads runs without asking ----------------------------------
@@ -87,7 +110,7 @@ _READ = {
              {"repo": {"list", "ls"}, "dependency": {"list", "ls"}, "dep": {"list", "ls"}, "plugin": {"list", "ls"}}),
     "terraform": ({"plan", "show", "validate", "output", "providers", "version", "graph"}, {"state": {"list", "show"}}),
 }
-_AWS_READ_OP = re.compile(r"(describe|get|list|batch-get|head|lookup|filter)-|(ls|tail|get-caller-identity)$")
+_AWS_READ_OP = re.compile(r"(describe|get|list|batch-get|head|lookup|filter)-|(ls|tail|list|get-caller-identity)$")   # configure list too; configure get reads keys
 _SQL_READ = re.compile(r"\s*(select|show|desc|describe|explain)\b", re.I)
 _REDIS_READ = {"get", "mget", "hget", "hmget", "hgetall", "hkeys", "hvals", "hlen", "hexists", "keys", "scan", "sscan",
                "hscan", "zscan", "ttl", "pttl", "type", "exists", "strlen", "info", "dbsize", "lrange", "llen", "lindex",
@@ -171,11 +194,20 @@ def _ai_made(part, cwd, workdir, since):
     if not targets:
         return False
     own = [Path(workdir).resolve()] if workdir else []
+    paths = []
     for target in targets:
         target = _expand(target)
-        if re.search(r"[*?\[$`]", target):
-            return False
-        path = Path(os.path.normpath(cwd / target))
+        if re.search(r"[$`]", target) or (cwd is None and not os.path.isabs(target)):
+            return False   # a variable we cannot read, or a relative path after a `cd` we could not follow
+        full = os.path.normpath(os.path.join(cwd or "/", target))
+        if re.search(r"[*?\[]", target):
+            found = glob.glob(full)   # a glob: every file it would hit, judged one by one
+            if len(found) > 200:
+                return False
+            paths += [Path(p) for p in found]
+        else:
+            paths.append(Path(full))
+    for path in paths:
         if path in (Path("/"), Path.home()) or (own and path == own[0]):
             return False
         if not os.path.lexists(path):
