@@ -24,7 +24,7 @@ class ChatCatchTests(unittest.TestCase):
     def test_an_at_mention_is_kept_even_without_request_words(self):
         message = {"mentions": [{"id": "ou_me", "key": "@_user_1", "name": "王小明"}]}
         self.assertTrue(mentions_owner(message, "ou_me"))
-        self.assertEqual(classify("@王小明 人生模拟器反馈", from_owner=False, chat_mode="group", names=self.names, mentioned=True), "@你")
+        self.assertEqual(classify("@王小明 新功能反馈", from_owner=False, chat_mode="group", names=self.names, mentioned=True), "@你")
         self.assertIsNone(classify("@王小明", from_owner=False, chat_mode="group", names=self.names, mentioned=True))
 
     def test_a_question_in_a_private_chat_is_kept(self):
@@ -33,7 +33,7 @@ class ChatCatchTests(unittest.TestCase):
     def test_urgent_or_at_you_goes_at_once_the_rest_follows_the_chosen_pace(self):
         self.assertIsNone(ready(CONFIG, [], NOW, "every"))
         self.assertIsNotNone(ready(CONFIG, [line("小王，今天下班前把数据发我")], NOW))
-        self.assertIsNotNone(ready(CONFIG, [line("人生模拟器反馈", kind="@你")], NOW))
+        self.assertIsNotNone(ready(CONFIG, [line("新功能反馈", kind="@你")], NOW))
         self.assertIsNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW))                # not due yet: waits
         self.assertIsNotNone(ready(CONFIG, [line("小王，帮忙看下这个需求")], NOW, "every"))    # the pace came round
         private = {**line("你们测试服有没有空升级一下包"), "chat_mode": "p2p"}

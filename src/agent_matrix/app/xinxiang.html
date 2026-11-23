@@ -630,7 +630,7 @@ function submitInline(){
   const value=input.value.trim();if(!value)return input.focus();
   input.value=""; drafts.delete("inline-"+f.n+"-"+f.k); S.inline=null; apply(f.n,f.k,value);
 }
-const DEMO_N = 45, DEMO_STEPS = ["1/4 读任务单和背景","2/4 读标签体系文档","3/4 写需求文档","4/4 自检"];
+const DEMO_N = 45, DEMO_STEPS = ["1/4 读任务单和背景","2/4 读数据看板文档","3/4 写需求文档","4/4 自检"];
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const byN = n => D.items.find(i => i.n === n);
@@ -1087,7 +1087,7 @@ async function memUpdate(body){
   catch(e){ toast("没保存成功，连不上本机服务"); }
   load();
 }
-const PROFILE_HINT="写几句就行，AI 会照着做得更像你要的：\n岗位：比如 观己 App 的产品经理，负责会员和增长\n公司和产品：做什么、用户是谁\n常一起干活的人：张三（设计）、李四（后端）\n交付习惯：方案用飞书文档、先给结论再展开、表格优先\n常用工具和地方：需求在飞书多维表格，代码在 GitHub 的 xxx 仓库";
+const PROFILE_HINT="写几句就行，AI 会照着做得更像你要的：\n岗位：比如 示例 App 的产品经理，负责会员和增长\n公司和产品：做什么、用户是谁\n常一起干活的人：张三（设计）、李四（后端）\n交付习惯：方案用飞书文档、先给结论再展开、表格优先\n常用工具和地方：需求在飞书多维表格，代码在 GitHub 的 xxx 仓库";
 /* 让 AI 认识我：你勾选它能看的地方，同意后它去看，写一份草稿给你确认 */
 const SCAN=[["feishu","飞书近 30 天","文档、群、会议、任务"],["folders","本机项目文件夹","项目名、代码仓库、常产出的文件"],["wechat","微信近期聊天","只看工作群和常聊工作的人"],["ai_memory","Cindy/Claude 记忆","你在别的 AI 里写过的说明"]];
 function scanReady(k){ const s=D.system||{}; return k==="feishu"?!!(s.record||{}).feishu_ready:k==="wechat"?wxOn(s):true; }
@@ -1570,7 +1570,9 @@ function wakeLine(st,value){
 }
 async function saveWakeUrl(){
   const el=$("#wakeurl"), v=String(el&&el.value||"").trim();
-  try{ await api("/api/settings",{cindy_wake_url:v}); toast(v?"已保存，有活时会马上叫醒 Cindy":"已清掉，只等 Cindy 的定时任务"); load(); }catch(e){ toast(e.message||"没保存成功"); }
+  try{ const r=await api("/api/settings",{cindy_wake_url:v}), w=r&&r.wake;
+    toast(!v?"已清掉，只等 Cindy 的定时任务":w&&w.ok?"已接好：刚叫了 Cindy 一次，通了":`地址存了，但试叫没成：${(w&&w.why)||"没有回应"}`); load(); }
+  catch(e){ toast(e.message||"没保存成功"); }
 }
 function geminiKeyRow(st){
   return `<div class="d" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">API Key：<input id="gemkey" type="password" autocomplete="off" placeholder="${st.gemini_key?"已填，粘贴新的可替换":"可不填；个人账号登录不了时填"}" style="width:230px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')saveGeminiKey()"><button class="btn" onclick="saveGeminiKey()">保存</button>${st.gemini_key?`<button class="btn ghost" onclick="saveGeminiKey(true)">清掉</button>`:""}
@@ -1718,7 +1720,7 @@ function pushLine(s){
 function filterRow(r){
   const skipC=r.skip_chats||[], skipW=r.skip_words||[], pick=(r.recent_chats||[]).filter(n=>!skipC.some(w=>n.includes(w))).slice(0,12);
   return setRow("不想看的","名字里含这些字的群只收 @你 的消息；消息里原样出现这些字就跳过（逐字匹配，不按意思判断）。飞书和 Slack 都管用，一行一个。",`<button class="btn pri" onclick="saveFilters()">保存过滤</button>`,
-    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="hint" style="margin:0 0 4px">屏蔽的群</div><textarea id="skipchats" rows="3" data-draft="skip-chats" placeholder="例：bot-loyalty&#10;all-member" style="width:100%">${esc(skipC.join("\n"))}</textarea></div>
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="hint" style="margin:0 0 4px">屏蔽的群</div><textarea id="skipchats" rows="3" data-draft="skip-chats" placeholder="例：bot-shop&#10;all-member" style="width:100%">${esc(skipC.join("\n"))}</textarea></div>
      <div><div class="hint" style="margin:0 0 4px">跳过的消息</div><textarea id="skipwords" rows="3" data-draft="skip-words" placeholder="例：Issue created&#10;部署通知" style="width:100%">${esc(skipW.join("\n"))}</textarea></div></div>
      ${pick.length?`<div class="chips" style="margin:6px 0 0">${pick.map(n=>`<button class="chip" onclick="addSkipChat(${esc(JSON.stringify(n.replace(/^Slack · /,"")))})">+ ${esc(n)}</button>`).join("")}</div>`:""}`);
 }

@@ -21,18 +21,18 @@ class WorkMemory(unittest.TestCase):
         aidrivers.hello(self.root, "Antigravity")
 
     def test_verdicts_are_kept_and_rules_hold_where_they_belong(self):
-        pid = projects.create(self.root, "观己 App")
+        pid = projects.create(self.root, "示例 App")
         projects.assign(self.root, ["r1"], pid)
         (self.root / "state/work/r1").mkdir(parents=True)
         (self.root / "state/work/r1/结果.json").write_text(json.dumps({"template": "方案"}), encoding="utf-8")
         memory.record_outcome(self.root, "r1", "退回", "别写过程，只要结论")
         memory.record_outcome(self.root, "r1", "通过")
         got = memory.outcomes(self.root)
-        self.assertEqual([(o["verdict"], o["template"], o["project"]) for o in got], [("退回", "方案", "观己 App"), ("通过", "方案", "观己 App")])
+        self.assertEqual([(o["verdict"], o["template"], o["project"]) for o in got], [("退回", "方案", "示例 App"), ("通过", "方案", "示例 App")])
         memory.add_rule(self.root, "给客户的方案不写内部代号", source="AI 学的", scope=f"project:{pid}")
         memory.add_rule(self.root, "周报先给结论", source="AI 学的", scope="type:周报")
         other = projects.create(self.root, "心响")
-        self.assertIn("不写内部代号（项目「观己 App」）", memory.rules_text(self.root, pid))
+        self.assertIn("不写内部代号（项目「示例 App」）", memory.rules_text(self.root, pid))
         self.assertNotIn("不写内部代号", memory.rules_text(self.root, other), "another project's rule stays out")
         self.assertIn("周报先给结论（做「周报」时）", memory.rules_text(self.root, None))
         rule = next(r for r in memory.rules(self.root) if r["rule"] == "周报先给结论")
@@ -134,12 +134,12 @@ class WorkMemory(unittest.TestCase):
             items = json.loads((Path(job["folder"]) / "items.json").read_text(encoding="utf-8"))
             self.assertEqual([i["n"] for i in items], [1, 2, 3])
             (Path(job["folder"]) / "organize.json").write_text(json.dumps({
-                "versions": [{"project": "观己 App", "name": "2.3", "status": "当前", "note": "会员改版"},
-                             {"project": "观己 App", "name": "2.4", "status": "下一版"}],
-                "items": [{"n": 1, "project": "观己 App", "version": "2.3"}, {"n": 2, "project": "观己 App", "version": "2.3"},
-                          {"n": 99, "project": "观己 App", "version": "2.3"}],
+                "versions": [{"project": "示例 App", "name": "2.3", "status": "当前", "note": "会员改版"},
+                             {"project": "示例 App", "name": "2.4", "status": "下一版"}],
+                "items": [{"n": 1, "project": "示例 App", "version": "2.3"}, {"n": 2, "project": "示例 App", "version": "2.3"},
+                          {"n": 99, "project": "示例 App", "version": "2.3"}],
                 "links": [{"earlier": 1, "later": 2}, {"earlier": 2, "later": 2}],
-                "expected": [{"project": "观己 App", "version": "2.3", "title": "上线前验收", "why": "每个版本都要"}]}), encoding="utf-8")
+                "expected": [{"project": "示例 App", "version": "2.3", "title": "上线前验收", "why": "每个版本都要"}]}), encoding="utf-8")
             with patch("agent_matrix.inbox.add"):
                 out = drive.submit(self.root, None, job["id"])
             self.assertEqual((out["status"], out["versions"], out["items"], out["links"], out["expected"]), ("done", 2, 2, 1, 1))
@@ -148,18 +148,18 @@ class WorkMemory(unittest.TestCase):
             self.assertEqual((v23["status"], sorted(x["rid"] for x in v23["items"])), ("current", ["r1", "r2"]))
             self.assertEqual(projects.chosen(self.root).get("r1"), v23["project_id"], "putting it in a version puts it in the project")
             text = versions.context_text(self.root, "r2", {r["record_id"]: r for r in ROWS})
-            for part in ("观己 App · 2.3（当前）", "会员改版", "定会员积分规则（完成）", "上线前验收"):
+            for part in ("示例 App · 2.3（当前）", "会员改版", "定会员积分规则（完成）", "上线前验收"):
                 self.assertIn(part, text)
             v24 = next(v for v in versions.all(self.root) if v["name"] == "2.4")
             versions.place(self.root, "r2", v24["id"], by=versions.OWNER)
             self.assertFalse(versions.place(self.root, "r2", v23["id"]), "the AI does not move what the owner placed")
             self.assertEqual(versions.of(self.root, "r2")["name"], "2.4")
-            versions.upsert(self.root, "观己 App", "2.4", "当前")
+            versions.upsert(self.root, "示例 App", "2.4", "当前")
             self.assertEqual({v["name"]: v["status"] for v in versions.all(self.root)}, {"2.3": "done", "2.4": "current"})
             drive._close(self.root, job, "done")
             item = drive._open(self.root, {"id": "item-r2-x", "kind": "item", "title": "做会员页面", "folder": str(self.root),
                                            "ref": {"record_id": "r2", "version": "v"}, "output": [], "instructions": "做"}, "Antigravity")
-        self.assertIn("这件事属于：观己 App · 2.4", item["instructions"])
+        self.assertIn("这件事属于：示例 App · 2.4", item["instructions"])
 
 
 if __name__ == "__main__":

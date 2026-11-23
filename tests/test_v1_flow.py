@@ -119,7 +119,7 @@ class MeetingTaskTests(unittest.TestCase):
     transcript = "00:10 我：如果你看了没问题，我这边就让大伟去做进去了。\n00:20 杨：我再看看吧。"
 
     def review(self, **changes):
-        action = dict(title="安排大伟做标签体系", text="安排", quote="我这边就让大伟去做进去了", timestamp="00:10",
+        action = dict(title="安排大伟做数据看板", text="安排", quote="我这边就让大伟去做进去了", timestamp="00:10",
                       reference=self.transcript.splitlines()[0], owner_name="我", direction="mine",
                       commitment_phrase="我这边就让大伟去做", confidence=0.6)
         action.update(changes)
@@ -127,7 +127,7 @@ class MeetingTaskTests(unittest.TestCase):
                       actions=[Action(**action)])
 
     def test_low_confidence_or_missing_commitment_is_not_a_task(self):
-        meta = {"meeting_id": "1" * 19, "start_time": "2026-11-16 14:32", "topic": "标签体系沟通"}
+        meta = {"meeting_id": "1" * 19, "start_time": "2026-11-16 14:32", "topic": "数据看板沟通"}
         review = self.review()
         validate_review(review, self.transcript, meta)
         self.assertEqual(kept_actions(review), [])
@@ -203,13 +203,13 @@ class PrepAndWeeklyTests(unittest.TestCase):
     def test_prep_links_items_by_topic_and_skips_empty_meetings(self):
         from agent_matrix.agents.meeting_prep import _keywords, _related, build
         keys = _keywords("2.2需求确认")
-        self.assertTrue(_related("整理2.2多自定义角色与头像需求稿", keys))
+        self.assertTrue(_related("整理2.2多主题皮肤需求稿", keys))
         self.assertFalse(_related("整理投放测试策略", keys))
-        self.assertTrue(_related("准备实习生例会复盘材料", _keywords("XX团队-实习生运营复盘会")))
+        self.assertTrue(_related("准备新人例会复盘材料", _keywords("XX团队-新人运营复盘会")))
         queue = SimpleNamespace(list=lambda: [])
         event = {"event_id": "e1", "summary": "2.2需求确认", "start_time": {"datetime": "2026-11-18T09:45:00+08:00"}}
         now = datetime(2026, 11, 18, 9, 15, tzinfo=TZ)
-        rows = [row(13, "待验收", 标题="整理2.2多自定义角色与头像需求稿", 交付物链接="https://x.feishu.cn/docx/a")]
+        rows = [row(13, "待验收", 标题="整理2.2多主题皮肤需求稿", 交付物链接="https://x.feishu.cn/docx/a")]
         card = build(Config(owner_name="我"), rows, event, queue, "/tmp", now)
         self.assertIn("30 分钟后开始", json.dumps(card, ensure_ascii=False))
         self.assertIsNone(build(Config(), [row(6, "未开始", 标题="整理投放测试策略")], event, queue, "/tmp", now))
@@ -220,7 +220,7 @@ class PrepAndWeeklyTests(unittest.TestCase):
         queue = SimpleNamespace(list=lambda: [])
         event = {"event_id": "e1", "summary": "2.2需求确认", "start_time": {"datetime": "2026-11-18T09:45:00+08:00"},
                  "vchat": {"meeting_url": "https://vc.feishu.cn/j/1"}}
-        rows = [row(13, "待验收", 标题="整理2.2多自定义角色与头像需求稿", 交付物链接="https://x.feishu.cn/docx/a"),
+        rows = [row(13, "待验收", 标题="整理2.2多主题皮肤需求稿", 交付物链接="https://x.feishu.cn/docx/a"),
                 row(14, "待确认", "我", 标题="2.2需求的验收标准")]
         import tempfile
         with tempfile.TemporaryDirectory() as root:
@@ -234,7 +234,7 @@ class PrepAndWeeklyTests(unittest.TestCase):
         self.assertEqual((title, refs), ("09:45 2.2需求确认", [13, 14]))
         rows_ = blocks[1]["rows"]
         self.assertEqual([(r["head"], r["url"]) for r in rows_],
-                         [("#13 整理2.2多自定义角色与头像需求稿", "https://x.feishu.cn/docx/a"), ("#14 2.2需求的验收标准", None)])
+                         [("#13 整理2.2多主题皮肤需求稿", "https://x.feishu.cn/docx/a"), ("#14 2.2需求的验收标准", None)])
         self.assertEqual(rows_[1]["hint"], "还没定什么时候做完")
         self.assertEqual(blocks[-1], {"type": "text", "text": "[进入会议](https://vc.feishu.cn/j/1)"})
         self.assertNotIn("逐字稿", json.dumps(blocks, ensure_ascii=False))
@@ -261,14 +261,14 @@ class CompleteDeliverableTests(unittest.TestCase):
     def test_completion_settles_the_deliverable(self):
         from unittest.mock import patch
         rows = [row(1, "未开始", "我", 标题="跟进会员设计稿交接"),
-                row(2, "未开始", "我", 标题="撰写标签体系需求文档"),
+                row(2, "未开始", "我", 标题="撰写数据看板需求文档"),
                 row(3, "未开始", "我", 标题="年度运营计划方案"),
                 row(4, "进行中", "我", 标题="整理周报", 交付物链接="https://x.feishu.cn/docx/w")]
         a = applier(rows)
-        found = {"title": "标签体系需求文档 v1", "url": "https://x.feishu.cn/docx/tag"}
-        with patch("agent_matrix.reply.find_deliverable", side_effect=lambda c, cfg, title, now: found if "标签" in title else None):
+        found = {"title": "数据看板需求文档 v1", "url": "https://x.feishu.cn/docx/tag"}
+        with patch("agent_matrix.reply.find_deliverable", side_effect=lambda c, cfg, title, now: found if "看板" in title else None):
             self.assertIn("行动项", self.run_text(a, "1 完成")[0])
-            self.assertIn("《标签体系需求文档 v1》", self.run_text(a, "2 完成")[0])
+            self.assertIn("《数据看板需求文档 v1》", self.run_text(a, "2 完成")[0])
             self.assertIn("没找到", self.run_text(a, "3 完成")[0])
             self.assertIn("交付物已在", self.run_text(a, "4 完成")[0])
         d = a.gateway.data
@@ -288,11 +288,11 @@ class CompleteDeliverableTests(unittest.TestCase):
             return {"title_highlighted": title, "result_meta": {"owner_id": owner, "edit_user_id": owner, "update_time_iso": when,
                                                                 "url": "https://x.feishu.cn/docx/" + str(abs(hash(title)))}}
         client = SimpleNamespace(_exec=lambda argv: {"results": [
-            result("<h>标签体系</h>需求文档"), result("别人的标签体系需求文档", owner="ou_x"),
-            result("标签体系需求文档（旧）", when="2026-09-01T10:00:00+08:00")]})
+            result("<h>数据看板</h>需求文档"), result("别人的数据看板需求文档", owner="ou_x"),
+            result("数据看板需求文档（旧）", when="2026-09-01T10:00:00+08:00")]})
         config = Config(owner_open_id="ou_me")
-        self.assertEqual(find_deliverable(client, config, "撰写标签体系需求文档", now)["title"], "标签体系需求文档")
-        self.assertIsNone(find_deliverable(client, config, "聚光投放复盘", now))
+        self.assertEqual(find_deliverable(client, config, "撰写数据看板需求文档", now)["title"], "数据看板需求文档")
+        self.assertIsNone(find_deliverable(client, config, "广告投放复盘", now))
 
 
 class NotebookTests(unittest.TestCase):

@@ -215,8 +215,8 @@ class SameThingTests(unittest.TestCase):
             return {"record_id": f"rec{n}", "编号": n, "标题": title, "状态": [st], **k}
         return [r(35, "角色默认动作需要调整为随机，并且在对话过程中需要根据情境调整"),
                 r(36, "角色默认动作需要调整为不一致，并且在对话过程中需要根据情境调"),
-                r(30, "聚光方案撰写"), r(44, "备材料：聚光方案撰写", 父事项=[{"id": "rec30"}]),
-                r(3, "核对标签体系文档并取得确认"), r(31, "撰写标签体系需求文档"),
+                r(30, "广告方案撰写"), r(44, "备材料：广告方案撰写", 父事项=[{"id": "rec30"}]),
+                r(3, "核对数据看板文档并取得确认"), r(31, "撰写数据看板需求文档"),
                 r(8, "刷好评"), r(9, "已经做完的投放方案", st="完成"),
                 r(12, "整理周报", 关联任务链接="https://applink.feishu.cn/client/todo/detail?guid=11111111-2222-3333-4444-555555555555")]
 
@@ -239,7 +239,7 @@ class SameThingTests(unittest.TestCase):
     def test_model_same_as_must_point_at_an_open_matching_item(self):
         from agent_matrix.meeting_review import _same_target, Action
         base = dict(text="t", quote="q", timestamp="00:10", reference="00:10 q", commitment_phrase="q", confidence=0.9,
-                    title="写标签体系需求")
+                    title="写数据看板需求")
         self.assertEqual(_same_target(self.rows(), Action(**base, same_as=31))["编号"], 31)
         with self.assertRaises(MatrixError):
             _same_target(self.rows(), Action(**base, same_as=9))   # finished
@@ -309,15 +309,15 @@ class SlackSourceTests(unittest.TestCase):
         state = State(Path(tempfile.mkdtemp()) / "state.db")
         msg = lambda mid, cid, cname, who, text, **k: {"message_id": mid, "chat_id": cid, "chat_name": cname,
             "chat_type": k.get("mode", "group"), "msg_type": "text", "create_time": k.get("at", "2026-11-23 10:00"),
-            "sender": {"id": who, "name": "Yami", "sender_type": "user"}, "content": text, "mentions": k.get("mentions")}
-        found = [msg("om_2", "oc_a", "Aiper 会员群", "ou_y", "那我先把app装上，你们帮忙升级一下？", at="2026-11-23 10:01"),
-                 msg("om_1", "oc_a", "Aiper 会员群", "ou_me", "发个店铺来"),
-                 msg("om_3", "oc_m", "team-rd5-dev", "ou_y", "帮忙 review 一下"),            # muted chat, not @你
-                 msg("om_4", "oc_m", "team-rd5-dev", "ou_y", "@王小明 线上报错了", mentions=[{"id": "ou_me"}]),
+            "sender": {"id": who, "name": "Amy", "sender_type": "user"}, "content": text, "mentions": k.get("mentions")}
+        found = [msg("om_2", "oc_a", "示例客户会员群", "ou_y", "那我先把app装上，你们帮忙升级一下？", at="2026-11-23 10:01"),
+                 msg("om_1", "oc_a", "示例客户会员群", "ou_me", "发个店铺来"),
+                 msg("om_3", "oc_m", "team-core-dev", "ou_y", "帮忙 review 一下"),            # muted chat, not @你
+                 msg("om_4", "oc_m", "team-core-dev", "ou_y", "@王小明 线上报错了", mentions=[{"id": "ou_me"}]),
                  msg("om_5", "oc_b", "审批助手", "ou_y", "请审批")]                          # built-in noise
         calls = []
         client = SimpleNamespace(root=None, _exec=lambda argv: calls.append(argv) or {"messages": found})
-        config = CONFIG.model_copy(update={"chat_skip_chats": ["team-rd5-dev"], "lark_brand": "lark"})   # Feishu reads busy chats in full
+        config = CONFIG.model_copy(update={"chat_skip_chats": ["team-core-dev"], "lark_brand": "lark"})   # Feishu reads busy chats in full
         now = datetime(2026, 11, 23, 10, 5, 0, 123456, tzinfo=TZ)
         with unittest.mock.patch("agent_matrix.activity.log"):
             out = chats.poll(config, client, state, now)
@@ -440,10 +440,10 @@ class SlackSourceTests(unittest.TestCase):
                 "paging": {"pages": 1}}}
         state = State(root / "state.db")
         try:
-            out = slack.poll(Config(slack_token="xoxp-1", owner_name="YuHao Lin"), root, state,
+            out = slack.poll(Config(slack_token="xoxp-1", owner_name="Alex Wang"), root, state,
                              datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
             kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))
-            self.assertEqual(kinds, {"@YuHao Lin 业务是否有偏移": "@你", "业务是否有偏移，大家看看": "群聊"})
+            self.assertEqual(kinds, {"@Alex Wang 业务是否有偏移": "@你", "业务是否有偏移，大家看看": "群聊"})
         finally:
             state.close()
 
@@ -457,20 +457,20 @@ class SlackSourceTests(unittest.TestCase):
             if method == "users.info":
                 return {"user": {"profile": {"display_name": "大山"}}}
             return {"messages": {"matches": [
-                {"ts": "1795000000.000100", "user": "UX", "text": "<@UME> 帮忙看下", "channel": {"id": "C1", "name": "bot-loyalty-alerts"}},
-                {"ts": "1795000000.000200", "user": "UX", "text": "<@UME> 优化一下这个", "channel": {"id": "C3", "name": "team-rd5-dev"}},
-                {"ts": "1795000000.000300", "user": "UX", "text": "YuHao Lin 今天能看下这个吗", "channel": {"id": "C3", "name": "team-rd5-dev"}},
+                {"ts": "1795000000.000100", "user": "UX", "text": "<@UME> 帮忙看下", "channel": {"id": "C1", "name": "bot-shop-alerts"}},
+                {"ts": "1795000000.000200", "user": "UX", "text": "<@UME> 优化一下这个", "channel": {"id": "C3", "name": "team-core-dev"}},
+                {"ts": "1795000000.000300", "user": "UX", "text": "Alex Wang 今天能看下这个吗", "channel": {"id": "C3", "name": "team-core-dev"}},
                 {"ts": "1795000001.000100", "user": "UX", "text": "<@UME> Issue created 帮忙看下", "channel": {"id": "C2", "name": "team-dev"}},
                 {"ts": "1795000002.000100", "user": "UX", "text": "<@UME> 帮忙看下这个需求", "channel": {"id": "C2", "name": "team-dev"}}],
                 "paging": {"pages": 1}}}
         state = State(root / "state.db")
         try:
-            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["RD5"], chat_skip_words=["issue created"])
+            config = Config(slack_token="xoxp-1", owner_name="Alex Wang", chat_skip_chats=["CORE"], chat_skip_words=["issue created"])
             out = slack.poll(config, root, state, datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
             # bot channels are never read; a muted channel keeps only real @-mentions; muted words skip, case-insensitive
             texts = sorted(t for t, in state.db.execute("SELECT text FROM chat_candidates"))
             self.assertEqual(out["candidates"], 2)
-            self.assertEqual(texts, ["@YuHao Lin 优化一下这个", "@YuHao Lin 帮忙看下这个需求"])
+            self.assertEqual(texts, ["@Alex Wang 优化一下这个", "@Alex Wang 帮忙看下这个需求"])
         finally:
             state.close()
 
@@ -490,7 +490,7 @@ class SlackSourceTests(unittest.TestCase):
             return {"messages": {"matches": rounds.pop(0) if rounds else [], "paging": {"pages": 1}}}
         state = State(root / "state.db")
         try:
-            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin")
+            config = Config(slack_token="xoxp-1", owner_name="Alex Wang")
             slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
             slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
             rows = {t: json.loads(c) for t, c in state.db.execute("SELECT text, context FROM chat_candidates")}
@@ -527,7 +527,7 @@ class SlackSourceTests(unittest.TestCase):
             return {"messages": {"matches": rounds.pop(0) if rounds else [], "paging": {"pages": 1}}}
         state = State(root / "state.db")
         try:
-            config = Config(slack_token="xoxp-1", owner_name="YuHao Lin", chat_skip_chats=["noise"])
+            config = Config(slack_token="xoxp-1", owner_name="Alex Wang", chat_skip_chats=["noise"])
             slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
             slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
             kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))

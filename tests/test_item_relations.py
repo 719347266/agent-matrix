@@ -21,7 +21,7 @@ class TriageRelations(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         (self.root / "state").mkdir()
-        self.vid = versions.upsert(self.root, "观己 App", "2.3", "当前")
+        self.vid = versions.upsert(self.root, "示例 App", "2.3", "当前")
         versions.place(self.root, "r60", self.vid)
 
     def submit(self, verdicts, ref):
@@ -55,9 +55,9 @@ class TriageRelations(unittest.TestCase):
 
     def test_a_new_item_is_put_in_an_existing_version_and_then_gets_its_expected_things(self):
         items = [{"n": 61, "record_id": "r61", "who": "我"}, {"n": 62, "record_id": "r62", "who": "我"}]
-        self.submit([{"n": 61, "decision": "ai", "reason": "起草", "version": {"project": "观己 App", "version": "2.3"},
+        self.submit([{"n": 61, "decision": "ai", "reason": "起草", "version": {"project": "示例 App", "version": "2.3"},
                       "expected": [{"title": "配套帮助文档", "why": "新功能要说明"}]},
-                     {"n": 62, "decision": "ai", "reason": "起草", "version": {"project": "观己 App", "version": "9.9"}}],   # no such version
+                     {"n": 62, "decision": "ai", "reason": "起草", "version": {"project": "示例 App", "version": "9.9"}}],   # no such version
                     {"items": items, "numbers": {}})
         self.assertEqual((versions.of(self.root, "r61") or {}).get("name"), "2.3")
         self.assertIsNone(versions.of(self.root, "r62"), "only a version that exists")
@@ -78,7 +78,7 @@ class TriageRelations(unittest.TestCase):
                 {"record_id": "r61", "编号": "61", "标题": "写通知", "状态": "待确认"},
                 {"record_id": "rx", "编号": None, "标题": "没编号"}]
         others, numbers = drive._triage_others(self.root, rows)
-        self.assertEqual([(o["n"], o["version"]) for o in others], [(60, "观己 App · 2.3"), (61, "")])
+        self.assertEqual([(o["n"], o["version"]) for o in others], [(60, "示例 App · 2.3"), (61, "")])
         self.assertEqual(numbers, {"60": "r60", "61": "r61"})
 
 
@@ -88,7 +88,7 @@ class ExpectedDue(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         (self.root / "state").mkdir()
-        self.vid = versions.upsert(self.root, "观己 App", "2.3", "当前")
+        self.vid = versions.upsert(self.root, "示例 App", "2.3", "当前")
 
     def test_told_the_day_before_and_on_the_day_once_each(self):
         versions.expect(self.root, self.vid, "上线前验收", "每版都要", "11-28")

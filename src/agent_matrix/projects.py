@@ -1,4 +1,4 @@
-"""Projects: the owner's own way of sorting items ("标签体系", "2.3 版本").
+"""Projects: the owner's own way of sorting items ("数据看板", "2.3 版本").
 
 Kept on this computer only (state/xinxiang.db: projects, item_projects); the Feishu table is not touched.
 An item is in the project the owner put it in. One the owner has not placed is guessed, never written:
@@ -95,7 +95,7 @@ def assign(root, record_ids, project_id):
 
 
 def find(root, name):
-    """An existing project by the name an AI wrote: exact, or one name inside the other ("观己" ↔ "观己 App"). None if none."""
+    """An existing project by the name an AI wrote: exact, or one name inside the other ("示例" ↔ "示例 App"). None if none."""
     name = " ".join(str(name or "").split()).lower()
     if not name:
         return None

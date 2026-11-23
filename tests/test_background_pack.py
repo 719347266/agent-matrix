@@ -26,20 +26,20 @@ class PackTests(unittest.TestCase):
         thread.add_deliverable(self.root, rid, summary=summary, url=f"https://x.feishu.cn/docx/{rid}")
 
     def test_what_the_items_before_delivered_is_shown(self):
-        rows = [{"record_id": "a", "编号": 1, "标题": "标签体系调研", "状态": ["完成"]},
+        rows = [{"record_id": "a", "编号": 1, "标题": "数据看板调研", "状态": ["完成"]},
                 {"record_id": "b", "编号": 2, "标题": "标签需求文档", "状态": ["进行中"]},
                 {"record_id": "c", "编号": 3, "标题": "标签上线排期", "状态": ["未开始"]}]
         itemlinks.link(self.root, "a", "b")
         itemlinks.link(self.root, "b", "c")
-        self.deliver("a", "# 标签体系\n分三大类", summary="标签分三大类，口径按月活")
+        self.deliver("a", "# 数据看板\n分三大类", summary="标签分三大类，口径按月活")
         text = background.build(self.root, None, rows, rows[2], NOW)
         self.assertIn("## 这件事接着前面这些事做", text)
         part = text.split("## 这件事接着前面这些事做", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("#1 标签体系调研（第 1 版）：标签分三大类，口径按月活", part)
+        self.assertIn("#1 数据看板调研（第 1 版）：标签分三大类，口径按月活", part)
         self.assertIn("https://x.feishu.cn/docx/a", part)
         self.assertIn(str(self.root / "state/work/a/交付.md"), part)
         self.assertIn("#2 标签需求文档（进行中）", part)  # nothing delivered yet: listed once, without a result
-        self.assertEqual(part.count("#1 标签体系调研"), 1, "a delivered item is listed once, with its result")
+        self.assertEqual(part.count("#1 数据看板调研"), 1, "a delivered item is listed once, with its result")
         self.assertNotIn("这件事接着前面这些事做", background.build(self.root, None, rows, rows[0], NOW))  # nothing before it
 
     def test_passed_examples_of_the_same_kind_and_rejection_reasons(self):
@@ -73,12 +73,12 @@ class PackTests(unittest.TestCase):
 
     def test_no_kind_falls_back_to_the_same_project(self):
         rows = [{"record_id": "x", "编号": 1, "标题": "标签整理"}, {"record_id": "new", "编号": 2, "标题": "标签收尾"}]
-        pid = projects.create(self.root, "标签体系")
+        pid = projects.create(self.root, "数据看板")
         projects.assign(self.root, ["x", "new"], pid)
         self.deliver("x", "## 结论\n按月活分层")
         memory.record_outcome(self.root, "x", "通过")
         text = background.build(self.root, None, rows, rows[1], NOW)
-        self.assertIn("同在项目「标签体系」", text)
+        self.assertIn("同在项目「数据看板」", text)
         self.assertIn("按月活分层", text)
 
     def test_no_verdicts_no_example_section(self):

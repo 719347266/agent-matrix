@@ -140,7 +140,7 @@ def first_prompt(root, row):
 def resume_prompt(changes, timed_out):
     if changes:
         lines = "\n".join("- " + c for c in changes)
-        return ("本人有新的要求，任务单.md 已更新：\n" + lines +
+        return ("本人有新的要求，事件.md 和任务单.md 已更新：\n" + lines +
                 "\n\n在上一版（上一版.md）基础上改，逐条改到。规则不变：先补背景，写 step.txt，"
                 "最后重写 交付.md 和 结果.json 再结束。")
     if timed_out:
@@ -226,6 +226,8 @@ class Item:
             previous = "上一版.md"
         for name in ("结果.json", "step.txt", ".last.txt"):
             (self.workdir / name).unlink(missing_ok=True)
+        from . import eventbrief   # the brief the AI reads first: what to do, how it came up, what is settled, what is next
+        (self.workdir / "事件.md").write_text(eventbrief.build(self.root, self.rid, rows), encoding="utf-8")
         (self.workdir / "任务单.md").write_text(background.task_sheet(row, rows), encoding="utf-8")
         self.show("找背景", "程序在拉背景")
         own_base = "/base/" + self.config.base_token if self.config.base_token else ""
@@ -308,7 +310,7 @@ class Item:
         from .prework import add_note, notify, publish_markdown
         self.show("交付中", "建飞书文档")
         keep = record_copy(self.root, self.rid)
-        for name in ("交付.md", "结果.json", "任务单.md", "背景.md", ".thread", ".claude-session", ".gemini-session", ".seen.json"):
+        for name in ("交付.md", "结果.json", "事件.md", "任务单.md", "背景.md", ".thread", ".claude-session", ".gemini-session", ".seen.json"):
             # On a plain-ASCII project path the AI works in the project's own copy: nothing to copy then.
             if (self.workdir / name).is_file() and (self.workdir / name).resolve() != (keep / name).resolve():
                 shutil.copyfile(self.workdir / name, keep / name)

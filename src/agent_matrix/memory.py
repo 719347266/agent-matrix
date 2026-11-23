@@ -187,7 +187,7 @@ def rules(root):
 
 
 def scope_name(scope, names=None):
-    """"" → 全部；"project:3" → 项目「观己 2.0」；"type:方案" → 做「方案」时."""
+    """"" → 全部；"project:3" → 项目「示例 2.0」；"type:方案" → 做「方案」时."""
     scope = str(scope or "")
     if scope.startswith("project:"):
         name = (names or {}).get(int(scope[8:]) if scope[8:].isdigit() else -1)

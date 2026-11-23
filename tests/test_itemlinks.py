@@ -44,17 +44,17 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(itemlinks.pairs(self.root), [])
 
     def test_the_ai_is_shown_what_came_before_with_its_deliverable(self):
-        rows = [{"record_id": "a", "编号": 1, "标题": "标签体系调研", "状态": ["完成"], "交付物链接": "https://x.feishu.cn/docx/A1", "预做结果摘要": "分三大类"},
+        rows = [{"record_id": "a", "编号": 1, "标题": "数据看板调研", "状态": ["完成"], "交付物链接": "https://x.feishu.cn/docx/A1", "预做结果摘要": "分三大类"},
                 {"record_id": "b", "编号": 2, "标题": "标签需求文档", "状态": ["进行中"]},
                 {"record_id": "c", "编号": 3, "标题": "标签上线排期", "状态": ["未开始"]}]
         itemlinks.link(self.root, "a", "b")
         itemlinks.link(self.root, "b", "c")
         before, after = background.linked_items(self.root, rows, rows[1])
-        self.assertEqual(before, ["- #1 标签体系调研（完成） 交付：https://x.feishu.cn/docx/A1 结论：分三大类"])
+        self.assertEqual(before, ["- #1 数据看板调研（完成） 交付：https://x.feishu.cn/docx/A1 结论：分三大类"])
         self.assertEqual(after, ["- #3 标签上线排期（未开始）"])
         text = background.build(self.root, None, rows, rows[2], NOW)
         self.assertIn("接着前面这些事做", text)
-        self.assertLess(text.index("#2 标签需求文档"), text.index("#1 标签体系调研"))  # nearest first
+        self.assertLess(text.index("#2 标签需求文档"), text.index("#1 数据看板调研"))  # nearest first
         self.assertNotIn("后面还有这些事", text)
 
 

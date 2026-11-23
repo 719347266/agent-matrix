@@ -132,7 +132,7 @@ class ServerTests(unittest.TestCase):
         (self.root / "state").mkdir()
         rows = [{"record_id": "rec44", "编号": "44", "标题": "投放方案", "执行方": "AI", "状态": "待验收", "截止日": "2026-11-18",
                  "交付物链接": "https://x.feishu.cn/docx/a", "原话引用": "[00:12] <cite>我来写</cite>", "来源": "会议", "创建时间": "2026-11-17T10:35:07"},
-                {"record_id": "rec1", "编号": "1", "标题": "验收头像", "执行方": "我", "状态": "未开始"}]
+                {"record_id": "rec1", "编号": "1", "标题": "验收皮肤", "执行方": "我", "状态": "未开始"}]
         (self.root / "state/tasks.json").write_text(json.dumps({"at": "2026-11-17T17:00:00+08:00", "rows": rows}, ensure_ascii=False))
         from agent_matrix import thread
         thread.add(self.root, "rec44", "me", "feedback", "加上竞品")
@@ -194,13 +194,13 @@ class ServerTests(unittest.TestCase):
         from agent_matrix import inbox
         from agent_matrix.brief_v1 import _block, _read_row, card
         inbox.add(self.root, "brief", card("11/17 周二 · 早报", "你要做 1 件", "blue", [_block("今天你要做 · 1 件", "blue", [
-            _read_row(("#1 验收头像", "今天到期", "orange", None))])], "只读", None), kind="brief")
-        inbox.add(self.root, "old", "11/16 早报\n你要做\n#1 验收头像 · 今天到期\n其余0件 · 回复：1 过 / 1 退 意见")
+            _read_row(("#1 验收皮肤", "今天到期", "orange", None))])], "只读", None), kind="brief")
+        inbox.add(self.root, "old", "11/16 早报\n你要做\n#1 验收皮肤 · 今天到期\n其余0件 · 回复：1 过 / 1 退 意见")
         _, body = self.get("/api/state", {"X-Xinxiang-Token": self.server.token})
         box = {m["title"]: m for m in json.loads(body)["inbox"]}
         section = box["11/17 周二 · 早报"]["blocks"][1]
-        self.assertEqual((section["title"], section["rows"][0]["head"]), ("今天你要做 · 1 件", "#1 验收头像"))
-        self.assertEqual(box["11/16 早报"]["blocks"], [{"type": "text", "text": "你要做\n#1 验收头像 · 今天到期\n其余0件 · 回复：1 过 / 1 退 意见"}])
+        self.assertEqual((section["title"], section["rows"][0]["head"]), ("今天你要做 · 1 件", "#1 验收皮肤"))
+        self.assertEqual(box["11/16 早报"]["blocks"], [{"type": "text", "text": "你要做\n#1 验收皮肤 · 今天到期\n其余0件 · 回复：1 过 / 1 退 意见"}])
 
 
 if __name__ == "__main__":

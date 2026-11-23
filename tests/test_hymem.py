@@ -22,7 +22,7 @@ class Fake:
         self.added.append((text, kw))
 
     def search(self, q, user_ids=None, limit=8):
-        return {"memories": {"profile": [{"content": "本人是观己的产品负责人"}],
+        return {"memories": {"profile": [{"content": "本人是示例的产品负责人"}],
                              "normal": [{"content": t} for t, _ in self.added if q[:2] in t][:limit], "proactive": []}}
 
     def close(self):
@@ -55,11 +55,11 @@ class Boost(unittest.TestCase):
 
     def test_queued_once_written_in_the_background_and_failures_retried_then_given_up(self):
         hymem.mark(self.root, True)
-        self.assertTrue(hymem.remember(self.root, "verdict", "本人评审「会员方案」：退回，原因：太长", workspace="观己 App", ref="v:1"))
+        self.assertTrue(hymem.remember(self.root, "verdict", "本人评审「会员方案」：退回，原因：太长", workspace="示例 App", ref="v:1"))
         self.assertFalse(hymem.remember(self.root, "verdict", "同一条再来一次", ref="v:1"))   # same ref: kept once
         hymem.remember(self.root, "meeting", "会议炸了", ref="m:1")
         self.assertEqual(hymem.flush(self.root, cfg()), (1, 1))
-        self.assertEqual(self.fake.added[0][1]["metadata"], {"project": "观己 App", "kind": "verdict"})
+        self.assertEqual(self.fake.added[0][1]["metadata"], {"project": "示例 App", "kind": "verdict"})
         for _ in range(hymem.MAX_TRIES):
             hymem.flush(self.root, cfg())
         st = hymem.status(self.root)
@@ -70,7 +70,7 @@ class Boost(unittest.TestCase):
         hymem.mark(self.root, True)
         hymem.remember(self.root, "deliverable", "会员方案第 2 版：权益分三档", ref="d:1")
         hymem.flush(self.root, cfg())
-        self.assertEqual(hymem.search(self.root, cfg(), "会员"), ["本人是观己的产品负责人", "会员方案第 2 版：权益分三档"])
+        self.assertEqual(hymem.search(self.root, cfg(), "会员"), ["本人是示例的产品负责人", "会员方案第 2 版：权益分三档"])
 
     def test_switching_on_starts_from_what_xinxiang_knows(self):
         hymem.mark(self.root, True)

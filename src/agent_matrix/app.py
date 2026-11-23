@@ -839,11 +839,14 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "engine_sort", body["engine_sort"])
                 if body.get("engine_fallback") in {"codex", "claude", "gemini", "api", ""}:
                     thread.set_setting(root, "engine_fallback", body["engine_fallback"])
-                if "cindy_wake_url" in body:   # the address of Cindy's webhook trigger, pasted by the owner
+                if "cindy_wake_url" in body:   # the address of Cindy's webhook trigger, pasted by the owner: tried at once
                     try:
-                        aidrivers.set_hook(root, "cindy", str(body["cindy_wake_url"] or ""))
+                        hook = aidrivers.set_hook(root, "cindy", str(body["cindy_wake_url"] or ""))
                     except ValueError as exc:
                         return self._send(400, {"ok": False, "error": str(exc)})
+                    if hook:
+                        tried = aidrivers.send_wake(hook, "test")
+                        return self._send(200, {"ok": True, "wake": tried})
                 if any(k in body for k in ("worker_api_provider", "worker_api_base_url", "worker_api_key", "worker_api_model")):
                     from .config import load as load_config, save as save_config   # 模型接口: kept in config.yaml on this computer
                     from .engines import API_PROVIDERS

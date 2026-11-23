@@ -80,11 +80,11 @@ class LocalSessions(unittest.TestCase):
         self.assertEqual(ls._last_request(self.home, "abcd-1234"), "把 #62 的流程图补齐")
 
     def test_a_conversation_about_one_item_binds_itself_and_can_be_undone(self):
-        items = [{"rid": "r6", "n": 6, "title": "整理聚光投放测试策略", "status": "进行中"},
+        items = [{"rid": "r6", "n": 6, "title": "整理广告投放测试策略", "status": "进行中"},
                  {"rid": "r9", "n": 9, "title": "已经做完的事情", "status": "完成"},
                  {"rid": "r7", "n": 7, "title": "另一件事情要做", "status": "进行中"}]
         named = ls._record("claude", "c-1", "随便聊聊", self.now, doing="帮我看下 #6 的数据")
-        titled = ls._record("claude", "c-2", "整理聚光投放测试策略", self.now)
+        titled = ls._record("claude", "c-2", "整理广告投放测试策略", self.now)
         finished = ls._record("claude", "c-3", "接着改 #9", self.now)
         two = ls._record("claude", "c-4", "比较 #6 和 #7", self.now)
         from agent_matrix.worker import work_base

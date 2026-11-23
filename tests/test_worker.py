@@ -380,7 +380,7 @@ class CardTests(unittest.TestCase):
         from agent_matrix.cards import mark, short_result
         c = card("AI 做完了", "", "green", [_block("做完了", "green", [
             _row_item(("#44 投放方案", "", "grey", None), "https://x.feishu.cn/docx/a", cmd="44 过", cmd_label="通过"),
-            _row_item(("#45 标签体系", "", "grey", None), "https://x.feishu.cn/docx/b", cmd="45 过", cmd_label="通过")])],
+            _row_item(("#45 数据看板", "", "grey", None), "https://x.feishu.cn/docx/b", cmd="45 过", cmd_label="通过")])],
                  "hint", None)
         text, ok = short_result("#44 投放方案 → 完成 ✓", NOW)
         self.assertEqual((text, ok), ("✓ 已完成 15:00", True))

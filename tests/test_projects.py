@@ -6,8 +6,8 @@ from pathlib import Path
 from agent_matrix import itemlinks, projects
 from agent_matrix.models import MatrixError
 
-ROWS = [{"record_id": "r1", "标题": "撰写标签体系需求文档"}, {"record_id": "r2", "标题": "标签更新：加心理、使用行为两大类"},
-        {"record_id": "r3", "标题": "付费点和付费归因怎么分析"}, {"record_id": "r4", "标题": "发布岗位招聘信息"},
+ROWS = [{"record_id": "r1", "标题": "撰写数据看板需求文档"}, {"record_id": "r2", "标题": "标签更新：加心理、使用行为两大类"},
+        {"record_id": "r3", "标题": "付费点和付费归因怎么分析"}, {"record_id": "r4", "标题": "发布活动报名信息"},
         {"record_id": "r5", "标题": "标签更新：加使用行为类"}]
 
 
@@ -25,9 +25,9 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(projects.place(self.root, ROWS), {})
 
     def test_the_owner_places_items_and_the_rest_is_guessed(self):
-        tag = projects.create(self.root, "标签体系")
+        tag = projects.create(self.root, "数据看板")
         hire = projects.create(self.root, "招人")
-        self.assertEqual([p["name"] for p in projects.all(self.root)], ["标签体系", "招人"])
+        self.assertEqual([p["name"] for p in projects.all(self.root)], ["数据看板", "招人"])
         self.assertNotEqual(*[p["color"] for p in projects.all(self.root)])
         projects.assign(self.root, ["r2"], tag)
         itemlinks.link(self.root, "r2", "r3")                    # r3 continues r2: it follows it into the project

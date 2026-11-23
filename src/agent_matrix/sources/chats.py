@@ -62,7 +62,7 @@ def classify(text, *, from_owner, chat_mode, names, mentioned=False, replied=Fal
     """Which kind of candidate this line is, or None to drop it. A muted chat keeps only "@你"."""
     if from_owner:
         return None if SMALL_TALK.match(text) else "我说的"
-    if mentioned:  # @you in a group: always worth a look, however short ("@你 人生模拟器反馈")
+    if mentioned:  # @you in a group: always worth a look, however short ("@你 新功能反馈")
         return "@你" if len(re.sub(r"@\S+", "", text).strip()) >= 2 else None
     if SMALL_TALK.match(text):
         return None

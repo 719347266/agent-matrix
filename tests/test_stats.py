@@ -48,7 +48,7 @@ class StatsTest(unittest.TestCase):
         self.assertEqual((out["reasons"], out["by_type"], out["blocked"], out["failed"]), ([], [], 0, 0))
 
     def test_first_pass_rate_rounds_and_weeks(self):
-        self.put("INSERT INTO projects (name, created) VALUES (?,?)", [("观己 App", ago(60))])
+        self.put("INSERT INTO projects (name, created) VALUES (?,?)", [("示例 App", ago(60))])
         self.verdicts(
             ("a", ago(1), "通过", "", 1, "方案", 1),                     # this week, first time
             ("b", ago(2), "退回", "写得太长了，一屏看不完", 1, "方案", 1),   # this week, came back, then passed at v2
@@ -74,7 +74,7 @@ class StatsTest(unittest.TestCase):
         self.assertTrue(types["报告"]["few"])
         self.assertIn("没标类型", types)
         projects = {g["name"]: g["total"] for g in out["by_project"]}
-        self.assertEqual(projects, {"观己 App": 2, "没归项目": 3})
+        self.assertEqual(projects, {"示例 App": 2, "没归项目": 3})
 
     def test_by_ai_and_blocked_failed(self):
         for rid in "xyz":

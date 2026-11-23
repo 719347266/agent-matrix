@@ -40,7 +40,7 @@ notion_database_id: ''
 
 # 本机 Claude 干活时可用的 MCP 工具。["*"] = 你在 Claude 里已连上的全部 MCP（发送、发布、合并、删除类一律禁止）；[] = 不用。
 worker_mcp_tools: []
-# 发送类工具默认一律禁止；这里写上完整工具名的才放行（比如让 cw5-pr-notify 把 PR 通知发到 Slack 群）。
+# 发送类工具默认一律禁止；这里写上完整工具名的才放行（比如让 pr-notify 把 PR 通知发到 Slack 群）。
 # 开着开发模式时，每次发送都先停下来等你在心响里批准。
 worker_mcp_send: []
 

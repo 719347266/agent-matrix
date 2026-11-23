@@ -323,7 +323,7 @@ def _apply(root, kind, d):
     elif kind == "stale_moment":
         memory.set_status(root, d["id"], "stale")
     elif kind == "place_item":
-        known = projects.find(root, d["project"])   # "观己" when the project is called "观己 App": the same one, not a new one
+        known = projects.find(root, d["project"])   # "示例" when the project is called "示例 App": the same one, not a new one
         name = known["name"] if known else d["project"]
         if d.get("version"):
             have = next((v for v in versions.all(root) if v["project"] == name and v["name"] == d["version"]), None)

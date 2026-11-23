@@ -146,7 +146,7 @@ class CommandQueueTests(unittest.TestCase):
 
 class ImmediateCompletionTests(unittest.TestCase):
     def test_optional_document_search_does_not_delay_completion_or_stop(self):
-        a = applier([row(1, "进行中", 标题="撰写标签体系需求文档")])
+        a = applier([row(1, "进行中", 标题="撰写数据看板需求文档")])
         a.immediate, a.deferred = True, []
         with patch("agent_matrix.reply.find_deliverable", side_effect=AssertionError("must defer")), patch.object(a, "stop_ai", return_value="已通知停止") as stop:
             reply = a.one(Op([1], "complete"), 1, a.find(1))
@@ -157,7 +157,7 @@ class ImmediateCompletionTests(unittest.TestCase):
         stop.assert_called_once()
 
     def test_failed_write_does_not_schedule_search_or_claim_completion(self):
-        a = applier([row(1, "进行中", 标题="撰写标签体系需求文档")])
+        a = applier([row(1, "进行中", 标题="撰写数据看板需求文档")])
         a.immediate, a.deferred = True, []
         with patch.object(a, "write", side_effect=RuntimeError("readback unavailable")):
             with self.assertRaises(RuntimeError):

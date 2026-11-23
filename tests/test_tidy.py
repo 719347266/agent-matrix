@@ -107,9 +107,9 @@ class Tidy(unittest.TestCase):
         self.assertEqual(tidy.save(self.root, [(u["type"], u["content"], u["why"], u["data"])]), 0, "the same one is not added twice")
 
     def test_use_applies_each_kind_and_drop_changes_nothing(self):
-        pid = projects.create(self.root, "观己 App")
-        v22 = versions.upsert(self.root, "观己 App", "2.2", "当前")
-        versions.upsert(self.root, "观己 App", "2.3", "下一版")
+        pid = projects.create(self.root, "示例 App")
+        v22 = versions.upsert(self.root, "示例 App", "2.2", "当前")
+        versions.upsert(self.root, "示例 App", "2.3", "下一版")
         versions.place(self.root, "r1", v22)
         memory.set_profile(self.root, "## 岗位\n产品经理\n\n## 在做的事\n会员体系")
         memory.add_rule(self.root, "先给两版文案", "x", source="AI 学的")
@@ -122,9 +122,9 @@ class Tidy(unittest.TestCase):
             {"type": "merge_rules", "ids": [rules["先给两版文案"], rules["文案给两个版本挑"]], "rule": "对外文案先给两版让我挑", "why": "重复"},
             {"type": "retire_rule", "id": rules["方案写满三页"], "why": "退回 3 次"},
             {"type": "stale_moment", "id": old, "by": new, "why": "改主意了"},
-            {"type": "place_item", "n": 2, "project": "观己 App", "version": "2.3", "why": "会员页在 2.3"},
+            {"type": "place_item", "n": 2, "project": "示例 App", "version": "2.3", "why": "会员页在 2.3"},
             {"type": "place_item", "n": 3, "project": "心响", "why": "上线通知"},
-            {"type": "version_status", "project": "观己 App", "version": "2.2", "status": "已完成", "why": "上线了"},
+            {"type": "version_status", "project": "示例 App", "version": "2.2", "status": "已完成", "why": "上线了"},
             {"type": "profile", "old": "## 在做的事\n会员体系", "new": "## 在做的事\n会员体系改版，下一步年卡", "why": "最近都在谈年卡", "evidence": f"moment:{new}"},
             {"type": "profile", "old": "", "new": "## 常一起干活的人\n张三（设计）", "why": "会上常出现", "evidence": f"moment:{new}"},
         ]})
@@ -222,14 +222,14 @@ class PlaceMatchesExisting(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "state").mkdir()
-            pid = projects.create(root, "观己 App")
-            self.assertEqual(projects.find(root, "观己")["id"], pid)
+            pid = projects.create(root, "示例 App")
+            self.assertEqual(projects.find(root, "示例")["id"], pid)
             self.assertIsNone(projects.find(root, "心响"))
-            tidy._apply(root, "place_item", {"rid": "r1", "project": "观己", "version": ""})
+            tidy._apply(root, "place_item", {"rid": "r1", "project": "示例", "version": ""})
             self.assertEqual(projects.chosen(root)["r1"], pid)
-            self.assertEqual([p["name"] for p in projects.all(root)], ["观己 App"], "no second project")
-            tidy.save(root, [("place_item", "#2 x → 观己", "y", {"n": 2, "rid": "r2", "project": "观己", "version": ""}),
-                             ("place_item", "#3 x → 观己", "y", {"n": 3, "rid": "r3", "project": "观己", "version": ""})], "tidy-1")
-            vid = versions.upsert(root, "观己 App", "2.3", "当前")
+            self.assertEqual([p["name"] for p in projects.all(root)], ["示例 App"], "no second project")
+            tidy.save(root, [("place_item", "#2 x → 示例", "y", {"n": 2, "rid": "r2", "project": "示例", "version": ""}),
+                             ("place_item", "#3 x → 示例", "y", {"n": 3, "rid": "r3", "project": "示例", "version": ""})], "tidy-1")
+            vid = versions.upsert(root, "示例 App", "2.3", "当前")
             versions.place(root, "r2", vid)   # 整理项目和版本 placed it meanwhile
             self.assertEqual([u["data"]["rid"] for u in tidy.updates(root)], ["r3"])

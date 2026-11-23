@@ -9,7 +9,7 @@ import unittest
 from agent_matrix.meeting_review import Action, Grounded, Review, Waiting, repair_review, validate_review
 
 T1 = ("00:10 老周：投流方案先保留，等周五的数据出来再定。\n"
-      "00:20 老周：标签体系就按现在这版定了。\n00:30 小王：我来写投放复盘。")
+      "00:20 老周：数据看板就按现在这版定了。\n00:30 小王：我来写投放复盘。")
 T2 = "00:05 王总：投流方案上周说等数据，现在数据出来了，投流方案怎么定？"
 
 
@@ -28,7 +28,7 @@ class MemoryTests(unittest.TestCase):
         self.first = review("m1", T1,
                             waiting=[Waiting(text="投流方案先保留", quote="投流方案先保留，等周五的数据出来再定", timestamp="00:10",
                                              reference=line(T1, 0), wait_for="周五的投放数据", due_date="2026-11-20", due_phrase="周五")],
-                            decisions=[Grounded(text="标签体系按现在这版定了", quote="标签体系就按现在这版定了", timestamp="00:20",
+                            decisions=[Grounded(text="数据看板按现在这版定了", quote="数据看板就按现在这版定了", timestamp="00:20",
                                                 reference=line(T1, 1))],
                             actions=[Action(title="写投放复盘", text="写复盘", quote="我来写投放复盘", timestamp="00:30",
                                             reference=line(T1, 2), owner_name="小王", commitment_phrase="我来写", confidence=0.9)])

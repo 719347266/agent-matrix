@@ -830,7 +830,9 @@ def _item_job(root, config, driver, item, client, rows, row, notes):
             state.set("work:first", [x for x in first if x != item.rid])
     changes = _changes(item.workdir, row)
     history = _history_text(root, item.rid)
-    base = first_prompt(root, row)
+    from .eventbrief import build as brief
+    told = brief(root, item.rid, rows)
+    base = (told + "\n---\n\n" if told else "") + first_prompt(root, row)   # the brief first: the AI need not dig for it
     extra = []
     if history:
         extra += ["", "## 这件事之前的对话（心响保存；可能是别的 AI 做的，接着往下，不要从头来）", history]
@@ -1006,7 +1008,7 @@ def _open(root, job, driver):
             project_id = projects.chosen(root).get(rid)
             from .snapshot import _snapshot
             version = versions.context_text(root, rid, {r.get("record_id"): r for r in _snapshot(root).get("rows") or []})
-        head = rules_text(root, project_id) + profile_text(root) + version
+        head = rules_text(root, project_id) + profile_text(root) + common_text(root) + version
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]
@@ -1017,6 +1019,21 @@ def _open(root, job, driver):
     job.update(driver=driver, status="open", rounds=0, step="领到了")
     _save(root, job)
     return job
+
+
+def common_text(root):
+    """The rules every job shares (prompts/_common.md), right after the owner's own rules and 关于你: one place, so the
+    job descriptions only say what is particular to them."""
+    try:
+        from .config import load
+        owner = load(Path(root) / "config.yaml").owner_name
+    except Exception:
+        owner = ""
+    try:
+        text = promptfile.read(root, "_common.md")
+    except OSError:
+        return ""
+    return text.replace("（{owner}）", f"（{owner}）" if owner else "").replace("{owner}", owner or "本人")
 
 
 def cindy_header(root, job):
@@ -1349,7 +1366,7 @@ def handoff_message(n, title, value):
     """What is sent to the AI that takes over one item: it says who it is (without taking everything else over),
     takes that one item, and carries on from where the last one stopped."""
     from .aidrivers import name_in
-    from .setupshim import work_cmd
+    from .setupshim import AI_RULES, work_cmd
     xin, name = work_cmd(), name_in(value) or "<你的名字>"
     return f"""请你来做我电脑上「心响」里的一件事：#{n} {title}。心响是本机的待办工具；这件事之前可能有别的 AI 做过，任务单、背景、之前的对话和上一版都在它给你的工作台里，接着做，不要从头来。
 
@@ -1360,7 +1377,7 @@ def handoff_message(n, title, value):
 3. 进入返回的 folder，按 instructions 做，用里面写的命令报进度、交活。
 4. 交完再运行一次 {xin} next --driver "{name}"：还有交给你的事就接着做，返回 idle 就结束。
 
-请遵守：命令都由你来运行，不要让我自己去敲；不要在对话里问我要密码、验证码或密钥；对外发送、审批、付款、删除只准备材料，不要执行。"""
+{AI_RULES}"""
 
 
 def hand_over(root, config, record_id, value, *, by, why="", n=None, title="", job=None):

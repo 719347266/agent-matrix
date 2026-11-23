@@ -371,8 +371,25 @@ def _gpt_said(root, record_id, limit=12):
 def write_context(root, item, history="", *, buddy=False):
     """The item's folder becomes the place to pick it up: 心响事项.md with the facts, the conversation so far and what
     the built-in GPT already did, plus AGENTS.md / CLAUDE.md so whichever AI opens the folder reads it first."""
-    from . import itemwork
+    from . import eventbrief, itemwork
     folder = itemwork.workdir_for(root, item["record_id"])
+    told = eventbrief.build(root, item["record_id"])
+    if told:   # the brief: standing on its own, nothing to dig for; the conversation so far follows it
+        lines = [told.rstrip()]
+        if history:
+            lines += ["", "## 这件事之前的对话（心响记录）", history]
+        said = _gpt_said(root, item["record_id"])
+        if said:
+            lines += ["", "## 本机 GPT 之前做这件事时说的话", *said]
+        (folder / "事件.md").write_text(told, encoding="utf-8")
+        (folder / "心响事项.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        guide = (f"这个文件夹是心响事项 #{item['n']}「{item.get('title') or ''}」的工作文件夹。下面是这件事的简报，照它接着做，不要从头来；"
+                 "先用两三句话说清现在到哪一步、还差什么，再问本人接下来要做什么。\n\n" + told)
+        if buddy:
+            guide = "豚豚接手：照下面的简报接着做，按所属项目规范直接续做；没有新反馈不重做、不代验收。\n\n" + told
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            (folder / name).write_text(guide, encoding="utf-8")
+        return folder
     lines = [f"# 心响事项 #{item['n']}：{item.get('title') or ''}", "",
              f"- 状态：{item.get('status') or ''}；谁来做：{item.get('who') or ''}；截止：{item.get('due') or '无'}",
              f"- 来源：{item.get('source') or '手动'} {item.get('source_url') or ''}".rstrip(),
@@ -452,7 +469,7 @@ def start_in_terminal(root, config, item, history="", cli="claude"):
     binary = {"claude": workenv.claude_binary, "gemini": workenv.gemini_binary}.get(cli, workenv.codex_binary)(config)
     if not binary:
         raise MatrixError(f"没有找到 {cli} 命令行。")
-    prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
+    prompt = "照当前文件夹 心响事项.md 里的简报接着这件事往下做（不用再去翻别处）。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
     sessions.open_terminal(f"cd {shlex.quote(str(folder))} && {shlex.join([binary, prompt])}")
     return {"opened": "terminal", "folder": str(folder)}
 
@@ -485,7 +502,7 @@ def open_gpt_in_chatgpt(thread_id):
 def start_for_item(root, config, item, history=""):
     """The same, in the Claude app."""
     folder = write_context(root, item, history)
-    prompt = "读当前文件夹的 心响事项.md，接着这件事往下做。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
+    prompt = "照当前文件夹 心响事项.md 里的简报接着这件事往下做（不用再去翻别处）。先说清现在到哪一步、还差什么，再问我接下来要做什么。"
     from urllib.parse import urlencode
     url = "claude://code/new?" + urlencode({"folder": str(folder), "q": prompt})
     try:
@@ -598,10 +615,10 @@ def cindy_setup_text(root):
     from .workenv import shim_path
     status = cindy_status(root)
     project = status.get("project") or "（你的项目文件夹）"
-    from .aidrivers import pending_secret
     cmd = str(shim_path())
-    secret = pending_secret(root, "cindy")
-    return f"""请用你的定时任务工具帮我建（已有同名的就改成下面这样）一个定时任务，替心响做事：
+    return f"""请用你的定时任务工具一次做完下面的配置，中间不要停下来问我，也不要留步骤给我；做完再一起告诉我结果。
+
+第一步，建（已有同名的就改成下面这样）一个定时任务，替心响做事：
 
 - 名称：{SCHEDULE_NAME}
 - 频率：每 5 分钟（cronExpr="*/5 * * * *"，timezone="Asia/Shanghai"，recurring=true）
@@ -617,12 +634,13 @@ def cindy_setup_text(root):
 3. kind 是 item 的，属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。kind 是 meeting、chat、triage、learn 的是整理类的活：只按 instructions 做，不要套用项目模板。
 4. 按 instructions 做，交付文件写到 folder 里；按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
 
-再给这个定时任务打开「Webhook 触发」，让心响有活时马上叫你，不用等到下一个 5 分钟：
-- 发送方选 Standard Webhooks，签名密钥填：{secret}
-- 打开后运行 `{cmd} wake-hook --driver Cindy --url "<这个定时任务的接收地址>"`，它会真叫你一次试通。
-- 你的工具开不了 Webhook 的话，就一步步告诉我在 Cindy 里怎么点：打开「{SCHEDULE_NAME}」→ Webhook 触发 → 发送方 Standard Webhooks → 签名密钥粘贴上面那串 → 复制接收地址，粘到心响「设置 → AI 执行 → 叫醒地址」。
+第二步，让心响有活时能马上叫你，不用等下一个 5 分钟：
+1. 用 schedule_update 给「{SCHEDULE_NAME}」打开 Webhook 触发：webhookTrigger 设为 {{"source": {{"preset": "standard-webhooks", "signed": false}}}}。
+   不验签就行：收到请求只会跑一轮前置检查，没活照样跳过、不花 token，也不用密钥。
+2. 用 schedule_webhook_list 找到这个定时任务的接收地址。
+3. 运行 `{cmd} wake-hook --driver Cindy --url "<接收地址>"`。它会真叫你一次试通，返回 "ok": true 就接好了；不是的话按它说的原因改好再运行一次。
 
-建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查、Webhook 都对就行。"""
+第三步，用 schedule_get 读回来核对：名称、频率、工作目录、前置检查、Webhook 都对。最后用几行告诉我：哪些配好了、试叫通没通。"""
 
 
 def open_session(root, config, job_id):
