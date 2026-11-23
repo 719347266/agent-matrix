@@ -1904,7 +1904,7 @@ function itemView(i){
       <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
     <div class="d-title">${esc(i.title)}</div>
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
-    ${aiPickView(i)}${chainView(i)}${deliverView(i)}${replyView(i)}
+    ${aiPickView(i)}${chainView(i)}${deliverView(i)}${replyView(i)}${noticeView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
     <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
@@ -1958,6 +1958,28 @@ async function dropReply(n){
   drafts.delete("reply-"+n); toast("这条不发了"); LIVE?load():render();
 }
 function copyReply(n){ navigator.clipboard?.writeText(replyText(n)).then(()=>toast("已复制"),()=>toast("复制不了，手动选中复制吧")); }
+/* ---------- 群通知：AI 起草（比如 PR 发了通知 reviewer），本人看过、可以改，点「发送」才以本人身份发到那个 Slack 频道 ---------- */
+function noticeView(i){
+  const r=i.draft_notice; if(!r) return "";
+  const where=esc(r.label||r.channel);
+  if(r.status==="sent") return `<div class="d-sec" style="padding-top:14px"><h3>已发群通知</h3><div class="inner-list"><div class="dv-row"><div style="min-width:0"><div class="t wrap">${linkify(r.text)}</div><div class="s">${esc(String(r.sent_at||"").slice(5,16).replace("T"," "))} 发到 Slack ${where}</div></div></div></div></div>`;
+  return `<div class="d-sec" style="padding-top:14px"><h3>要发的群通知<span class="hint" style="margin:0 0 0 8px;font-weight:400">AI 起草，你点「发送」才会以你的身份发到 Slack ${where}</span></h3>
+    <textarea id="notice-${i.n}" data-draft="notice-${i.n}" rows="6" style="width:100%" aria-label="要发的群通知">${esc(r.text)}</textarea>
+    <div class="acts" style="margin-top:6px"><button class="btn pri" onclick="sendNotice(${i.n})">发送</button><button class="btn" onclick="copyNotice(${i.n})">复制</button><button class="btn ghost" onclick="dropNotice(${i.n})">不发</button></div></div>`;
+}
+function noticeText(n){ const el=$("#notice-"+n); return String(el?el.value:(byN(n).draft_notice||{}).text||"").trim(); }
+async function sendNotice(n){
+  const i=byN(n), text=noticeText(n); if(!text) return toast("群通知是空的");
+  if(!LIVE) return toast("原型：不会真的发出去");
+  try{ await api("/api/notice/send",{rid:i.rid,text},40000); drafts.delete("notice-"+n); toast("群通知已发出"); }catch(e){ toast(e.message||"没发出去"); }
+  load();
+}
+async function dropNotice(n){
+  const i=byN(n);
+  if(LIVE){ try{ await api("/api/notice/drop",{rid:i.rid}); }catch(e){ return toast(e.message||"没改成"); } } else i.draft_notice=null;
+  drafts.delete("notice-"+n); toast("这条群通知不发了"); LIVE?load():render();
+}
+function copyNotice(n){ navigator.clipboard?.writeText(noticeText(n)).then(()=>toast("已复制"),()=>toast("复制不了，手动选中复制吧")); }
 /* ---------- 交付：每一版的链接和说明都能改、能删，也能自己加一版 ---------- */
 function deliverView(i){
   const list=D.deliverables[i.n]||[], e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;

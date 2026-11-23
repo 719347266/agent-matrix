@@ -78,5 +78,46 @@ class ReplyTests(unittest.TestCase):
         self.assertIn("reply", check_result(work, None)[1])
 
 
+    def test_a_group_notice_waits_for_send_then_goes_to_that_channel_once_not_in_a_thread(self):
+        posted = []
+        post = lambda tok, method, **p: posted.append((method, p)) or {"ts": "9.9"}
+        notice = {"channel": "C06T7TRGZRR", "label": "#team-rd5-dev", "text": "<https://x/pull/1|PR #1> 请 review"}
+        replies.save(self.root, "recE5", "回给对方的话")                               # the reply and the notice are separate
+        self.assertEqual(replies.save_notice(self.root, "recE5", notice)["status"], "draft")
+        self.assertEqual(posted, [])                                                  # saving sends nothing
+        out = replies.send_notice(self.root, Config(slack_token="xoxp-1"), "recE5", "PR #1 请 review（改过）", slack_post=post)
+        self.assertEqual(out, {"ok": True, "where": "slack"})
+        self.assertEqual(posted, [("chat.postMessage", {"channel": "C06T7TRGZRR", "text": "PR #1 请 review（改过）"})])
+        self.assertEqual(replies.get(self.root, "recE5", replies.NOTICE)["status"], "sent")
+        self.assertEqual(replies.get(self.root, "recE5")["status"], "draft")          # the reply is untouched
+        with self.assertRaises(MatrixError):                                          # never twice
+            replies.send_notice(self.root, Config(slack_token="xoxp-1"), "recE5", "再发", slack_post=post)
+        self.assertIsNone(replies.save_notice(self.root, "recE5", notice))             # a later version does not reopen it
+        self.assertIn("#team-rd5-dev", thread.history(self.root, ["recE5"])["recE5"]["messages"][-1]["text"])
+
+    def test_a_notice_needs_a_slack_channel_id_and_can_be_dropped(self):
+        for bad in ({"channel": "#team-rd5-dev", "text": "x"}, {"channel": "D0B45XYZ", "text": "x"},
+                    {"channel": "C06T7TRGZRR", "text": " "}, "C06T7TRGZRR", None):
+            self.assertIsNone(replies.save_notice(self.root, "recF6", bad))
+        replies.save_notice(self.root, "recF6", {"channel": "C06T7TRGZRR", "text": "不发了"})
+        self.assertTrue(replies.discard(self.root, "recF6", replies.NOTICE))
+        with self.assertRaises(MatrixError):
+            replies.send_notice(self.root, Config(slack_token="xoxp-1"), "recF6", "不发了",
+                                slack_post=lambda *a, **k: self.fail("a dropped notice must not be sent"))
+        replies.save_notice(self.root, "recG7", {"channel": "C06T7TRGZRR", "text": "没连 Slack"})
+        with self.assertRaisesRegex(MatrixError, "Slack 没连接"):
+            replies.send_notice(self.root, Config(), "recG7", "没连 Slack")
+
+    def test_the_result_file_may_carry_a_notice_only_with_a_channel_id_and_text(self):
+        from agent_matrix.itemwork import check_result
+        work = self.root / "work"; work.mkdir()
+        base = {"outcome": "done", "template": "其他", "summary": "x", "sources": ["a"]}
+        for bad in ({"channel": "#team-rd5-dev", "text": "x"}, {"channel": "C06T7TRGZRR"}, "发到群里"):
+            (work / "结果.json").write_text(json.dumps({**base, "notify": bad}), encoding="utf-8")
+            self.assertIn("notify", check_result(work, None)[1] or "")
+        (work / "结果.json").write_text(json.dumps({**base, "notify": {"channel": "C06T7TRGZRR", "text": "PR 请看"}}),
+                                       encoding="utf-8")
+        self.assertNotIn("notify", check_result(work, None)[1] or "")
+
 if __name__ == "__main__":
     unittest.main()
