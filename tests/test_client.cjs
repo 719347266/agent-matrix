@@ -71,7 +71,17 @@ function reset(item) {
   assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/Cindy \/ 本机 GPT/);
   evaluate('D.settings.engine_sort="cindy"');
   let one = pane("ai");
-  assert.doesNotMatch(one,/codex 命令行|分给了两个|setAll/, "no GPT row once nothing uses it, and no box urging one AI for all");
+  assert.doesNotMatch(one,/分给了两个|setAll/, "no box urging one AI for all");
+  assert.match(one,/叫不醒时谁来顶上/); assert.match(one,/codex 命令行/, "GPT stands in when Cindy cannot be woken: its row shows");
+  assert.match(one,/有活时马上叫醒 Cindy/);
+  evaluate('D.settings.engine_fallback=""');
+  assert.doesNotMatch(pane("ai"),/codex 命令行/, "no GPT row once nothing uses it");
+  evaluate('D.settings.engine_fallback="api"; D.settings.api={provider:"deepseek",key:false,target:["DeepSeek","https://api.deepseek.com/anthropic","deepseek-chat"],providers:[{id:"deepseek",name:"DeepSeek",model:"deepseek-chat",keys:"https://platform.deepseek.com/api_keys"},{id:"custom",name:"自定义"}]}');
+  one = pane("ai");
+  assert.match(one,/模型接口/); assert.match(one,/还没填 Key/); assert.match(one,/DeepSeek 后台/);
+  evaluate('D.settings.wake={cindy:{name:"Cindy",hook:false,standin:{since:"2026-11-23T15:20:00+08:00",why:"Cindy 没开着",engine:"api"}}}');
+  assert.match(pane("ai"),/现在由 模型接口 顶上（15:20 起）：Cindy 没开着/);
+  evaluate('delete D.settings.engine_fallback; delete D.settings.api; delete D.settings.wake');
   assert.match(one,/class="chip on" onclick="setSetting\('engine','cindy'\)"/); assert.match(one,/class="chip on" onclick="setSetting\('engine_sort','cindy'\)"/);
   evaluate('D.settings.engine_sort="codex"');
   evaluate('D.settings={intake_mode:"all"}; D.system={record:{feishu_ready:true,mode:"feishu"}}');
@@ -180,16 +190,16 @@ function reset(item) {
   let guide = evaluate('S.ob={step:3,started:true}; obView()');
   for (const label of ["AI 接手","Antigravity 在这儿","copySetupPrompt()","共 ","pg-bar"]) assert.ok(guide.includes(label), label);
   assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">Antigravity</);
-  assert.match(evaluate("checkList()"),/做事的 AI：Antigravity/); assert.match(evaluate("checkList()"),/正在领活（gemini-3）/);
+  assert.match(evaluate("checkList()"),/做事的 AI：Antigravity/); assert.match(evaluate("checkList()"),/按定时任务来领活（gemini-3）/);
   evaluate('D.settings.drivers[0].online=false');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["engine"]); assert.match(evaluate("checkList()"),/现在不在（上次来是 11-20 16:40）/);
   evaluate('D.settings={engine:"codex",intake_mode:"manual",me:{name:""},engine_tests:{},drivers:[]}');
   assert.match(evaluate("checkList()"),/不用装：把上面那段话发给你常用的 AI/);
   // three local AIs and Cindy, for doing items and for sorting
-  evaluate('D.settings={engine:"gemini",engine_sort:"cindy",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
+  evaluate('D.settings={engine:"gemini",engine_sort:"cindy",engine_fallback:"gemini",intake_mode:"all",me:{name:"王小明"},engine_tests:{},cindy:{installed:true,ready:true,same_project:true,projects:[],schedule:{status:"active",hooked:true}}}; D.system={listener:"运行中",engines:{codex:true,claude:true,gemini:true},record:{feishu_ready:true,mode:"feishu"},store:{local:true},here:{platform:"mac"}}');
   let ai = pane("ai");
   for (const label of ["本机 Gemini","gemini 命令行","API Key","setSetting('engine_sort','cindy')","Cindy 定时来领活"]) assert.ok(ai.includes(label), label);
-  assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use");
+  assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use (Gemini also stands in for Cindy)");
   assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
   evaluate('D.system.engines.gemini=false'); assert.match(evaluate("checkList()"),/还没有装 本机 Gemini/);
   // rules the AI learned wait on top for the owner's yes or no

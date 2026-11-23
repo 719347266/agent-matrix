@@ -229,6 +229,50 @@ def defer(queue, mid, now):
     return {"ok":True,"meeting_id":mid,"status":"needs_attention" if exhausted else "waiting_transcript"}
 
 
+def fetch_ready(config, client, queue, now):
+    """Fetch the transcript of every meeting that just became ready, in code, before any AI is woken: the AI is only
+    called (Cindy's pre-run check, the built-in worker) for a meeting whose transcript is already here.
+    A meeting the owner cannot read (the minutes belong to someone else) is said once, right away, and tried again
+    every 5 minutes until access is given. Returns the meetings fetched in this round."""
+    if not config.transcripts_to_llm_allowed or config.llm_backend != "cindy_current":
+        return []
+    fetched = []
+    for row in queue.ready(now):
+        if row["status"] != "ready":
+            continue
+        mid = row["meeting_id"]
+        try:
+            prepare(config, client, queue, mid)
+        except MatrixError as exc:
+            defer(queue, mid, now)
+            if getattr(exc, "code", None) == "no_permission":
+                queue.update(mid, next_check=(now + timedelta(minutes=5)).isoformat())
+                _say_no_permission(client, queue, queue.get(mid) or {})
+            said = f"meeting-fetch-error:{mid}:{getattr(exc, 'code', type(exc).__name__)}"
+            if not queue.state.get(said):   # retried every few minutes: the same failure is logged once
+                queue.state.set(said, now.isoformat())
+                from . import activity
+                activity.log(client.root, "error", f"会议逐字稿没拿到：{row.get('topic') or mid}", detail=str(exc)[:300], status="failed")
+            continue
+        queue.update(mid, next_check=now.isoformat())   # in hand: due now, so the pre-run check wakes the AI at once
+        fetched.append(mid)
+    return fetched
+
+
+def _say_no_permission(client, queue, row):
+    meta = row.get("metadata") or {}
+    topic, start = meta.get("topic") or "会议", meta.get("start_time") or ""
+    link = f"\n[打开会议]({meta['source_url']})" if str(meta.get("source_url") or "").startswith("https://") else ""
+    key = "meeting-no-permission-" + sha256(str(row.get("meeting_id")).encode()).hexdigest()[:24]
+    text = (f"【会议妙记看不了】{topic}（{start}）\n妙记属于别人，你的飞书账号没有查看权限，会上分给你的事还提不出来。"
+            f"\n在飞书里申请查看，或让主持人给你开权限；拿到后心响 5 分钟内自动接着提取。{link}")
+    try:
+        queue.state.once(key, lambda: client.send_self(text, key))
+    except MatrixError as exc:
+        from . import activity
+        activity.swallowed(client.root, "meeting_watch._say_no_permission", exc)
+
+
 def notify_missing(config,client,queue,mid):
     row=queue.get(mid)
     if not row or row["status"] not in {"needs_attention","attention_sent"}:

@@ -222,7 +222,15 @@ def build_state(root):
     except Exception as exc:
         activity.swallowed(root, "app.drivers", exc)
         settings["drivers"] = []
-    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude", "gemini")}
+    settings["engine_tests"] = {k: thread.setting(root, f"engine_test:{k}", None) for k in ("codex", "claude", "gemini", "api")}
+    from .engines import fallback_engine
+    settings["engine_fallback"] = fallback_engine(root) or ""   # 叫不醒时谁来顶上; "" = nobody
+    try:  # waking the AIs in other apps, and whether the built-in driver stands in for one right now
+        from . import wakeup
+        settings["wake"] = wakeup.status(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.wake", exc)
+        settings["wake"] = {}
     try:  # where conversations open and items are picked up (设置 → AI 对话)
         from . import local_sessions
         from .config import load as load_config
@@ -237,6 +245,10 @@ def build_state(root):
         settings["part_prompts"] = {part: setupshim.part_prompt(part) for part in setupshim.PARTS}   # one part to a second AI
         settings["setup"] = setup_view(root)   # what the owner asked the driving AI to set up, and how far it got
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
+        from .engines import API_PROVIDERS, api_target
+        settings["api"] = {"provider": cfg.worker_api_provider, "base": cfg.worker_api_base_url, "model": cfg.worker_api_model,
+                           "key": bool(cfg.worker_api_key), "target": api_target(cfg),
+                           "providers": [{"id": k, **v} for k, v in API_PROVIDERS.items()]}
         from . import hymem   # 记忆增强: the settings without the keys, and how far writing has got
         settings["memory_boost"] = {"enabled": cfg.memory_boost_enabled, "base_url": cfg.memory_base_url, "has_key": bool(cfg.memory_api_key),
                                     "llm": cfg.memory_llm_model, "embed_base_url": cfg.memory_embed_base_url, "has_embed_key": bool(cfg.memory_embed_api_key),
@@ -251,7 +263,7 @@ def build_state(root):
         activity.swallowed(root, "app.build_state", exc)
     return {"demo": False, "page": page_version(), "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
-            "guide": drive.GUIDE.format(cmd=str(drive.shim_path())),
+            "guide": drive.guide_text(str(drive.shim_path())),
             **memory_view(root, items),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
@@ -760,7 +772,7 @@ class Handler(BaseHTTPRequestHandler):
                 from . import thread
                 from . import aidrivers
                 ai_names = {aidrivers.setting_of(d["name"]) for d in aidrivers.known(root)}
-                if body.get("engine") in {"codex", "claude", "gemini", "cindy"} | ai_names:
+                if body.get("engine") in {"codex", "claude", "gemini", "api", "cindy"} | ai_names:
                     thread.set_setting(root, "engine", body["engine"])
                 from . import approvals
                 if body.get("dev_mode") in approvals.MODES:
@@ -770,8 +782,25 @@ class Handler(BaseHTTPRequestHandler):
                         thread.set_setting(root, want, bool(body[want]))
                 if "cindy_project" in body:
                     thread.set_setting(root, "cindy_project", str(body["cindy_project"] or "")[:500])
-                if body.get("engine_sort") in {"codex", "claude", "gemini", "cindy"} | ai_names:
+                if body.get("engine_sort") in {"codex", "claude", "gemini", "api", "cindy"} | ai_names:
                     thread.set_setting(root, "engine_sort", body["engine_sort"])
+                if body.get("engine_fallback") in {"codex", "claude", "gemini", "api", ""}:
+                    thread.set_setting(root, "engine_fallback", body["engine_fallback"])
+                if "cindy_wake_url" in body:   # the address of Cindy's webhook trigger, pasted by the owner
+                    try:
+                        aidrivers.set_hook(root, "cindy", str(body["cindy_wake_url"] or ""))
+                    except ValueError as exc:
+                        return self._send(400, {"ok": False, "error": str(exc)})
+                if any(k in body for k in ("worker_api_provider", "worker_api_base_url", "worker_api_key", "worker_api_model")):
+                    from .config import load as load_config, save as save_config   # 模型接口: kept in config.yaml on this computer
+                    from .engines import API_PROVIDERS
+                    config = load_config(root / "config.yaml")
+                    if body.get("worker_api_provider") in API_PROVIDERS:
+                        config.worker_api_provider = body["worker_api_provider"]
+                    for key in ("worker_api_base_url", "worker_api_key", "worker_api_model"):
+                        if key in body:
+                            setattr(config, key, str(body[key] or "").strip()[:300])
+                    save_config(root / "config.yaml", config)
                 if "worker_gemini_api_key" in body:  # kept in config.yaml on this computer, handed to the gemini command only
                     from .config import load as load_config, save as save_config
                     config = load_config(root / "config.yaml")
@@ -901,7 +930,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .config import load
                 from .engines import test_engine
                 name = body.get("engine")
-                if name not in {"codex", "claude", "gemini"}:
+                if name not in {"codex", "claude", "gemini", "api"}:
                     return self._send(400, {"ok": False, "reply": "不认识这个 AI。"})
                 return self._send(200, {"ok": True, **test_engine(root, load(root / "config.yaml"), name)})
             if path == "/api/session/unbind":

@@ -287,6 +287,34 @@ class ListenerMeetingCheckTests(unittest.TestCase):
         self.assertEqual(self.run_check(lambda q: None), [])  # still ready next minute: no second wake-up
         self.assertEqual(self.kicks, [True])
 
+    def test_a_meeting_the_owner_cannot_read_wakes_nobody_says_so_once_and_is_tried_again_in_minutes(self):
+        from agent_matrix.feishu import FeishuError
+        mid = "7000000000000000003"
+        said = []
+        class Client:
+            root = Path(self.tmp.name)
+            def send_self(self, text, key):
+                said.append(text)
+                return {"message_id": "local_1"}
+        def refuse(*_args, **_kwargs):
+            raise FeishuError("no_permission", detail="No read permission for minute x")
+        config = self.config.model_copy(update={"transcripts_to_llm_allowed": True, "llm_backend": "cindy_current"})
+        meta = {**self.meta(mid), "end_time": "2026-11-19 16:50"}
+        def fake_check(config, source, queue, now):
+            if not queue.get(mid):
+                queue.put(meta, now)
+                queue.update(mid, status="ready", next_check=now.isoformat())
+        with self.patch("agent_matrix.meeting_watch.check", fake_check), self.patch("agent_matrix.meeting_watch.prepare", refuse):
+            self.assertEqual(self.listener.meeting_check(config, Client(), self.state, self.now), [])
+            self.assertEqual(self.kicks, [])                                   # no transcript: no AI woken
+            row = MeetingQueue(self.state).get(mid)
+            self.assertEqual(row["status"], "waiting_transcript")
+            self.assertEqual(row["next_check"], (self.now + timedelta(minutes=5)).isoformat())
+            MeetingQueue(self.state).update(mid, status="ready", next_check=self.now.isoformat())
+            self.listener.meeting_check(config, Client(), self.state, self.now)
+        self.assertEqual(len(said), 1)                                         # told once, not every 5 minutes
+        self.assertIn("没有查看权限", said[0])
+
     def test_a_meeting_still_waiting_for_its_transcript_does_not_wake_the_ai(self):
         mid = "7000000000000000002"
         self.assertEqual(self.run_check(lambda q: (q.put(self.meta(mid), self.now), q.update(mid, status="waiting_transcript"))), [])

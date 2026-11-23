@@ -73,6 +73,12 @@ class Config(BaseModel):
     worker_gemini: str = ""          # path to the gemini command; empty = find it on PATH (本机 Gemini)
     worker_gemini_model: str = ""    # e.g. gemini-2.5-pro; empty = the Gemini CLI's default
     worker_gemini_api_key: str = ""  # optional Gemini API key (GEMINI_API_KEY); empty = however the gemini command is signed in
+    # 模型接口: no subscription needed, the owner's own key for a provider with a Claude-compatible endpoint (DeepSeek, Kimi,
+    # 智谱 …), run through the Claude command line. Kept in config.yaml on this computer only.
+    worker_api_provider: str = "deepseek"
+    worker_api_base_url: str = ""    # empty = the provider's known address
+    worker_api_key: str = ""
+    worker_api_model: str = ""       # empty = the provider's usual model
     # 记忆增强 (optional): Tencent Hunyuan Hy Memory with the owner's own API. Kept in config.yaml on this computer only.
     memory_boost_enabled: bool = False
     memory_base_url: str = ""            # OpenAI-compatible endpoint for the language model

@@ -79,6 +79,19 @@ class ButtonHandoff(unittest.TestCase):
         self.assertEqual([v['type'] for v in self.pump()],['complete'])
 
     @unittest.skipUnless(hasattr(select, 'kqueue'), "macOS notification")
+    def test_a_round_that_slept_through_its_time_ends_soon_after_waking(self):
+        # The Mac slept mid-round: wall-clock time jumped past the round's end, so it finishes instead of
+        # waiting on until Cindy's 330 s limit calls it a timeout.
+        clock = iter([1000.0] + [1000.0 + pickup.LISTEN_SECONDS + 600] * 50)
+        out = io.StringIO()
+        with patch.object(pickup.time, 'time', lambda: next(clock)):
+            started = time.monotonic()
+            pickup.run(self.root, io.StringIO(json.dumps(self.start) + '\n'), out, listen=True)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual([json.loads(l)['type'] for l in out.getvalue().splitlines()], ['complete'])
+        self.assertLess(pickup.LISTEN_SECONDS + pickup.WAIT_STEP, 330 - 60)   # room left under Cindy's limit
+
+    @unittest.skipUnless(hasattr(select, 'kqueue'), "macOS notification")
     def test_running_listener_wakes_for_a_click_and_waits_for_matched_receipt(self):
         # A real child process and kernel event; only the Cindy stdin/stdout peer is simulated.
         env = dict(os.environ, PYTHONPATH=str(Path(pickup.__file__).resolve().parents[1]))

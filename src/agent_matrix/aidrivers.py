@@ -2,10 +2,20 @@
 
 Nothing is chosen in advance. The owner pastes one message to an AI (Antigravity, Gemini, Claude Code, Cursor,
 Cindy … any that can run a command). That AI says who it is (`xinxiang hello`), which makes it the one that does
-the work, and then keeps asking for the next thing to do. 心响 learns the list of AIs on this computer from who
-came and said hello; an AI that stops asking is shown as away, and sending it the message again brings it back.
+the work, and then comes by on its own schedule (a pre-run `gate` decides whether to wake it) or is woken by 心响 through
+the address it gave (`wake-hook`). 心响 learns the list of AIs on this computer from who came and said hello; one that
+does not come is woken, and when that fails the built-in driver stands in for it (wakeup.py).
 Sending the message to another AI hands the work over to that one.
 """
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
+import urllib.error
+import urllib.request
+import uuid
 from datetime import datetime, timedelta
 import re
 from pathlib import Path
@@ -14,7 +24,7 @@ from . import thread as conversation
 from .timeutil import TZ
 
 KEY = "ai:drivers"
-AWAY_AFTER = timedelta(minutes=12)   # a waiting `next` asks again at least every ten minutes
+AWAY_AFTER = timedelta(minutes=12)   # an AI on a 5-minute schedule calls `gate` (or `next`) at least that often
 
 
 def _now():
@@ -89,6 +99,86 @@ def known(root):
     return sorted(out, key=lambda d: d["seen"], reverse=True)
 
 
+STANDIN, HOOKS = "ai:standin", "ai:wake-hooks"
+
+
+def _hooks(root):
+    return dict(conversation.setting(Path(root), HOOKS, None) or {})
+
+
+def new_secret():
+    return "whsec_" + base64.b64encode(secrets.token_bytes(24)).decode()
+
+
+def hook_of(root, value):
+    return _hooks(root).get(value)
+
+
+def set_hook(root, value, url, secret=None):
+    """An AI (or the owner) tells 心响 how to wake it: an https address that starts one round of its schedule."""
+    url = str(url or "").strip()
+    if url and not url.startswith("https://"):
+        raise ValueError("叫醒地址要以 https:// 开头。")
+    hooks = _hooks(root)
+    if not url:
+        hooks.pop(value, None)
+    else:
+        was = hooks.get(value) or {}
+        hooks[value] = {"url": url[:500], "secret": (secret or was.get("secret") or new_secret())[:200],
+                        "set": _now().isoformat(timespec="seconds")}
+    conversation.set_setting(Path(root), HOOKS, hooks)
+    return hooks.get(value)
+
+
+def signed(secret, msg_id, stamp, body):
+    """Standard Webhooks: base64 HMAC-SHA256 of "<id>.<timestamp>.<body>" with the secret (whsec_ + base64 key)."""
+    key = base64.b64decode(secret.split("_", 1)[1]) if secret.startswith("whsec_") else secret.encode()
+    return "v1," + base64.b64encode(hmac.new(key, f"{msg_id}.{stamp}.{body}".encode(), hashlib.sha256).digest()).decode()
+
+
+WAKE_SAID = {401: "叫醒密钥对不上（两边的签名密钥不一样）", 404: "叫醒地址失效了（那边的 Webhook 被删了或换了）",
+             429: "叫醒次数今天用完了（那边的 Webhook 有每日上限）", 503: "那边暂时收不了叫醒（云端接收不可用）"}
+
+
+def send_wake(hook, work, opener=urllib.request.urlopen):
+    """One signed request that starts a round on the AI's side. Says nothing but the kind of work waiting."""
+    if not hook or not hook.get("url"):
+        return {"ok": False, "why": "它没给心响叫醒的入口，只能等它自己的定时任务来"}
+    msg_id, stamp = "xinxiang-" + uuid.uuid4().hex, str(int(time.time()))
+    body = json.dumps({"type": "xinxiang.work", "work": work}, ensure_ascii=False)
+    request = urllib.request.Request(hook["url"], data=body.encode(), method="POST", headers={
+        "content-type": "application/json", "webhook-id": msg_id, "webhook-timestamp": stamp,
+        "webhook-signature": signed(hook.get("secret") or "", msg_id, stamp, body), "user-agent": "xinxiang"})
+    try:
+        with opener(request, timeout=15) as answer:
+            code = answer.status
+    except urllib.error.HTTPError as exc:
+        code = exc.code
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {"ok": False, "why": f"叫醒请求发不出去（{type(exc).__name__}：网络不通或地址不对）"}
+    if 200 <= code < 300:
+        return {"ok": True, "status": code}
+    return {"ok": False, "status": code, "why": WAKE_SAID.get(code, f"叫醒被拒绝（HTTP {code}）")}
+
+
+
+def pending_secret(root, value):
+    """The signing secret to put on the AI's side before its address is known (kept until the address comes)."""
+    hooks = _hooks(root)
+    entry = hooks.setdefault(value, {})
+    if not entry.get("secret"):
+        entry["secret"] = new_secret()
+        conversation.set_setting(Path(root), HOOKS, hooks)
+    return entry["secret"]
+
+
+
+
+def standing_in(root):
+    """The AIs in other apps the built-in driver stands in for right now (wakeup.py decides): {value: {...}}."""
+    return dict(conversation.setting(Path(root), STANDIN, None) or {})
+
+
 def forget(root, name):
     known = _all(root)
     if known.pop(clean(name), None) is not None:
@@ -101,7 +191,7 @@ def forget(root, name):
 
 FOR = "ai:for"
 HANDOFF = "handoff"   # waiting for whichever AI the message is sent to: nobody else takes it meanwhile
-LOCAL = {"codex": "本机 GPT", "claude": "本机 Claude", "gemini": "本机 Gemini"}
+LOCAL = {"codex": "本机 GPT", "claude": "本机 Claude", "gemini": "本机 Gemini", "api": "模型接口"}
 
 
 def _for(root):

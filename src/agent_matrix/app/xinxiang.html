@@ -1339,7 +1339,7 @@ const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===fal
 const SET_IC={bug:'<path d="M9 8a3 3 0 0 1 6 0M7 11h10v4a5 5 0 0 1-10 0zM4 13h3M17 13h3M5 19l2.5-2M19 19l-2.5-2M5 8l2.5 2M19 8l-2.5 2"/>',update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
   bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const engName = v => String(v||"").startsWith("driver:")?String(v).slice(7):(ENGINE_NAME[v]||v||"");   // an AI that said hello goes by its own name
-const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
+const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini",api:"模型接口"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
 /* every line of the menu says what is chosen now; the page behind it only shows options that follow from the choices made */
 function setMenu(st,s){ const r=s.record||{};
   const left=setupProblems().length, upd=s.update||{}, waiting=(D.bugs||[]).filter(b=>b.status==="open").length;
@@ -1401,7 +1401,7 @@ function setupChecks(){
   if(r.feishu_ready&&pb.fields) out.push({key:"feishu_fields",need:true,title:"飞书事项表",state:"bad",text:`事项表少了几个栏目（${esc(pb.fields)}），AI 代做现在用不了。${ASK_AI}补上，不会动已有的内容。`});
   const eng=st.engine||"codex", c=st.cindy||{};
   const outside=(v,job)=>{ const name=engName(v), d=(st.drivers||[]).find(x=>x.name===name);
-    return d&&d.online?{state:"ok",text:`${esc(name)} 在这儿，正在领活${d.model?`（${esc(d.model)}）`:""}。`}
+    return d&&d.online?{state:"ok",text:`${esc(name)} 在这儿，按定时任务来领活${d.model?`（${esc(d.model)}）`:""}。`}
       :{state:"bad",text:`${esc(name)} 现在不在${d&&d.seen?`（上次来是 ${esc(d.seen)}）`:""}，${job}。把上面那段话再发给它一次；发给另一个 AI，就换那个 AI 来做。`}; };
   const who=(v,job,cindyJob)=>String(v).startsWith("driver:")?outside(v,job):v==="cindy"?cindyState(c,cindyJob||job):local(v,job);
   out.push({key:"engine",need:true,title:`做事的 AI：${engName(eng)}`,...who(eng,"交给 AI 的事没人做","交给 AI 的事不会开工")});
@@ -1511,9 +1511,10 @@ function sysPage(){ const s=D.system||{}, st=D.settings||{}, w=D.worker||{}, men
 }
 const switchCtl=(on,call)=>`<div class="switch ${on?"on":""}" style="margin:0;padding:0;border:0;background:none" role="switch" aria-checked="${!!on}" tabindex="0" onclick="${call}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${call}}"><div class="tr"></div></div>`;
 const toggle=(key,on)=>switchCtl(on,`setSetting('${key}',${!on})`);
-const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"],gemini:["Gemini","gemini 命令行","worker_gemini_model"]};
-const LOCAL_ENGINES=["codex","claude","gemini"];
+const ENG={codex:["GPT","codex 命令行","worker_model"],claude:["Claude","claude 命令行","worker_claude_model"],gemini:["Gemini","gemini 命令行","worker_gemini_model"],api:["模型接口","用 claude 命令行接你自己的 Key","worker_api_model"]};
+const LOCAL_ENGINES=["codex","claude","gemini","api"];
 function engineRow(name,st,found){
+  if(name==="api") return apiRow(st,found);
   const [label,cli,key]=ENG[name], t=(st.engine_tests||{})[name], busy=S.testing&&S.testing[name], model=(st.models||{})[name]||"";
   const state=found===false?`<span class="eng-state bad">没找到 ${cli}</span>`:busy?`<span class="eng-state busy">正在测试…</span>`
     :!t?`<span class="eng-state">还没测试</span>`:t.ok?`<span class="eng-state ok">已连通，${t.seconds} 秒（${esc(t.at)}）</span>`:`<span class="eng-state bad">连不上（${esc(t.at)}）</span>`;
@@ -1522,6 +1523,45 @@ function engineRow(name,st,found){
   return setRow(`${label}<span class="hint" style="margin:0 0 0 8px;font-weight:400">${cli}${used?`　正在用于：${used}`:""}</span>`,
     `模型：<input class="model" data-draft="model-${name}" value="${esc(model)}" placeholder="${name==="codex"?"模型名":"留空用默认"}" onkeydown="if(event.key==='Enter')saveModel('${key}',this.value)" onblur="saveModel('${key}',this.value)" aria-label="${label} 模型">`,
     `${state}<button class="btn" ${busy||found===false?"disabled":""} onclick="testEngine('${name}')">测试连接</button>`, err+(name==="gemini"?geminiKeyRow(st):""));
+}
+function apiRow(st,found){
+  const a=st.api||{}, t=(st.engine_tests||{}).api, busy=S.testing&&S.testing.api, provs=a.providers||[], cur=provs.find(x=>x.id===a.provider)||provs[0]||{};
+  const [pname,base,model]=a.target||[cur.name||"",cur.base||"",cur.model||""];
+  const state=found===false?`<span class="eng-state bad">没找到 claude 命令行</span>`:busy?`<span class="eng-state busy">正在测试…</span>`
+    :!a.key?`<span class="eng-state">还没填 Key</span>`:!t?`<span class="eng-state">还没测试</span>`:t.ok?`<span class="eng-state ok">已连通，${t.seconds} 秒（${esc(t.at)}）</span>`:`<span class="eng-state bad">连不上（${esc(t.at)}）</span>`;
+  const used=[st.engine==="api"?"做事":"",st.engine_sort==="api"?"整理":"",st.engine_fallback==="api"?"顶上":""].filter(Boolean).join("、");
+  const err=t&&!t.ok&&!busy&&t.error?`<div class="d" style="color:var(--red);margin-top:6px">${esc(t.error)}</div>`:"";
+  const field=(id,label,val,ph,type="text")=>`${label}：<input id="${id}" type="${type}" autocomplete="off" value="${esc(val)}" placeholder="${esc(ph)}" style="width:${type==="password"?230:200}px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')saveApi()">`;
+  const below=`<div class="chips" style="margin:8px 0">${provs.map(x=>`<button class="chip ${x.id===a.provider?"on":""}" onclick="saveApi('${x.id}')">${esc(x.name)}</button>`).join("")}</div>
+    <div class="d" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${field("apikey","API Key","",a.key?"已填，粘贴新的可替换":"在服务商后台复制","password")}
+      ${field("apimodel","模型",a.model||"",cur.model||"模型名")}${a.provider==="custom"?field("apibase","地址",a.base||"","https://…/anthropic"):""}<button class="btn" onclick="saveApi()">保存</button></div>
+    <div class="hint" style="margin:6px 0 0">没有订阅也能用：填你自己的 Key，按用量付费。${cur.keys?`在 <a href="${esc(cur.keys)}" target="_blank" rel="noopener">${esc(cur.name)} 后台</a>申请。`:"填一个支持 Claude 格式（/anthropic）的地址。"}Key 只存在这台电脑上。</div>`;
+  return setRow(`模型接口<span class="hint" style="margin:0 0 0 8px;font-weight:400">${esc(pname)}${model?` · ${esc(model)}`:""}${used?`　正在用于：${used}`:""}</span>`,
+    "DeepSeek、Kimi、智谱等，用你自己的 API Key。", `${state}<button class="btn" ${busy||found===false||!a.key?"disabled":""} onclick="testEngine('api')">测试连接</button>`, err+below);
+}
+async function saveApi(provider){
+  const v=id=>{ const el=$("#"+id); return el?String(el.value||"").trim():undefined; };
+  const body={...(provider?{worker_api_provider:provider}:{})}, key=v("apikey"), model=v("apimodel"), base=v("apibase");
+  if(key) body.worker_api_key=key; if(model!==undefined&&!provider) body.worker_api_model=model; if(base!==undefined&&!provider) body.worker_api_base_url=base;
+  if(provider){ body.worker_api_model=""; body.worker_api_base_url=""; }
+  try{ await api("/api/settings",body); toast(key?"已保存，点「测试连接」试一下":"已保存"); load(); }catch(e){ toast(e.message||"没保存成功"); }
+}
+function fallbackRow(st,found){
+  const cur=st.engine_fallback??"codex", t=(st.engine_tests||{})[cur];
+  const opts=[...LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]),["","不顶上"]];
+  const state=!cur?`<span class="eng-state bad">没人顶上：叫不醒时活会一直等着</span>`:!t?`<span class="eng-state">还没测试</span>`:t.ok?`<span class="eng-state ok">${esc(ENGINE_NAME[cur])} 能用</span>`:`<span class="eng-state bad">${esc(ENGINE_NAME[cur])} 现在连不上</span>`;
+  return setRow("叫不醒时谁来顶上","选的 AI 在别的软件里（Cindy 或报到的 AI）：有活时心响先去叫它；8 分钟还没人接，就用这里选的本机 AI 先做，并告诉你它为什么没来。它回来后自动交还。",
+    state,choice("engine_fallback",cur,opts));
+}
+function wakeLine(st,value){
+  const w=(st.wake||{})[value]; if(!w) return "";
+  const s=w.standin, last=w.last_wake;
+  return s?`<br><span class="eng-state bad">现在由 ${esc(ENGINE_NAME[s.engine]||s.engine)} 顶上（${esc(String(s.since).slice(11,16))} 起）：${esc(s.why)}</span>`
+    :w.hook&&last&&!last.ok&&last.why?`<br><span class="hint" style="margin:0">上次叫醒没成：${esc(last.why)}</span>`:"";
+}
+async function saveWakeUrl(){
+  const el=$("#wakeurl"), v=String(el&&el.value||"").trim();
+  try{ await api("/api/settings",{cindy_wake_url:v}); toast(v?"已保存，有活时会马上叫醒 Cindy":"已清掉，只等 Cindy 的定时任务"); load(); }catch(e){ toast(e.message||"没保存成功"); }
 }
 function geminiKeyRow(st){
   return `<div class="d" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">API Key：<input id="gemkey" type="password" autocomplete="off" placeholder="${st.gemini_key?"已填，粘贴新的可替换":"可不填；个人账号登录不了时填"}" style="width:230px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')saveGeminiKey()"><button class="btn" onclick="saveGeminiKey()">保存</button>${st.gemini_key?`<button class="btn ghost" onclick="saveGeminiKey(true)">清掉</button>`:""}
@@ -1536,9 +1576,10 @@ function aiPage(st,s){
   const found=s.engines||{}, cindy=st.cindy||{}, cindyOk=cindy.installed===false?false:true;
   const work=st.engine||"codex", sort=st.engine_sort||work, useCindy=work==="cindy"||sort==="cindy";
   const local=LOCAL_ENGINES.map(e=>[e,ENGINE_NAME[e],found[e]]), ais=(st.drivers||[]).map(d=>["driver:"+d.name,d.name+(d.online?"":"（不在）"),true]);
-  const used=LOCAL_ENGINES.filter(e=>work===e||sort===e);   // only the local AIs in use need a connection
+  const outside=v=>v==="cindy"||String(v).startsWith("driver:"), standby=(outside(work)||outside(sort))?(st.engine_fallback??"codex"):"";
+  const used=LOCAL_ENGINES.filter(e=>work===e||sort===e||standby===e);   // only the local AIs in use need a connection
   const who=v=>{ const d=(st.drivers||[]).find(x=>"driver:"+x.name===v);
-    return d?`<br>${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${d.app||d.model?"　":""}<span class="eng-state ${d.online?"ok":""}">${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</span>`:""; };
+    return (d?`<br>${esc([d.app!==d.name&&d.app,d.model].filter(Boolean).join(" · "))}${d.app||d.model?"　":""}<span class="eng-state ${d.online?"ok":""}">${d.online?"在这儿":`上次来 ${esc(d.seen||"")}`}</span>`:"")+wakeLine(st,v); };
   const opts=[...ais,["cindy","Cindy",cindyOk],...local];
   const probs=setupChecks().filter(x=>x.need&&x.state!=="ok"&&x.key!=="engine"), d=obDriver(st);
   const fix=probs.length?setSec("fix","","",d
@@ -1548,7 +1589,7 @@ function aiPage(st,s){
       setRow("做事","找背景、写成果、按你的意见改。"+who(work),`<button class="btn" onclick="copyPart('work')">复制给 AI 的话</button>`,choice("engine",work,opts))
       +setRow("整理","从会议和聊天里找出你的事、判断新进来的事。"+who(sort),`<button class="btn" onclick="copyPart('sort')">复制给 AI 的话</button>`,choice("engine_sort",sort,opts))
       +setRow("单独某一件","在那件事里改「哪个 AI」。","")
-      +(useCindy?cindyRows(cindy):"")+used.map(e=>engineRow(e,st,found[e])).join(""))
+      +(useCindy?cindyRows(cindy,st):"")+(standby!==""||outside(work)||outside(sort)?fallbackRow(st,found):"")+used.map(e=>engineRow(e,st,found[e])).join(""))
    +`<p class="hint" style="margin:10px 2px 0">用别的 AI（Claude Code、Cursor、Antigravity…）：点「复制给 AI 的话」发给它，它来报到后就出现在选项里。</p>`
    +setSec("all","","",`<details><summary class="set-sum">每一项现在的状态</summary><div style="padding:12px 14px">${checkList()}</div></details>`)
    +setSec("dev","","",setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
@@ -1571,7 +1612,7 @@ function advancedSection(st,s,w){
     +setRow("后台程序","收消息、整理、提醒、备份都靠它。",`<span class="eng-state ${s.listener==="运行中"?"ok":"bad"}">${esc(s.listener||"未知")}</span>`)
     +`</div>`;
 }
-function cindyRows(c){
+function cindyRows(c,st={}){
   const projects=c.projects||[], sch=c.schedule;
   const proj=setRow("Cindy 用哪个项目","按这个项目的规范和记忆做事。",
     `<div class="chips">${projects.slice(0,6).map(p=>`<button class="chip ${c.project===p.folder?"on":""}" title="${esc(p.folder)}" onclick="setSetting('cindy_project',${esc(JSON.stringify(p.folder))})">${esc(p.name)}</button>`).join("")||'<span class="hint" style="margin:0">Cindy 里还没有项目</span>'}</div>`);
@@ -1585,7 +1626,11 @@ function cindyRows(c){
     :sch.hooked==null?"已建好，等它跑第一轮（最多 5 分钟）。"
     :!c.same_project?`定时任务用的项目和上面选的不一样。点右边复制一段话发给 Cindy，它会改过来。`
     :`每 5 分钟来看一次；没活不叫 AI。`;
-  return proj+setRow("Cindy 定时来领活",why,`${state}<button class="btn" onclick="checkCindy()">检查</button><button class="btn ${c.ready&&c.same_project?"":"pri"}" onclick="copyCindySetup()">复制给 Cindy 的话</button>`);
+  const w=(st.wake||{}).cindy||{}, hook=w.hook;
+  const wake=setRow("有活时马上叫醒 Cindy",(hook?"已接好：心响有活就叫 Cindy 马上开一轮，不用等 5 分钟。":"还没接：有活要等 Cindy 下一个 5 分钟。「复制给 Cindy 的话」里有开 Webhook 的步骤；Cindy 开不了就把它的接收地址粘到这里。")+wakeLine(st,"cindy"),
+    hook?`<span class="eng-state ok">已接好</span>`:"",
+    `<div class="d" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">叫醒地址：<input id="wakeurl" autocomplete="off" placeholder="${hook?"已填，粘贴新的可替换":"https://… Cindy 定时任务的接收地址"}" style="width:320px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')saveWakeUrl()"><button class="btn" onclick="saveWakeUrl()">保存</button></div>`);
+  return proj+setRow("Cindy 定时来领活",why,`${state}<button class="btn" onclick="checkCindy()">检查</button><button class="btn ${c.ready&&c.same_project?"":"pri"}" onclick="copyCindySetup()">复制给 Cindy 的话</button>`)+wake;
 }
 function talkSection(st){
   const f=st.apps||{};

@@ -50,6 +50,19 @@ def work_cmd():
     return f'"{path}"' if " " in path else path
 
 
+def rounds(xin, name='<你的名字>'):
+    """How an AI works for 心响: it comes by on a schedule, a check in code decides whether to wake it, it does what
+    is there and ends the round. It never stays on the line waiting: a subscription chat cannot hold a conversation
+    open for hours, and one that times out leaves nobody doing the work."""
+    return f"""不要一直挂着等活：每隔一段时间来一趟，有活才做，做完这一轮就结束。
+- 你所在的客户端能建定时任务（比如 Cindy 的定时任务、Claude 的定时任务、Codex 的自动化）：建一个每 5 分钟一次的定时任务，叫「心响｜{name} 领活」。
+  · 能设前置检查（运行前先跑的命令）就设成：{xin} gate --driver "{name}"。退出码 0 = 有活，开始这一轮；2 = 没活，跳过这一轮，不叫醒你、不花 token。
+  · 设不了前置检查：每一轮第一步先运行这条 gate，退出码是 2 就直接结束这一轮。
+  · 每一轮要做的：运行 {xin} next --driver "{name}" 领一件活，按它说的做完、交了，再领下一件；返回 {{"idle": true}} 就结束这一轮。
+- 你的客户端建不了定时任务：现在把能领的活领完（同上，领到 idle 为止）就结束；以后心响有活会提醒我，我再叫你。
+- 不要用 --wait 守着，也不要没活时反复运行 next。"""
+
+
 def prompt(root):
     """The one message the owner pastes to whichever AI they use. That AI says who it is, sets 心响 up, then does
     the work: 心响 never needs to be told in advance which AI it will be."""
@@ -64,12 +77,15 @@ def prompt(root):
 
 {cmd} doctor
 
-第三步，开始干活。他在心响里选了要接的工具、同意你认识他的话，你领到的头几件活就是「接入飞书/微信/Slack」和「认识你」，按顺序一件件做，每一步都报进度。之后心响里所有要 AI 做的事都交给你：做事项、整理会议和聊天、判断新进来的事。心响自己的后台程序负责定时去收消息和会议，收到要动脑的活就排队等你来领。运行下面这条命令领活（名字和第一步一样）。没活时它会等着，有活立刻返回：
+第三步，开始干活。他在心响里选了要接的工具、同意你认识他的话，你领到的头几件活就是「接入飞书/微信/Slack」和「认识你」，按顺序一件件做，每一步都报进度。之后心响里所有要 AI 做的事都交给你：做事项、整理会议和聊天、判断新进来的事。心响自己的后台程序负责定时去收消息和会议，收到要动脑的活就排队等你来领。现在先运行一次下面这条命令领活（名字和第一步一样）：
 
-{xin} next --driver "<你的名字>" --wait 600
+{xin} next --driver "<你的名字>"
 
-- 返回 {{"idle": true}} 就再运行一次，一直守着。
 - 返回一件事（folder、instructions、job）：进入 folder，按 instructions 做，用里面写的命令报进度、交活，然后再领下一件。
+- 返回 {{"idle": true}}：现在没活了。
+
+第四步，以后怎么来领活：
+{rounds(xin)}
 
 请遵守：
 1. 只做心响让你做的事，不要改别的东西。
@@ -77,7 +93,7 @@ def prompt(root):
 3. 只有人能做的事（登录账号、在浏览器里点同意、扫码、回答问题）才来找我：一次把要我做什么说清楚，然后等我做完。
 4. 不要在对话里问我要密码、验证码或密钥。
 5. 对外发送、审批、付款、删除这类事只准备材料，不要执行。
-6. 配好后用一句话告诉我可以用了；这段对话要结束、不能再守着时也告诉我一声，我把这段话再发你一次就能接着干。
+6. 配好后用一句话告诉我可以用了，并说清你建好了定时任务，还是要我有活时再叫你。
 
 """ + TALK
 
@@ -93,9 +109,9 @@ def part_prompt(part):
 
 1. 告诉心响你是谁，并接下「{name}」（名字写你自己，比如 Antigravity、Gemini、Claude Code、Cursor）：
 {xin} hello --name "<你的名字>" --app "<你所在的客户端>" --model "<你现在用的模型>" --part {part}
-2. 开始干活。运行下面这条命令领活（名字和上面一样）。没活时它会等着，有活立刻返回：
-{xin} next --driver "<你的名字>" --wait 600
-- 返回 {{"idle": true}} 就再运行一次，一直守着。
-- 返回一件事（folder、instructions、job）：进入 folder，按 instructions 做，用里面写的命令报进度、交活，然后再领下一件。
+2. 现在先领一次活（名字和上面一样）：{xin} next --driver "<你的名字>"
+- 返回一件事（folder、instructions、job）：进入 folder，按 instructions 做，用里面写的命令报进度、交活，然后再领下一件；返回 {{"idle": true}} 就是现在没活了。
+3. 以后怎么来领活：
+{rounds(xin)}
 
-请遵守：命令都由你来运行，不要让我自己去敲；不要在对话里问我要密码、验证码或密钥；对外发送、审批、付款、删除只准备材料，不要执行；这段对话要结束、不能再守着时告诉我一声。"""
+请遵守：命令都由你来运行，不要让我自己去敲；不要在对话里问我要密码、验证码或密钥；对外发送、审批、付款、删除只准备材料，不要执行；做完后告诉我你建好了定时任务，还是要我有活时再叫你。"""

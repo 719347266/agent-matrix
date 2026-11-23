@@ -128,13 +128,14 @@ class SetupCheckTests(unittest.TestCase):
         self.assertEqual((thread.setting(self.root, "engine", ""), thread.setting(self.root, "engine_sort", "")), ("driver:Antigravity", "driver:Antigravity"))
         by = {x["key"]: x for x in self.report(BARE)["items"]}
         self.assertEqual((by["engine"]["ok"], by["engine"]["title"]), (True, "做事的 AI：Antigravity"))
-        self.assertIn("正在领活", by["engine"]["say"])
+        self.assertIn("按定时任务来领活", by["engine"]["say"])
         known = thread.setting(self.root, aidrivers.KEY, None)
         known["Antigravity"]["seen"] = (datetime.now(TZ) - timedelta(minutes=30)).isoformat()
         thread.set_setting(self.root, aidrivers.KEY, known)
         item = {x["key"]: x for x in self.report(BARE)["items"]}["engine"]
         self.assertFalse(item["ok"]); self.assertIn("现在不在", item["say"])
-        self.assertIn('next --driver "Antigravity" --wait 600', item["steps"][0])
+        self.assertIn('next --driver "Antigravity"', item["steps"][0]); self.assertIn("定时任务", item["steps"][0])
+        self.assertNotIn("--wait", "\n".join(item["steps"]))
         self.assertIn("hello --name", item["steps"][1])                          # or another AI takes over
 
     def test_the_desktop_client_and_another_ai(self):
@@ -158,8 +159,10 @@ class SetupCheckTests(unittest.TestCase):
 
     def test_the_message_for_the_owners_ai_and_what_it_may_set(self):
         said = setupcheck.prompt(self.root)
-        for words in ("/x/bin/xinxiang-setup doctor", "不要让我自己去敲", "不要在对话里问我要密码", "hello --name", "next --driver", "--wait 600"):
+        for words in ("/x/bin/xinxiang-setup doctor", "不要让我自己去敲", "不要在对话里问我要密码", "hello --name", "next --driver",
+                      "gate --driver", "定时任务", "不要用 --wait 守着"):
             self.assertIn(words, said)
+        self.assertNotIn("--wait 600", said)                                    # nobody is asked to stay on the line
         self.assertEqual(setupcheck.parse(["owner_name=王小明", "owner_aliases=小王，明哥", "want_feishu=true", "engine=claude"]),
                          {"owner_name": "王小明", "owner_aliases": ["小王", "明哥"], "want_feishu": True, "engine": "claude"})
         with self.assertRaises(ValueError):

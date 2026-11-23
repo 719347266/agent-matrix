@@ -598,7 +598,9 @@ def cindy_setup_text(root):
     from .workenv import shim_path
     status = cindy_status(root)
     project = status.get("project") or "（你的项目文件夹）"
+    from .aidrivers import pending_secret
     cmd = str(shim_path())
+    secret = pending_secret(root, "cindy")
     return f"""请用你的定时任务工具帮我建（已有同名的就改成下面这样）一个定时任务，替心响做事：
 
 - 名称：{SCHEDULE_NAME}
@@ -615,7 +617,12 @@ def cindy_setup_text(root):
 3. kind 是 item 的，属于当前项目：按本项目的规范、模板和记忆来做；心响只是派活、收交付的系统，不是要做需求的产品。kind 是 meeting、chat、triage、learn 的是整理类的活：只按 instructions 做，不要套用项目模板。
 4. 按 instructions 做，交付文件写到 folder 里；按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
 
-建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查都对就行。"""
+再给这个定时任务打开「Webhook 触发」，让心响有活时马上叫你，不用等到下一个 5 分钟：
+- 发送方选 Standard Webhooks，签名密钥填：{secret}
+- 打开后运行 `{cmd} wake-hook --driver Cindy --url "<这个定时任务的接收地址>"`，它会真叫你一次试通。
+- 你的工具开不了 Webhook 的话，就一步步告诉我在 Cindy 里怎么点：打开「{SCHEDULE_NAME}」→ Webhook 触发 → 发送方 Standard Webhooks → 签名密钥粘贴上面那串 → 复制接收地址，粘到心响「设置 → AI 执行 → 叫醒地址」。
+
+建好后用 schedule_get 读回来给我看一眼：名称、频率、工作目录、前置检查、Webhook 都对就行。"""
 
 
 def open_session(root, config, job_id):

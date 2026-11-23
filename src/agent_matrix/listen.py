@@ -354,18 +354,20 @@ class Listener:
         A failure here is recorded and never stops the other minute jobs."""
         if not config.meeting_watch_enabled or config.intake_mode == "manual":
             return None
-        from .meeting_watch import MeetingQueue, MeetingSource, check
+        from .meeting_watch import MeetingQueue, MeetingSource, check, fetch_ready
         from . import activity
         queue = MeetingQueue(state)
         before = {r["meeting_id"]: r["status"] for r in queue.list()}
         try:
             check(config, MeetingSource(client), queue, now)
+            fetch_ready(config, client, queue, now)   # the transcript, in code, before any AI is woken for it
         except Exception as exc:
             activity.log(self.root, "error", "会议检查出错", detail=f"{type(exc).__name__}: {exc}"[:300], status="failed")
             return None
         rows = queue.list()
         activity.beat(self.root, "会议检查", f"待处理 {sum(r['status'] in {'ready', 'prepared', 'needs_attention'} for r in rows)} 场")
-        new = [r["meeting_id"] for r in rows if r["status"] in {"ready", "needs_attention"} and before.get(r["meeting_id"]) != r["status"]]
+        # a meeting whose transcript could not be fetched went back to waiting: it wakes nobody
+        new = [r["meeting_id"] for r in rows if r["status"] in {"ready", "prepared", "needs_attention"} and before.get(r["meeting_id"]) != r["status"]]
         if new:
             self.wake_worker(config, force=True)
         return new
@@ -466,6 +468,18 @@ class Listener:
                     log("memory", "waiting due", told)
             except Exception as exc:
                 log("memory failed", type(exc).__name__, str(exc)[:200])
+        if self.every("wake", 120):
+            def wake():   # its own thread: checking for items takes the project lock and may take a while
+                try:
+                    from . import wakeup
+                    if not 8 <= datetime.now(TZ).hour < 23 and not wakeup.chosen(self.root):
+                        return
+                    done = wakeup.watch(self.root, load(self.path))
+                    if done:
+                        log("wake", done)
+                except Exception as exc:
+                    log("wake failed", type(exc).__name__, str(exc)[:200])
+            threading.Thread(target=wake, daemon=True, name="xinxiang-wake").start()
         if self.every("expected", 600):
             try:  # 预计会遇到的事: told the day before and on the day (local only; once per day per thing)
                 from . import versions

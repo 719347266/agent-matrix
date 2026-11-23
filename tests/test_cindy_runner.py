@@ -94,7 +94,9 @@ class CindyRunner(unittest.TestCase):
         (self.root / "config.yaml").write_text("{}", encoding="utf-8")
         with patch.object(drive, "install_shim"), redirect_stdout(io.StringIO()) as out:
             self.assertEqual(drive.main(["hello", "--name", "Gemini", "--app", "Gemini CLI", "--model", "gemini-2.5-pro", "--config", str(self.root / "config.yaml")]), 0)
-        self.assertIn('"you": "Gemini"', out.getvalue()); self.assertIn("--wait 600", out.getvalue())
+        said = json.loads(out.getvalue())
+        self.assertEqual(said["you"], "Gemini"); self.assertNotIn("--wait", said["next"])
+        self.assertIn('gate --driver "Gemini"', said["later"])                  # it comes by on a schedule, never stays waiting
         self.assertEqual(drive.kinds_for(self.root, "Gemini"), ["setup", "profile", "organize", "tidy", *drive.SORTING, "item"])
 
     def test_gemini_is_a_local_ai_like_the_others(self):
@@ -142,6 +144,21 @@ class CindyRunner(unittest.TestCase):
             self.assertEqual(drive.main(args), 0)
         with patch.object(drive, "install_shim"), patch("agent_matrix.workenv._check", return_value=(0, {"ready": []})), redirect_stdout(io.StringIO()):
             self.assertEqual(drive.main(args), 2)              # nothing waiting: skip the round, no tokens
+
+    def test_the_gate_answers_for_whichever_ai_asks_and_only_for_its_own_work(self):
+        from agent_matrix import aidrivers
+        aidrivers.hello(self.root, "Codex", app="Cindy", model="GPT-6", take="sort")
+        set_setting(self.root, "engine", "cindy")
+        cfg = self.root / "config.yaml"
+        cfg.write_text("{}", encoding="utf-8")
+        run = lambda *who: drive.main(["gate", *who, "--config", str(cfg)])
+        with patch.object(drive, "install_shim"), patch.object(drive, "has_items_for", return_value=False), \
+             patch.object(drive, "has_sorting_for", return_value="meeting"), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(run("--driver", "Codex"), 0)                    # the meeting waits for Codex
+            self.assertEqual(run(), 2)                                       # Cindy's schedule: not its part
+            self.assertEqual(run("--driver", "Gemini"), 2)                   # someone else: nothing
+        self.assertIn('"work": "meeting"', out.getvalue().splitlines()[0])
+        self.assertTrue([d for d in aidrivers.known(self.root) if d["name"] == "Codex"][0]["online"])   # the gate is a visit
 
     def test_cindy_is_told_which_project_it_works_in(self):
         set_setting(self.root, "cindy_project", "/Users/x/Documents/Studio")

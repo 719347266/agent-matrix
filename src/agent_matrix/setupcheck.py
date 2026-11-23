@@ -107,16 +107,16 @@ def report(root):
     from . import aidrivers
     xin = work_cmd()
     takeover = (f"最省事的办法：你自己来当心响的 AI，不用装别的。运行 `{xin} hello --name \"<你的名字>\" --app \"<你所在的客户端>\" --model \"<你用的模型>\"`，"
-                f"再运行 `{xin} next --driver \"<你的名字>\" --wait 600` 守着领活。做了这一步，这一项下面的步骤就不用做了。")
+                f"再照 `{xin} guide` 建一个每 5 分钟、带前置检查 gate 的定时任务来领活。做了这一步，这一项下面的步骤就不用做了。")
 
     def outside(name, job):
         """An AI that said hello: it does the work for as long as it keeps asking for it."""
         info = next((d for d in aidrivers.known(root) if d["name"] == name), None)
         if info and info["online"]:
-            return {"ok": True, "say": f"{name} 在这儿，正在领活。"}
+            return {"ok": True, "say": f"{name} 在这儿，按定时任务来领活。"}
         return {"ok": False, "say": f"{name} 现在不在{('（上次来是 ' + info['seen'] + '）') if info and info['seen'] else ''}，{job}。", "steps": [
-            f"如果你就是 {name}：运行 `{xin} next --driver \"{name}\" --wait 600`，接着守着领活。",
-            f"如果你是另一个 AI：你来接手。运行 `{xin} hello --name \"<你的名字>\" --app \"<你所在的客户端>\" --model \"<你用的模型>\"`，再运行 `{xin} next --driver \"<你的名字>\" --wait 600`。"]}
+            f"如果你就是 {name}：先运行 `{xin} next --driver \"{name}\"` 把现在的活领完（领到 idle 为止），再看你的定时任务还在不在，不在就照 `{xin} guide` 建一个。",
+            f"如果你是另一个 AI：你来接手。运行 `{xin} hello --name \"<你的名字>\" --app \"<你所在的客户端>\" --model \"<你用的模型>\"`，再照 `{xin} guide` 领活、建定时任务。"]}
 
     def who(chosen, job):
         name = aidrivers.name_in(chosen)

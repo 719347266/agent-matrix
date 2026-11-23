@@ -20,7 +20,7 @@ LAYERS = [
                   "reply", "meeting_watch", "meeting_review", "chat_review", "background", "pastwork", "proactive",
                   "agents", "agents.daily_brief", "agents.meeting_followup", "agents.meeting_prep",
                   "agents.pre_worker", "agents.recurring", "agents.weekly_review"]),
-    ("AI执行", ["engines", "itemwork", "drive", "worker", "sessions", "local_sessions", "cindy_pickup", "aidrivers"]),
+    ("AI执行", ["engines", "itemwork", "drive", "worker", "sessions", "local_sessions", "cindy_pickup", "aidrivers", "wakeup"]),
     ("入口", ["listen", "app", "cli", "winclient", "setupcheck", "update", "scheduled", "monitor", "tray", "commands", "__main__", "__init__"]),
 ]
 LEVEL = {m: i for i, (_, mods) in enumerate(LAYERS) for m in mods}

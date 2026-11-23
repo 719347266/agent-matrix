@@ -646,6 +646,20 @@ def _write_related(root, folder):
     (Path(folder) / "related_items.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _listener_alive(root):
+    from . import meeting_watch
+    from .state import State
+    state = State(Path(root) / "state/state.db")
+    try:
+        beat = state.get("listen:heartbeat")
+    finally:
+        state.close()
+    try:
+        return bool(beat) and now() - meeting_watch.parse_time(beat) < timedelta(minutes=3)
+    except (TypeError, ValueError):
+        return False
+
+
 def _ready_meetings(root, config):
     from . import meeting_watch
     from .itemstore import feishu_free
@@ -857,7 +871,9 @@ def local_kinds(root):
     (all of them when a local AI is chosen in settings, else only those handed to a local AI one by one)."""
     from .aidrivers import LOCAL
     from .thread import setting
-    return [*(("profile", "organize", "tidy") if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sort_runner(root) == "local" else ()), "item"]
+    from .aidrivers import standing_in
+    sorts = sort_runner(root) == "local" or setting(Path(root), "engine_sort", "") in standing_in(root)   # standing in
+    return [*(("profile", "organize", "tidy") if setting(Path(root), "engine", "codex") in LOCAL else ()), *(SORTING if sorts else ()), "item"]
 
 
 def kinds_for(root, driver):
@@ -873,8 +889,10 @@ def item_filter(root, driver, *, builtin=False):
     in settings when that is this one."""
     from . import aidrivers
     from .thread import setting
+    from .aidrivers import standing_in
     table, usual = aidrivers.assignments(root), setting(Path(root), "engine", "codex")
-    return lambda rid: aidrivers.is_mine(table.get(rid) or usual, driver, builtin=builtin)
+    stood = set(standing_in(root)) if builtin else set()   # the built-in driver also takes the work of an AI it stands in for
+    return lambda rid: aidrivers.is_mine(table.get(rid) or usual, driver, builtin=builtin) or (table.get(rid) or usual) in stood
 
 
 def has_sorting_for(root, config):
@@ -882,7 +900,9 @@ def has_sorting_for(root, config):
     from . import thread as conversation
     try:
         taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
-        if any(m.get("status") == "ready" and m["meeting_id"] not in taken for m in _ready_meetings(root, config)):
+        # with the listener running it fetches the transcript first: wake the AI only for one already here
+        fetched = {"prepared"} if _listener_alive(root) else {"ready", "prepared"}
+        if any(m.get("status") in fetched and m["meeting_id"] not in taken for m in _ready_meetings(root, config)):
             return "meeting"
         if _chat_due(root, config):
             return "chat"
@@ -1010,6 +1030,26 @@ def cindy_header(root, job):
             f"- 心响只是给你派活、收交付的系统，不是你要做需求的产品；不要把心响的东西写进交付。\n"
             f"- 回复第一行写「心响 #{job.get('n') or ''} {job.get('title') or ''}」，方便本人在心响里找到这段对话。\n"
             f"- 交付文件写到下面说的工作文件夹（folder）里，做完按末尾的命令交给心响。\n\n")
+
+
+def work_for(root, config, driver):
+    """What this AI would get if it asked now, checked in code before it is woken (a schedule's pre-run check):
+    "setup", "profile", "organize", "tidy", "item", "meeting", "chat", "triage", or None. No model, no job opened."""
+    from . import memory, setupasks, tidy, versions
+    kinds = set(kinds_for(root, driver))
+    for kind, asked in (("setup", setupasks.pending), ("profile", memory.scan_asked), ("organize", versions.organize_asked),
+                        ("tidy", tidy.due)):
+        if kind in kinds and not _busy(root, kind) and asked(root):
+            return kind
+    if has_items_for(root, config, driver):
+        return "item"
+    if kinds & set(SORTING):
+        return has_sorting_for(root, config)
+    return None
+
+
+WORK_WORDS = {"setup": "接入设置", "profile": "「认识你」", "organize": "整理项目和版本", "tidy": "整理记忆",
+              "item": "交给 AI 的事", "meeting": "整理会议", "chat": "整理聊天", "triage": "判断新进来的事"}
 
 
 def has_items_for(root, config, driver="Cindy"):
@@ -1355,7 +1395,7 @@ def hand_over(root, config, record_id, value, *, by, why="", n=None, title="", j
         out["message"] = handoff_message(n, title, target)
         known = {d["name"]: d for d in aidrivers.known(root)}
         if (known.get(aidrivers.name_in(target) or "") or {}).get("online"):
-            out["note"] = f"{to} 正在守着领活，会自己接手；它不在时再把 message 发给它。"
+            out["note"] = f"{to} 会按它的定时任务来领，会自己接手；它一直不来时再把 message 发给它。"
     return out
 
 
@@ -1382,27 +1422,38 @@ def handoff(root, config, job_id, to, why, driver):
 
 GUIDE = """# 接入心响：任何 AI 都可以驱动
 
-你是本人的 AI 员工。循环做下面几步，直到没有活：
+你是本人的 AI 员工。
 
 0. 先说你是谁（只用一次）：`{cmd} hello --name "<你的名字>" --app "<你所在的客户端>" --model "<你用的模型>"`。
    从这一刻起，心响的事和整理都交给你；本人把这段话发给另一个 AI，就换成那个 AI。
-1. 运行 `{cmd} next --driver "<你的名字>" --wait 600 --session "<你这段对话的编号或链接>"`。没活时它会等着，有活立刻返回；
-   返回 `{{"idle": true}}` 就再运行一次，一直守着，直到本人说停。
+1. 领一件活：`{cmd} next --driver "<你的名字>" --session "<你这段对话的编号或链接>"`。
    `--session` 让本人在心响里看到你在做哪件事，并能直接打开你这段对话；没有就省略。
 2. 返回的 JSON 里有 `folder`（工作文件夹）、`instructions`（这件活的完整说明）、`output`（要写出的文件）。
    进入 folder，按 instructions 做；需要飞书资料时用 `lark-cli`（只读）。
 3. 按 instructions 末尾的命令报进度、交活：`{cmd} submit --job <job>`。返回 fix 就按 problem 改好再交。
-4. 回到第 1 步。
+4. 回到第 1 步，直到返回 `{{"idle": true}}`：这一轮就结束。
+
+以后怎么来领活：
+{rounds}
 
 规则：飞书里的东西只读；建文档、改表格、通知本人都由心响做。对外发送、审批、付款、删除只准备材料，不执行。
 每件事的对话历史由心响保存，next 会把它交给你：接着上一个 AI 往下做，不要从头来。
 """
 
 
+def guide_text(cmd):
+    """The guide any AI reads: how to ask for work, and how to come by on a schedule instead of waiting."""
+    from .setupshim import rounds
+    return GUIDE.format(cmd=cmd, rounds=rounds(cmd))
+
+
 def main(argv=None):
     from .config import load
     p = argparse.ArgumentParser(prog="xinxiang", description="心响驱动协议：任何 AI 都能领活、交活")
-    p.add_argument("command", choices=["hello", "next", "step", "say", "submit", "ask", "release", "handoff", "guide", "status", "gate"])
+    p.add_argument("command", choices=["hello", "next", "step", "say", "submit", "ask", "release", "handoff", "guide", "status", "gate",
+                                        "wake-hook"])
+    p.add_argument("--url", help="wake-hook：心响有活时请求这个地址来叫醒你（Standard Webhooks 签名）；空 = 取消")
+    p.add_argument("--secret", help="wake-hook：签名密钥（不给就用心响生成的那串）")
     p.add_argument("--name", help="hello：你是谁（Antigravity、Gemini、Claude Code、Cursor …）")
     p.add_argument("--app", default="", help="hello：你所在的客户端")
     p.add_argument("--model", default="", help="hello：你现在用的模型")
@@ -1423,7 +1474,7 @@ def main(argv=None):
     install_shim(root)
     try:
         if args.command == "guide":
-            print(GUIDE.format(cmd=_cmd()))
+            print(guide_text(_cmd()))
             return 0
         if args.command == "status":
             print(json.dumps({"open": [{k: j[k] for k in ("id", "kind", "title", "driver", "step")} for j in open_jobs(root)],
@@ -1440,39 +1491,43 @@ def main(argv=None):
             print(json.dumps({"ok": True, "you": me["name"],
                               "now": "记下了，交给你的事你来做" if args.helper else {"all": "心响的事和整理都交给你了", "work": "心响的「做事」交给你了",
                                                                                    "sort": "心响的「整理」交给你了"}[args.part],
-                              "next": f'{_cmd()} next --driver "{me["name"]}"' + ("" if args.helper else " --wait 600")}, ensure_ascii=False))
+                              "next": f'{_cmd()} next --driver "{me["name"]}"',
+                              "later": ("" if args.helper else
+                                        f'每 5 分钟来一趟：前置检查 {_cmd()} gate --driver "{me["name"]}"（0 = 有活，2 = 没活跳过），'
+                                        f'有活就运行 next 领到 idle 为止；不要用 --wait 守着。完整说明：{_cmd()} guide')}, ensure_ascii=False))
             return 0
+        if args.command == "wake-hook":
+            # an AI tells 心响 how to wake it: without --url it gets the signing secret to put on its side first
+            name = "Cindy" if args.driver.lower() == "cindy" else aidrivers.clean(args.driver)
+            value = "cindy" if name == "Cindy" else aidrivers.setting_of(name)
+            if value != "cindy" and not aidrivers.is_known(root, name):
+                raise MatrixError(f"{name} 还没报到：先运行 hello。")
+            if args.url is None:
+                print(json.dumps({"ok": True, "secret": aidrivers.pending_secret(root, value),
+                                  "next": f'在你那边的 Webhook 里选 Standard Webhooks、填上这串签名密钥，再运行 {_cmd()} wake-hook --driver "{name}" --url "<接收地址>"'},
+                                 ensure_ascii=False))
+                return 0
+            try:
+                hook = aidrivers.set_hook(root, value, args.url, args.secret)
+            except ValueError as exc:
+                raise MatrixError(str(exc)) from None
+            if not hook:
+                print(json.dumps({"ok": True, "now": f"不再主动叫醒 {name}，等它自己的定时任务来"}, ensure_ascii=False))
+                return 0
+            tried = aidrivers.send_wake(hook, "test")   # one real wake-up: the round it starts finds nothing and ends
+            print(json.dumps({"ok": tried.get("ok", False), "now": f"心响有活时会马上叫醒 {name}" if tried.get("ok") else tried.get("why")},
+                             ensure_ascii=False))
+            return 0 if tried.get("ok") else 1
         aidrivers.seen(root, args.driver)
         config = load(path)
         if args.command == "gate":
-            # a schedule's pre-run check: exit 0 = there is an item to do, 2 = nothing (skip this round, no tokens)
-            from . import setupasks
-            from .aidrivers import is_mine
-            from .thread import setting
-            if setupasks.pending(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "setup"):
-                print(json.dumps({"ok": True, "work": "setup"}, ensure_ascii=False))
-                return 0
-            from . import memory
-            if memory.scan_asked(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "profile"):
-                print(json.dumps({"ok": True, "work": "profile"}, ensure_ascii=False))
-                return 0
-            from . import versions
-            if versions.organize_asked(root) and is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "organize"):
-                print(json.dumps({"ok": True, "work": "organize"}, ensure_ascii=False))
-                return 0
-            from . import tidy
-            if is_mine(setting(root, "engine", "codex"), "Cindy") and not _busy(root, "tidy") and tidy.due(root):
-                print(json.dumps({"ok": True, "work": "tidy"}, ensure_ascii=False))
-                return 0
-            if has_items_for(root, config, "Cindy"):
-                print(json.dumps({"ok": True, "work": "item"}, ensure_ascii=False))
-                return 0
-            sorting = sort_runner(root) == "cindy" and has_sorting_for(root, config)
-            if sorting:
-                print(json.dumps({"ok": True, "work": sorting}, ensure_ascii=False))
-                return 0
-            print(json.dumps({"ok": True, "work": None}, ensure_ascii=False))
-            return 2
+            # a schedule's pre-run check: exit 0 = there is work for this AI, 2 = nothing (skip this round, no tokens).
+            # Cindy's own pickup schedule calls it without a name (only a name given here counts, not one inherited).
+            named = any(a == "--driver" or a.startswith("--driver=") for a in (sys.argv[1:] if argv is None else argv))
+            me = args.driver if named else "Cindy"
+            work = work_for(root, config, me)
+            print(json.dumps({"ok": True, "work": work}, ensure_ascii=False))
+            return 0 if work else 2
         if args.command == "next":
             kinds = [k.strip() for k in (args.kinds or "").split(",") if k.strip()] or None
             only = _record_of(root, args.n) if args.n else None

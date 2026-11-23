@@ -38,6 +38,15 @@ class ChatPolling(unittest.TestCase):
     def poll(self, minutes=0):
         return chats.poll(Config(), self.client, self.state, self.now + timedelta(minutes=minutes))
 
+    def test_an_old_read_position_with_microseconds_is_sent_in_whole_seconds(self):
+        # Feishu's search rejects "…:43.379881+08:00" (99992402) and the whole round failed on one old chat.
+        self.state.set("chats:cursor:3", "2026-11-17T12:27:43.379881+08:00")
+        self.poll()
+        starts = [a[a.index("--start") + 1] for a in (c.args[0] for c in self.client._exec.call_args_list) if "--start" in a]
+        self.assertTrue(starts)
+        self.assertTrue(all(len(x) == len("2026-11-17T12:27:43+08:00") for x in starts), starts)
+        self.assertIn("2026-11-17T12:27:43+08:00", starts)
+
     def test_paused_collectors_and_idle_drivers_do_not_contact_feishu(self):
         from agent_matrix.listen import Listener
         config = Config(chat_watch_enabled=False, wechat_enabled=False, meeting_watch_enabled=True,

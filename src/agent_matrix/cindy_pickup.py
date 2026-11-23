@@ -63,6 +63,10 @@ def latest(root):
                 for rid, receipt, error in db.execute("SELECT rid,receipt,error FROM pickup ORDER BY seq")}
 
 
+LISTEN_SECONDS = 240   # one round, well inside the schedule's 330 s limit; the next round starts at the next 5 minutes
+WAIT_STEP = 15
+
+
 def signal_file(root):
     return Path(root) / "state/cindy-pickup.wake"
 
@@ -113,11 +117,13 @@ def run(root, stdin, stdout, listen=False):
                                   flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
                                   fflags=select.KQ_NOTE_WRITE | select.KQ_NOTE_ATTRIB)
             events.control([watch], 0, 0)
-            deadline = time.monotonic() + 290
-            while time.monotonic() < deadline:
-                while drain() == 10 and time.monotonic() < deadline:
+            # Wall-clock time and short waits: the Mac may sleep in the middle of a round, and Cindy's own 330 s limit
+            # keeps counting while it sleeps, so the round has to notice the lost time soon after waking and end.
+            deadline = time.time() + LISTEN_SECONDS
+            while time.time() < deadline:
+                while drain() == 10 and time.time() < deadline:
                     pass
-                events.control(None, 1, max(0, deadline - time.monotonic()))
+                events.control(None, 1, max(0, min(WAIT_STEP, deadline - time.time())))
     else:
         drain()
     frame("complete", summary="")

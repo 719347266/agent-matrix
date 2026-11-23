@@ -423,7 +423,55 @@ class GeminiRun(CodexRun):
             on_event(event)
 
 
-ENGINES = {"codex": "CodexRun", "claude": "ClaudeRun", "gemini": "GeminiRun"}
+# Providers whose API speaks Claude's format: the Claude command line runs on them with the owner's own key.
+API_PROVIDERS = {
+    "deepseek": {"name": "DeepSeek", "base": "https://api.deepseek.com/anthropic", "model": "deepseek-chat",
+                 "keys": "https://platform.deepseek.com/api_keys"},
+    "kimi": {"name": "Kimi", "base": "https://api.moonshot.cn/anthropic", "model": "kimi-k2-turbo-preview",
+             "keys": "https://platform.moonshot.cn/console/api-keys"},
+    "zhipu": {"name": "智谱 GLM", "base": "https://open.bigmodel.cn/api/anthropic", "model": "glm-4.6",
+              "keys": "https://open.bigmodel.cn/usercenter/apikeys"},
+    "custom": {"name": "自定义", "base": "", "model": "", "keys": ""},
+}
+
+
+def api_target(config):
+    """(provider name, base address, model) of the 模型接口, the owner's own entries winning over the known ones."""
+    known = API_PROVIDERS.get(config.worker_api_provider) or API_PROVIDERS["custom"]
+    return known["name"], (config.worker_api_base_url or known["base"]).strip(), (config.worker_api_model or known["model"]).strip()
+
+
+class ApiRun(ClaudeRun):
+    """模型接口: the Claude command line pointed at the owner's own provider and key (DeepSeek, Kimi, 智谱 …), for owners
+    without a subscription. It keeps its own Claude settings folder, so the owner's Claude account, settings and
+    conversations are neither used nor touched."""
+    THREAD_FILE = ".api-session"
+    NAME = "模型接口"
+
+    def argv(self):
+        name, base, model = api_target(self.config)
+        if not (self.config.worker_api_key and base and model):
+            raise MatrixError(f"模型接口还没填好：{name} 的 API Key、地址和模型都要有。在 设置 → AI 执行 → 模型接口 里填。")
+        plain = self.config.model_copy(update={"worker_mcp_tools": [], "worker_claude_model": model})
+        keep, self.config = self.config, plain
+        try:
+            return super().argv()
+        finally:
+            self.config = keep
+
+    def env(self):
+        env = super().env()
+        _, base, model = api_target(self.config)
+        home = Path.home() / ".agent-matrix" / "claude-api"
+        home.mkdir(parents=True, exist_ok=True)
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.update(ANTHROPIC_BASE_URL=base, ANTHROPIC_AUTH_TOKEN=self.config.worker_api_key, ANTHROPIC_MODEL=model,
+                   ANTHROPIC_DEFAULT_HAIKU_MODEL=model, ANTHROPIC_SMALL_FAST_MODEL=model, CLAUDE_CONFIG_DIR=str(home),
+                   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+        return env
+
+
+ENGINES = {"codex": "CodexRun", "claude": "ClaudeRun", "gemini": "GeminiRun", "api": "ApiRun"}
 
 
 def run_class(name):
@@ -443,10 +491,23 @@ def engine(root, purpose="work"):
     meetings and chats, judging new items and learning rules ("sort"; same as "work" unless chosen)."""
     from . import thread as conversation
     work = conversation.setting(Path(root), "engine", "codex")
-    if work not in ENGINES:   # items done by Cindy: the built-in driver still sorts, with GPT unless chosen
-        work = "codex"
+    if work not in ENGINES:   # items done by Cindy or another app: what the built-in driver does, it does with the fallback AI
+        work = fallback_engine(root) or "codex"
     chosen = conversation.setting(Path(root), "engine_sort", work) if purpose == "sort" else work
-    return run_class(chosen if chosen in ENGINES else work)   # sorting handed to Cindy: what the built-in driver still does itself uses the work AI
+    if chosen not in ENGINES:   # sorting handed to an AI in another app: when the built-in driver stands in, the fallback AI does it
+        chosen = fallback_engine(root) or work
+    return run_class(chosen)
+
+
+def fallback_engine(root):
+    """The local AI that stands in when the AI in another app cannot be woken (设置 → 叫不醒时谁来顶上).
+    Not chosen: the local AI that does the items, else GPT. Chosen "" (不顶上): None."""
+    from . import thread as conversation
+    chosen = conversation.setting(Path(root), "engine_fallback", None)
+    if chosen is None:
+        work = conversation.setting(Path(root), "engine", "codex")
+        return work if work in ENGINES else "codex"
+    return chosen if chosen in ENGINES else None
 
 
 def test_engine(root, config, name):
@@ -465,7 +526,8 @@ def test_engine(root, config, name):
     folder = scratch(root, "engine-test", name)
     (folder / ".last.txt").unlink(missing_ok=True)
     started = time.monotonic()
-    model = {"claude": config.worker_claude_model or "Claude 账号默认", "gemini": config.worker_gemini_model or "Gemini 默认"}.get(name, config.worker_model)
+    model = {"claude": config.worker_claude_model or "Claude 账号默认", "gemini": config.worker_gemini_model or "Gemini 默认",
+             "api": " · ".join(x for x in api_target(config)[::2] if x)}.get(name, config.worker_model)
     try:
         run = Probe(config, folder, effort="low", timeout_minutes=2, ephemeral=True).run("只回复两个字：连通。不要运行任何命令。")
         reply = (folder / ".last.txt").read_text(encoding="utf-8").strip() if (folder / ".last.txt").is_file() else ""
@@ -479,6 +541,10 @@ def test_engine(root, config, name):
             problem = reply[:300]
         if "no longer supported" in problem or "IneligibleTier" in problem or "GEMINI_API_KEY" in problem:
             problem = "Google 已不再让个人账号直接登录这个命令行。到 aistudio.google.com 申请一个 Gemini API Key，填到下面的「API Key」里再测。"
+        elif name == "api" and any(w in problem.lower() for w in ("401", "unauthorized", "invalid api key", "authentication")):
+            problem = "API Key 不对或已失效：到服务商后台重新复制一个填进来。"
+        elif name == "api" and any(w in problem.lower() for w in ("402", "insufficient", "balance", "quota")):
+            problem = "账户余额或额度不够了：到服务商后台充值后再测。"
         elif "login" in problem.lower() or "logged in" in problem.lower() or "unauthorized" in problem.lower() or "401" in problem:
             problem += "（没登录：在终端运行一次这个命令行并登录）"
         result = {"ok": ok, "reply": reply[:60], "error": problem, "seconds": round(time.monotonic() - started, 1)}

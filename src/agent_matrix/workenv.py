@@ -110,7 +110,8 @@ def _env(config):
     if own is not None:
         env["CODEX_HOME"] = str(own)
     env.pop("VIRTUAL_ENV", None)
-    extra = []
+    node = working_node_dir()
+    extra = [node] if node else []   # first, so a broken Homebrew node (a library upgraded under it) is not the one picked up
     lark = shutil.which(config.lark_binary) or (config.lark_binary if os.path.isabs(config.lark_binary) else None)
     if lark:
         extra.append(os.path.dirname(lark))
@@ -120,6 +121,36 @@ def _env(config):
     paths = [*extra, *os.environ.get("PATH", "").split(os.pathsep)]
     env["PATH"] = os.pathsep.join(dict.fromkeys(x for x in paths if x and x.isascii()))
     return env
+
+
+_NODE = {}
+
+
+def node_candidates():
+    """Where a Node.js may be: the owner's PATH first, then the usual installers (n, nvm, volta, Homebrew)."""
+    home = os.path.expanduser("~")
+    dirs = [*os.environ.get("PATH", "").split(os.pathsep), f"{home}/.local/bin", f"{home}/.n/bin", f"{home}/.volta/bin",
+            *sorted(glob(f"{home}/.nvm/versions/node/*/bin"), key=_version_key, reverse=True),
+            "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+    return [d for d in dict.fromkeys(dirs) if d and os.path.isfile(os.path.join(d, "node"))]
+
+
+def working_node_dir():
+    """The folder of a node that really starts. Command-line AIs (Gemini, Claude, Cursor …) run on Node, and a node
+    can be installed but broken (e.g. Homebrew upgraded a library under it): then the AI fails before saying a word."""
+    if "dir" in _NODE:
+        return _NODE["dir"]
+    found = None
+    for d in node_candidates():
+        try:
+            ok = subprocess.run([os.path.join(d, "node"), "-v"], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if ok.returncode == 0 and ok.stdout.startswith("v"):
+            found = d
+            break
+    _NODE["dir"] = found
+    return found
 
 
 def work_base(root):

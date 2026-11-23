@@ -99,6 +99,17 @@ def mentions_all(message):
                for m in message.get("mentions") or [] if isinstance(m, dict)) or "@_all" in str(message.get("content") or "")
 
 
+def _stamp(value):
+    """A saved read position as Feishu accepts it: whole seconds. Older code saved positions with microseconds
+    (…T12:27:43.379881+08:00), which the message search rejects as invalid (99992402) and the whole round fails."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).isoformat(timespec="seconds")
+    except ValueError:
+        return None
+
+
 def poll(config, client, state, now, *, skip_chat_ids=()):
     """Persist the next attempt so a restart or API failure cannot cause a burst."""
     deadline = state.get("chats:next-poll")
@@ -132,7 +143,7 @@ def _poll(config, client, state, now, skip_chat_ids):
     end = (now - timedelta(minutes=5)).isoformat(timespec="seconds")
     cursors = {}
     for cid in eligible:
-        since = state.get("chats:cursor:" + cid)
+        since = _stamp(state.get("chats:cursor:" + cid))
         if not since:
             since = (now - timedelta(hours=2)).isoformat(timespec="seconds")
             state.set("chats:cursor:" + cid, since)

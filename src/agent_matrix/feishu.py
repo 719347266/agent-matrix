@@ -83,7 +83,8 @@ def why_not(exc):
             "cli_unavailable": "找不到飞书命令行（lark-cli）",
             "timeout": "飞书命令行太久没有响应",
             "network": "连不上飞书（网络不通）",
-            "invalid_json": "飞书命令行返回的内容读不懂（可能版本太旧或没登录）"}.get(str(code), f"飞书命令行报错（{code}）")
+            "invalid_json": "飞书命令行返回的内容读不懂（可能版本太旧或没登录）",
+            "no_permission": "你的飞书账号没有查看权限（东西是别人的）"}.get(str(code), f"飞书命令行报错（{code}）")
 
 
 def note_health(state, exc=None):
@@ -99,6 +100,25 @@ def note_health(state, exc=None):
     state.set("feishu:health", {"ok": False, "why": why_not(exc), "at": now.strftime("%m-%d %H:%M"),
                                 "since": was.get("since") if was.get("ok") is False else now.strftime("%m-%d %H:%M"),
                                 "count": (was.get("count", 0) if was.get("ok") is False else 0) + 1})
+
+
+def _envelope(run):
+    """The JSON the command answered with. A failing command may print progress lines on stderr and its JSON on
+    stdout (minutes +detail does), or the other way round: take whichever stream holds the JSON."""
+    streams = (run.stdout,) if run.returncode == 0 else (run.stderr, run.stdout)
+    for text in streams:
+        try:
+            return json.loads(text)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _entry_errors(data):
+    """The `error` of each entry in a batch answer ({"minutes": [{"error": …}]})."""
+    if not isinstance(data, dict):
+        return []
+    return [str(x["error"]) for v in data.values() if isinstance(v, list) for x in v if isinstance(x, dict) and x.get("error")]
 
 
 AUTH_KEEP_SECONDS = 45
@@ -135,17 +155,19 @@ class Feishu:
             raise FeishuError("timeout") from exc
         except OSError as exc:
             raise FeishuError("cli_unavailable") from exc
-        try:
-            d = json.loads(r.stdout if r.returncode == 0 else r.stderr or r.stdout)
-        except (ValueError, TypeError) as exc:
+        d = _envelope(r)
+        if d is None:
             said = (r.stderr or "") + " " + (r.stdout or "")
-            raise FeishuError("network" if proxy_down(said) else "invalid_json", detail=said[:400]) from exc
+            raise FeishuError("network" if proxy_down(said) else "invalid_json", detail=said[:400])
         if not isinstance(d, dict):
             raise FeishuError("invalid_envelope")
         if r.returncode != 0 or d.get("ok") is False:
             e = d.get("error", {}) if isinstance(d.get("error"), dict) else {}
             code = "high-risk-write-refused" if r.returncode == 10 else e.get("code", e.get("subtype", r.returncode))
             said = " ".join(str(e.get(k) or "") for k in ("message", "hint", "detail", "permission_violations", "required_scopes", "missing_scopes"))
+            if not e:   # a batch command (minutes +detail …) puts each failure on its own entry instead
+                said = " ".join(_entry_errors(d.get("data")))[:400]
+                code = "no_permission" if re.search(r"no (read )?permission|permission denied|无权限|没有权限", said, re.I) else code
             raise FeishuError(code, e.get("type") in {"authorization", "authentication"}, scope=scope, detail=said)
         if manifest:
             if d.get("manifest_version") != "v1" or d.get("format") != "ndjson":
