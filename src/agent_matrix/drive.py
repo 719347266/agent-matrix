@@ -595,13 +595,30 @@ def _prepare_meeting(root, config, driver):
     return None
 
 
-def _prepare_chat(root, config, driver):
-    from .chat_review import ChatReview
-    from .workenv import _check, _cli, scratch
+def _chat_due(root):
+    from .workenv import _check
     if _busy(root, "chat"):
-        return None
+        return False
     code, checked = _check(root, "agent_matrix.chat_review")
     if code != 0 or not checked.get("run_model"):
+        return False
+    batch = (checked.get("batch") or {}).get("batch_id")
+    if not batch:
+        return True
+    jid = "chat-" + batch
+    db = _db(root)
+    try:
+        cutoff = (now() - timedelta(minutes=30)).isoformat(timespec="seconds")
+        return not db.execute("SELECT 1 FROM jobs WHERE kind='chat' AND status='failed' AND updated>? "
+                              "AND (id=? OR id GLOB ?) LIMIT 1", (cutoff, jid, jid + "-*")).fetchone()
+    finally:
+        db.close()
+
+
+def _prepare_chat(root, config, driver):
+    from .chat_review import ChatReview
+    from .workenv import _cli, scratch
+    if not _chat_due(root):
         return None
     code, prep = _cli(root, "agent_matrix.chat_review", "prepare")
     if code != 0 or not prep.get("candidates_path"):
@@ -750,10 +767,8 @@ def has_sorting_for(root, config):
         taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
         if any(m.get("status") == "ready" and m["meeting_id"] not in taken for m in checked.get("ready") or []):
             return "meeting"
-        if not _busy(root, "chat"):
-            code, checked = _check(root, "agent_matrix.chat_review")
-            if code == 0 and checked.get("run_model"):
-                return "chat"
+        if _chat_due(root):
+            return "chat"
         if conversation.setting(Path(root), "auto_assign", False) and not _busy(root, "triage"):
             from .itemwork import _pending_new
             from .snapshot import _snapshot
@@ -800,6 +815,16 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
             return _open(root, job, driver)
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
+            continue
+        if kind == "chat":
+            from .state import exclusive_lock
+            try:
+                with exclusive_lock(root / "state" / "chat-claim", wait=0):
+                    job = prepare(root, config, driver)
+                    if job:
+                        return _open(root, job, driver)
+            except MatrixBusy:
+                pass
             continue
         job = prepare(root, config, driver)
         if job:
@@ -937,10 +962,14 @@ def fail(root, job, problem):
     from . import activity, inbox
     job = get(root, job["id"]) if isinstance(job, dict) and "id" in job else job
     job.update(status="failed", lease_until=None)
-    _save(root, job)
+    if not _save(root, job):
+        return _closed(get(root, job["id"]))
     activity.log(root, "error", f"{job.get('title') or job['kind']}：没做成", detail=str(problem)[:300], status="failed")
     try:
-        inbox.add(root, f"job-failed:{job['id']}:{job.get('rounds', 0)}",
+        key = f"job-failed:{job['id']}:{job.get('rounds', 0)}"
+        if job["kind"] == "chat":
+            key = "chat-failed:" + Path(job["ref"]["source"]).name
+        inbox.add(root, key,
                   f"⚠ {job.get('title') or 'AI 的活'}没做成\n原因：{str(problem)[:200]}\n系统会在 30 分钟后自动再试一次；"
                   f"急的话在「系统」页点「立即检查」。", kind="system")
     except Exception as exc:
@@ -988,7 +1017,10 @@ def submit(root, config, job_id, driver=None):
     folder, source = Path(job["folder"]), Path(job["ref"]["source"])
     if (folder / "review.json").is_file():
         shutil.copyfile(folder / "review.json", source / "review.json")
-    code, out = _cli(root, *job["ref"]["validate"])
+    if not (source / "review.json").is_file():
+        code, out = 1, {"error": "AI 还没有生成 review.json，请在当前工作目录写好这份文件再提交。"}
+    else:
+        code, out = _cli(root, *job["ref"]["validate"])
     if code != 0 or not out.get("ok"):
         job["rounds"] += 1
         problem = str(out.get("error") or "review.json 不符合格式")[:300]

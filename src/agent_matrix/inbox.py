@@ -149,7 +149,7 @@ def messages(root, limit=100, unread_only=False):
     db = _db(root)
     try:
         rows = db.execute("SELECT id, at, CASE WHEN key LIKE 'prep-%' THEN 'prep' ELSE kind END, title, summary, blocks, read "
-                          "FROM messages WHERE key!='history-imported' AND key NOT LIKE 'banner-test-%' AND key NOT LIKE 'test-alert-%' " +
+                          "FROM messages WHERE superseded=0 AND key!='history-imported' AND key NOT LIKE 'banner-test-%' AND key NOT LIKE 'test-alert-%' " +
                           ("AND read=0 " if unread_only else "") + "ORDER BY at DESC, id DESC LIMIT ?", (limit,)).fetchall()
     finally:
         db.close()
@@ -164,7 +164,7 @@ def messages(root, limit=100, unread_only=False):
 def unread(root):
     db = _db(root)
     try:
-        return db.execute("SELECT count(*) FROM messages WHERE read=0").fetchone()[0]
+        return db.execute("SELECT count(*) FROM messages WHERE superseded=0 AND read=0").fetchone()[0]
     finally:
         db.close()
 

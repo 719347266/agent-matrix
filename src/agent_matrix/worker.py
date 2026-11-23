@@ -211,6 +211,9 @@ def run_job(root, config, job):
     if run.thread:
         from .sessions import bind
         bind(root, job["id"], run.thread)
+    if job["kind"] == "chat" and run.returncode and not (folder / "review.json").is_file():
+        reason = "AI 运行超时" if run.timed_out else f"AI 命令退出（状态码 {run.returncode}）"
+        return drive.fail(root, job, reason + "，没有生成聊天提取结果 review.json。")
     result = drive.submit(root, config, job["id"])
     if result.get("status") == "fix" and run.thread:
         Run(config, folder, thread=run.thread, effort=config.extract_effort, timeout_minutes=10).run(
@@ -265,7 +268,10 @@ def run_loop(root, config, *, max_jobs=200):
                         failed.add(job["ref"]["record_id"])
                 activity.log(root, "error", f"{name}处理「{str(job.get('title'))[:16]}」出错", detail=str(exc)[:300], status="failed")
                 try:
-                    drive.release(root, config, job["id"])
+                    if job["kind"] == "chat":
+                        drive.fail(root, job, str(exc))
+                    else:
+                        drive.release(root, config, job["id"])
                 except Exception as exc:
                     activity.swallowed(root, "worker.run_loop", exc)
             finally:

@@ -10,6 +10,7 @@ SCHEMAS; never edit a step that has shipped. Steps run once, in order, inside on
 processes starting together cannot half-upgrade a file.
 """
 from pathlib import Path
+import re
 import sqlite3
 import time
 
@@ -31,6 +32,23 @@ def _add_columns(table, *columns):
             if column.split()[0] not in have:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
     return step
+
+
+def _group_chat_failures(db):
+    """Keep the newest alert visible for each legacy chat batch, preserving all rows."""
+    _add_columns("messages", "superseded INTEGER NOT NULL DEFAULT 0")(db)
+    seen = set()
+    for mid, key in db.execute("SELECT id, key FROM messages WHERE key LIKE 'job-failed:chat-chat-%' "
+                               "ORDER BY id DESC").fetchall():
+        match = re.fullmatch(r"job-failed:chat-(chat-\d{8}-\d{4})(?:-[0-9a-f]{12})?:\d+", key)
+        if not match:
+            continue
+        batch = match[1]
+        if batch in seen:
+            db.execute("UPDATE messages SET superseded=1 WHERE id=?", (mid,))
+        else:
+            db.execute("UPDATE messages SET key=? WHERE id=?", ("chat-failed:" + batch, mid))
+            seen.add(batch)
 
 
 # One list per file. Each entry is one upgrade step: SQL statements, or a function taking the connection.
@@ -130,7 +148,7 @@ SCHEMAS = {
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
             at TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
             blocks TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0)""",
-    ]],
+    ], [_group_chat_failures]],
     "activity": [[
         "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, at TEXT, kind TEXT, title TEXT, detail TEXT, status TEXT, ref TEXT)",
         "CREATE TABLE IF NOT EXISTS beats (component TEXT PRIMARY KEY, at TEXT, summary TEXT)",

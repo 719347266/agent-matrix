@@ -19,6 +19,9 @@ COMMIT = re.compile(r"我来|我去|我会|我负责|我晚点|我稍后|我待�
 SMALL_TALK = re.compile(r"^(?:好的?|好嘞|好滴|行|收到|嗯+|哦+|噢+|ok(?:ay)?|谢谢|感谢|多谢|thx|thanks|哈+|呵+|嘿+|:[\w+-]+:|[\W_])*$", re.I)
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
 MAX_CHATS = 25
+POLL_MINUTES = 30
+HISTORY_PAGES = 5
+SEARCH_GROUP = 10
 
 
 def table(state):
@@ -97,22 +100,87 @@ def mentions_all(message):
 
 
 def poll(config, client, state, now, *, skip_chat_ids=()):
-    table(state)
+    """Persist the next attempt so a restart or API failure cannot cause a burst."""
+    deadline = state.get("chats:next-poll")
+    if deadline and now < datetime.fromisoformat(deadline):
+        return {"deferred_until": deadline}
+    failures = state.get("chats:poll-failures", 0)
+    state.set("chats:next-poll", (now + timedelta(minutes=POLL_MINUTES)).isoformat())
+    try:
+        result = _poll(config, client, state, now, skip_chat_ids)
+    except Exception:
+        delay = min(360, POLL_MINUTES * 2 ** min(failures + 1, 4))
+        state.set("chats:next-poll", (now + timedelta(minutes=delay)).isoformat())
+        state.set("chats:poll-failures", failures + 1)
+        raise
+    state.set("chats:poll-failures", 0)
+    state.set("chats:last-poll", now.isoformat())
+    return result
+
+
+def _poll(config, client, state, now, skip_chat_ids):
+    from ..feishu import FeishuError
+    from ..models import MatrixError
     data = client._exec(["im", "+chat-list", "--as", "user", "--types", "p2p,group", "--exclude-muted",
                          "--sort", "active_time", "--page-size", str(MAX_CHATS), "--format", "json"])
     chats = (data.get("items") or data.get("chats") or []) if isinstance(data, dict) else data
     names = owner_words(config)
     exclude = set(skip_chat_ids) | set(state.get("chats:exclude", []))
+    eligible = {c["chat_id"]: c for c in chats[:MAX_CHATS] if c.get("chat_id") and c["chat_id"] not in exclude
+                and not skipped_chat(config, c.get("name") or "")}
+    # Search is indexed asynchronously. Leave the newest five minutes to the next round.
+    end = (now - timedelta(minutes=5)).isoformat(timespec="seconds")
+    cursors = {}
+    for cid in eligible:
+        since = state.get("chats:cursor:" + cid)
+        if not since:
+            since = (now - timedelta(hours=2)).isoformat(timespec="seconds")
+            state.set("chats:cursor:" + cid, since)
+        cursors[cid] = since
+    active = []
+    ids = [cid for cid, since in cursors.items() if datetime.fromisoformat(since) < datetime.fromisoformat(end)]
+    probe = state.get("chats:search-unavailable-until", "") < now.isoformat()
+    for offset in range(0, len(ids), SEARCH_GROUP):
+        group = ids[offset:offset + SEARCH_GROUP]
+        hits = set(group)
+        if probe:
+            try:
+                found = client._exec(["im", "+messages-search", "--as", "user", "--chat-id", ",".join(group),
+                                      "--start", min(cursors[c] for c in group), "--end", end, "--sender-type", "user",
+                                      "--no-reactions", "--page-size", "50", "--format", "json"])
+                messages = found.get("messages")
+                if isinstance(messages, list) and found.get("has_more") is False and all(m.get("chat_id") for m in messages):
+                    hits = {m["chat_id"] for m in messages}
+            except FeishuError as exc:
+                if str(exc.code) not in {"missing_scope", "99991672", "99991679"}:
+                    raise
+                # Older grants can still read histories. Try search again tomorrow.
+                probe = False
+                state.set("chats:search-unavailable-until", (now + timedelta(days=1)).isoformat())
+        for cid in group:
+            if cid in hits or state.get("chats:page:" + cid):
+                active.append(cid)
+            else:
+                state.set("chats:cursor:" + cid, end)
+    # Do not fan out across a busy account. Rotate deferred conversations ahead of recently read ones.
+    active.sort(key=lambda c: state.get("chats:visited:" + c, ""))
     kept = scanned = 0
-    for chat in chats[:MAX_CHATS]:
-        cid, cname = chat.get("chat_id"), str(chat.get("name") or "")
-        if not cid or cid in exclude or skipped_chat(config, cname):
-            continue
+    for cid in active[:HISTORY_PAGES]:
+        chat = eligible[cid]
+        cname = str(chat.get("name") or "")
         muted = muted_chat(config, cname)
         cursor_key = "chats:cursor:" + cid
-        since = state.get(cursor_key) or (now - timedelta(hours=2)).isoformat()
-        got = client._exec(["im", "+chat-messages-list", "--chat-id", cid, "--start", since, "--end", now.isoformat(),
-                            "--order", "asc", "--no-reactions", "--as", "user", "--format", "json"])
+        page_key = "chats:page:" + cid
+        page = state.get(page_key) or {}
+        until = page.get("end", end)
+        args = ["im", "+chat-messages-list", "--chat-id", cid, "--start", cursors[cid], "--end", until,
+                "--order", "asc", "--no-reactions", "--as", "user", "--format", "json"]
+        if page:
+            args += ["--page-token", page["token"]]
+        state.set("chats:visited:" + cid, now.isoformat())
+        got = client._exec(args)
+        if got.get("has_more") and not got.get("page_token"):
+            raise MatrixError("飞书聊天记录还有下一页，但未返回续读位置。")
         messages = got.get("messages") or got.get("items") or []
         history_key = "chats:recent:" + cid
         history = recent_lines(state, history_key)
@@ -133,22 +201,25 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
                             replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
                             broadcast=mentions_all(m))
             if kind and (not muted or kind == "@你"):
-                state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
+                inserted = state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
                     m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
                     "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],
                     json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
-                kept += 1
+                kept += inserted.rowcount
             history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
         state.db.commit()
         state.set(history_key, history[-2:])
-        state.set(cursor_key, now.isoformat())
+        if got.get("has_more"):
+            state.set(page_key, {"end": until, "token": got["page_token"]})
+        else:
+            state.set(cursor_key, until)
+            state.set(page_key, None)
     if kept:
         from .. import activity
         pace = (f"其余 {config.chat_review_every_minutes} 分钟内统一提取" if config.chat_review_every_minutes
                 else f"其余到下一个整理时间（{'、'.join(config.chat_review_times)}）统一提取")
         activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话：@你或带时间、催办的马上提取，{pace}")
-    state.set("chats:last-poll", now.isoformat())
-    return {"chats": len(chats), "messages_scanned": scanned, "candidates": kept}
+    return {"chats": len(chats), "histories_read": min(len(active), HISTORY_PAGES), "messages_scanned": scanned, "candidates": kept}
 
 
 def pending(state):
