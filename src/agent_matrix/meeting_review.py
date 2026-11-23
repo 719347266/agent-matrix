@@ -417,6 +417,13 @@ def publish(config, client, state, review):
     try:  # 经历层: what was decided, asked, required and left waiting, with the words (and old waiting topics come back)
         from . import memory
         memory.record_meeting(client.root,review,meta)
+        from . import hymem   # 记忆增强 (when switched on): the whole outcome of the meeting, to be extracted and reconciled
+        parts=[(label,[getattr(e,"title",None) or e.text for e in entries]) for label,entries in
+               (("定了",review.decisions),("要求",review.requirements),("还没定",review.open_questions),
+                ("在等",getattr(review,"waiting",[]) or []),("要做",review.actions))]
+        text="；".join(f"{label}：" + "、".join(x for x in items if x) for label,items in parts if items)
+        if text:
+            hymem.remember(client.root,"meeting",f"{str(meta.get('start_time') or '')[:10]} 会议《{meta.get('topic') or '会议'}》{text}",ref="meeting:"+review.meeting_id)
     except Exception as exc:
         activity.log(client.root,"error","会议经历没存进记忆",detail=f"{type(exc).__name__}: {exc}"[:200],status="failed")
     return {"ok":True,"meeting_id":review.meeting_id,"task_ids":task_ids,

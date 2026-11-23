@@ -19,7 +19,7 @@ Get-ChildItem "$Out\python" -Filter "python*._pth" | Remove-Item
 # 2. 心响和它的依赖，装进这份 Python 的 site-packages（用同一个小版本的 Python 来装，二进制包才对得上）
 $site = "$Out\python\Lib\site-packages"
 New-Item -ItemType Directory -Force $site | Out-Null
-python -m pip install --disable-pip-version-check --no-warn-script-location --target $site ".[windows]"
+python -m pip install --disable-pip-version-check --no-warn-script-location --target $site ".[windows,memory]"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 # 3. 这份 Python 真的能跑心响吗

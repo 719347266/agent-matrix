@@ -54,6 +54,17 @@ function reset(item) {
   for (const label of ["驱动心响的 AI","接入","数据与通知","问题反馈","版本与更新","更多","都没接","Cindy","只存本机"]) assert.ok(menu.includes(label), label);
   assert.equal((menu.match(/class="cell /g)||[]).length, 6, "six places in the settings, no more");
   assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
+  // 记忆增强: off by default; on → the owner's own endpoint and key, a few suggested providers, a test button
+  evaluate('D.settings.memory_boost={enabled:false,installed:true,presets:{siliconflow:{name:"硅基流动",base_url:"https://api.siliconflow.cn/v1",llm:"deepseek-ai/DeepSeek-V3",embed:"BAAI/bge-m3",dims:1024,key_url:"https://cloud.siliconflow.cn/account/ak"},deepseek:{name:"DeepSeek（向量另配）",base_url:"https://api.deepseek.com",llm:"deepseek-chat",embed:"",dims:1024}},status:{}}');
+  let boost = pane("data");
+  for (const label of ["记忆增强","Hy Memory","关着","boostSave({enabled:true})","心响自己的记忆照常工作"]) assert.ok(boost.includes(label), label);
+  assert.doesNotMatch(boost,/bz-key/, "off: no form");
+  evaluate('D.settings.memory_boost.enabled=true; D.settings.memory_boost.has_key=true; S.boost=null');
+  boost = pane("data");
+  for (const label of ["还没填全","硅基流动","DeepSeek（向量另配）","其他","bz-base","bz-key","已填好（要换就贴新的）","bz-embed","向量用另一家","boostTest()"]) assert.ok(boost.includes(label), label);
+  evaluate('D.settings.memory_boost={...D.settings.memory_boost,ready:true,status:{written:12,waiting:3,stuck:1,error:"401 key 不对"}}');
+  for (const label of ["在用","已写入 12 条，排队 3 条，1 条写不进去","最近出错：401 key 不对"]) assert.ok(pane("data").includes(label), label);
+  evaluate('delete D.settings.memory_boost');
   assert.doesNotMatch(pane("mode"),/自动开工/, "manual mode has nothing to start by itself");
   assert.match(pane("ai"),/codex 命令行/); assert.doesNotMatch(pane("ai"),/claude 命令行/, "only the engines in use");
   // the page is just who does what: 做事 and 整理 each with its own choice, and only the AIs in use show their own setup
@@ -107,7 +118,7 @@ function reset(item) {
   evaluate('D.settings.want_feishu=true');   // the owner means to connect Feishu: that is now a step, and the name is needed
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["me","tools"]); assert.match(evaluate("checkList()"),/你想接飞书/);
   evaluate('D.settings.want_feishu=false');
-  assert.deepEqual(plain("OB.map(o=>o.key)"),["me","tools","ai"], "who you are, where work comes from, then one message to your AI");
+  assert.deepEqual(plain("OB.map(o=>o.key)"),["me","tools","know","ai"], "who you are, where work comes from, what the AI may look at, then one message to your AI");
   // a newer version: one button, and a mark in the sidebar; a copy under development says why it does not update itself
   evaluate('D.system.update={current:"0.4.0",latest:"0.4.1",newer:true,can:true,kind:"client",checked:"11-20 12:00"}');
   let up = pane("update");
@@ -166,8 +177,8 @@ function reset(item) {
   assert.deepEqual(plain("setupProblems()"),[]);
   let any = pane("ai");
   for (const label of ["做事","整理","copySetupPrompt()","Antigravity","gemini-3","在这儿","Claude Code（不在）","setSetting('engine','driver:Claude Code')","copyPart('work')","copyPart('sort')"]) assert.ok(any.includes(label), label);
-  let guide = evaluate('S.ob={step:2}; obView()');
-  for (const label of ["Antigravity 已经接手","gemini-3","开始使用","copySetupPrompt()"]) assert.ok(guide.includes(label), label);
+  let guide = evaluate('S.ob={step:3,started:true}; obView()');
+  for (const label of ["AI 接手","Antigravity 在这儿","copySetupPrompt()","共 ","pg-bar"]) assert.ok(guide.includes(label), label);
   assert.match(evaluate('S.setTab="ai"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">Antigravity</);
   assert.match(evaluate("checkList()"),/做事的 AI：Antigravity/); assert.match(evaluate("checkList()"),/正在领活（gemini-3）/);
   evaluate('D.settings.drivers[0].online=false');
@@ -184,6 +195,48 @@ function reset(item) {
   // rules the AI learned wait on top for the owner's yes or no
   evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
   let mem = evaluate("memPage()");
+  assert.match(mem,/关于你/); assert.match(mem,/<textarea id="prof"/, "nothing written yet: a box to write it, with an example");
+  evaluate('D.memory.profile={text:"岗位：产品经理",at:"11-21 10:00"}'); let mem2 = evaluate("memPage()");
+  assert.match(mem2,/岗位：产品经理/); assert.doesNotMatch(mem2,/<textarea id="prof"/); assert.match(mem2,/S\.profEdit=true/);
+  // 让 AI 认识我: tick the places, agree, the AI looks; its draft waits for the owner
+  evaluate('D.memory.profile={text:""}; S.scanPick=SCAN.filter(x=>scanReady(x[0])).map(x=>x[0])'); let pick = evaluate("memPage()");
+  for (const label of ["让 AI 看哪些地方","飞书近 30 天","本机项目文件夹","微信近期聊天","Cindy/Claude 记忆","同意，开始看","不保存聊天原文"]) assert.ok(pick.includes(label), label);
+  evaluate('S.scanPick=null; D.memory.profile={text:"",scanning:{by:"Antigravity",step:"2/4 看飞书文档"}}'); assert.match(evaluate("memPage()"),/Antigravity 正在认识你<\/b>：2\/4 看飞书文档/);
+  evaluate('D.memory.profile={text:"",draft:{text:"## 岗位和职责\\n产品经理",by:"Antigravity",at:"11-21 10:00"}}'); let dr = evaluate("memPage()");
+  for (const label of ["Antigravity 写好了一份「关于你」草稿","产品经理","useDraft(true)","editDraft()","useDraft(false)"]) assert.ok(dr.includes(label), label);
+  evaluate('D.memory.profile=null');
+  // 项目与版本 and scoped rules
+  assert.match(evaluate("memPage()"),/让 AI 整理项目和版本/, "nothing sorted yet: one button");
+  evaluate("globalThis.keptRules=D.memory.rules");
+  evaluate(`D.memory.versions=[{id:1,project_id:1,project:"观己 App",name:"2.3",status:"current",status_label:"当前",period:"11 月",note:"会员改版",items:[{n:45,title:"定积分规则",status:"完成",by:"AI"}],expected:[{id:7,title:"上线前验收",why:"每个版本都要",status:"open",due:"2026-11-28"}]},{id:2,project_id:1,project:"观己 App",name:"2.2",status:"done",status_label:"已完成",items:[],expected:[]}]; D.memory.verdicts={"通过":3,"退回":1,"要改":0}; D.memory.rules=[{id:9,rule:"方案控制在一屏",why:"#1 退回",source:"AI 学的",scope:"type:方案",scope_name:"做「方案」时",wins:2,losses:1,fresh:false}]`);
+  let ver = evaluate("memPage()");
+  for (const label of ["项目与版本","观己 App","2.3","当前","会员改版","#45","AI 归的","1/1 件做完","预计会遇到","上线前验收",">11-28<","organize({expected:7,status:'done'})","<details class=\"ver\">","重新整理","做「方案」时","通过 2 · 退回 1","近 30 天评审：通过 3 · 退回 1 · 要改 0"]) assert.ok(ver.includes(label), label);
+  evaluate('D.memory.versions=[]; D.memory.verdicts={}; D.memory.rules=globalThis.keptRules');
+  // 效果: below the rules; nothing reviewed yet → one plain line, no chart
+  let eff0 = evaluate("memPage()");
+  assert.match(eff0,/在用的规矩[\s\S]*效果[\s\S]*等你验收几件交付后，这里会显示 AI 做得怎么样/); assert.doesNotMatch(eff0,/一次通过率|<svg/);
+  evaluate(`D.memory.effect={has:true,recent:{total:5,first:4,rate:80},before:{total:4,first:2,rate:50},rounds:0.6,blocked:2,failed:1,
+    weeks:[{start:"09-28",total:0,first:0,rate:null},{start:"10-05",total:1,first:0,rate:0},{start:"10-12",total:2,first:1,rate:50},{start:"10-19",total:1,first:1,rate:100},
+           {start:"10-26",total:1,first:1,rate:100},{start:"11-02",total:2,first:1,rate:50},{start:"11-09",total:1,first:1,rate:100},{start:"11-16",total:1,first:1,rate:100}],
+    by_type:[{name:"方案",total:4,first:3,rate:75,few:false},{name:"报告<b>",total:1,first:1,rate:100,few:true}],by_ai:[{name:"Claude",total:5,first:4,rate:80,few:false}],by_project:[],
+    reasons:[{kind:"太长/格式",count:3,example:"写得太长"},{kind:"方向不对",count:2,example:""},{kind:"缺数据/背景",count:1,example:"没数据"},{kind:"其他",count:1,example:""}]}`);
+  let eff = evaluate("memPage()");
+  for (const label of ["最近 4 周一次通过率 80%","（前 4 周 50%）","<svg","11-16","按交付类型","方案","75%","样本太少","按 AI","Claude","通过前平均要改 0.6 轮","AI 卡住问你 2 次","没做成 1 次","太长/格式","比如「写得太长」","缺数据/背景"]) assert.ok(eff.includes(label), label);
+  assert.ok(!eff.includes("报告<b>") && eff.includes("报告&lt;b&gt;"), "names are escaped");
+  assert.doesNotMatch(eff,/其他 <span/, "only the top three reasons");
+  assert.equal((eff.match(/<rect /g)||[]).length, 8, "one mark per week");
+  evaluate('D.memory.effect={has:true,recent:{total:2,first:1,rate:50},before:{total:0,first:0,rate:null},weeks:[],by_type:[],by_ai:[],reasons:[],blocked:0,failed:0}');
+  assert.match(evaluate("memPage()"),/最近 4 周一次通过率 50%.*（前 4 周 没有验收）/);
+  evaluate('delete D.memory.effect');
+  // 记忆更新: what the daily tidy proposed waits on top, above 关于你; nothing when there is none
+  assert.doesNotMatch(evaluate("memPage()"),/记忆更新/);
+  evaluate(`D.memory.updates=[{id:4,type:"merge_rules",label:"合并规矩",content:"「先给两版」「两版挑」合并成「对外文案先给两版」",why:"说的是一件事"},{id:5,type:"profile",label:"关于你",content:"## 在做的事\\n年卡",why:"最近都在谈",old:"## 在做的事\\n会员"}]`);
+  let upd = evaluate("memPage()");
+  for (const label of ["记忆更新 · 2 条","合并规矩","合并成「对外文案先给两版」","说的是一件事","memUpdate({use:4})","memUpdate({drop:4})","原来：## 在做的事","memUpdate({use:'all'})","全部用上"]) assert.ok(upd.includes(label), label);
+  assert.ok(upd.indexOf("记忆更新") < upd.indexOf("关于你"), "above 关于你");
+  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">3</);
+  await evaluate("memUpdate({drop:4})"); assert.match(evaluate("memPage()"),/记忆更新 · 1 条/);
+  await evaluate("memUpdate({use:'all'})"); assert.doesNotMatch(evaluate("memPage()"),/记忆更新/);
   assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
   assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
@@ -235,8 +288,26 @@ function reset(item) {
     evaluate(`S.ob={step:${step}}`);
     assert.ok(evaluate("obView()").includes(evaluate(`OB[${step}].title`)));
   }
+  // the guide's last step and 今天 show each step the AI is on, how many are left and about how long
+  evaluate('D.settings={...D.settings,engine:"driver:Antigravity",drivers:[{name:"Antigravity",online:true,model:"gemini-3"}],want_feishu:true,setup:{driver:{name:"Antigravity",online:true},asks:{feishu:{at:"x"}},doing:{feishu:{by:"Antigravity",step:"2/4 登录飞书",said:"请在浏览器里点授权"}},gave_up:{}}}; D.system={...D.system,listener:"运行中",record:{feishu_ready:false}}; D.memory={...D.memory,profile:{text:"",asked:{sources:["folders"]}}}');
+  let board = evaluate("progressBoard(setupSteps())");
+  for (const label of ["第 3 步，共 4 步","大约还要 10 分钟","接入飞书","2/4 登录飞书","要你做：请在浏览器里点授权","认识你","排着队"]) assert.ok(board.includes(label), label);
+  evaluate('D.memory.organize={asked:{at:"x"}}'); board = evaluate("progressBoard(setupSteps())");
+  for (const label of ["共 5 步","整理项目和版本","大约还要 14 分钟"]) assert.ok(board.includes(label), label);
+  evaluate('D.memory.organize={}; D.memory.versions=[{id:1}]'); board = evaluate("progressBoard(setupSteps())");
+  assert.match(board,/go\('mem'\)[^>]*>理出 1 个版本，去「记忆」里看/, "finished: one click to see it");
+  evaluate('D.memory.versions=[]; S.organizedNow=false');
+  assert.match(evaluate("todayPage()"),/pg-card/, "today shows the progress while the AI works");
+  evaluate('D.settings.setup={driver:{},asks:{},doing:{},gave_up:{}}; D.settings.want_feishu=false; D.memory.profile={text:"x"}');
+  assert.doesNotMatch(evaluate("todayPage()"),/pg-card/, "nothing going on: no progress card");
+  // who sees the guide: a new owner; an owner from an older guide who was never got to know; the rest only hear what is new
+  for (const [st, known, ob, news] of [[{onboarded:false},false,true,false],[{onboarded:true,guide_version:1},false,true,false],[{onboarded:true,guide_version:1},true,false,true],[{onboarded:true,guide_version:3},true,false,false],[{onboarded:true,guide_version:2},true,false,true]]) {
+    const g = plain(`guideFor(${JSON.stringify(st)}, ${known?'{text:"岗位"}':'{text:""}'})`);
+    assert.deepEqual([g.ob, g.news], [ob, news], JSON.stringify(st)+known);
+  }
+  assert.match(evaluate("newsView()"),/重新走一遍/); evaluate("S.ob=null; S.news=false");
   const last = evaluate('D.settings.drivers=[]; D.settings.engine="codex"; S.ob={step:OB.length-1}; obView()');
-  for (const label of ["等你的 AI 来报到","先进去看看","copySetupPrompt()"]) assert.ok(last.includes(label), label);
+  for (const label of ["等你把那段话发给 AI","先进去用","copySetupPrompt()","大约还要"]) assert.ok(last.includes(label), label);
   assert.doesNotMatch(last,/本机 GPT|本机 Claude|测试连接/, "the newcomer does not choose an engine");
   evaluate("S.ob=null");
   evaluate('S.item=45; byN(45).status="进行中"; document.querySelector("#saybox").value="电话确认了"; sendNote(true)');

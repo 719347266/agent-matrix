@@ -165,7 +165,13 @@ def build_state(root):
     pickups = cindy_pickup.latest(root)
     from . import aidrivers
     handed = aidrivers.assignments(root)
+    from . import versions as version_store
+    in_version = {}
+    for v in version_store.all(root):
+        for x in v["items"]:
+            in_version[x["rid"]] = {"id": v["id"], "name": f"{v['project']} · {v['name']}", "status": v["status_label"]}
     for item in items:
+        item["version"] = in_version.get(item["rid"])
         item["cindy_pickup"] = pickups.get(item["rid"])
         item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
@@ -195,6 +201,7 @@ def build_state(root):
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
                 "engine": thread.setting(root, "engine", "codex"),
                 "onboarded": bool(thread.setting(root, "onboarded", False)),
+                "guide_version": int(thread.setting(root, "guide_version", 0) or 0),   # which first-run guide the owner went through
                 "prework_enabled": _config_flag(root, "prework_enabled"),
                 "worker_mcp": _config_flag(root, "worker_mcp_tools")}
     settings["engine_sort"] = thread.setting(root, "engine_sort", settings["engine"] if settings["engine"] != "cindy" else "codex")
@@ -231,6 +238,11 @@ def build_state(root):
         settings["part_prompts"] = {part: setupshim.part_prompt(part) for part in setupshim.PARTS}   # one part to a second AI
         settings["setup"] = setup_view(root)   # what the owner asked the driving AI to set up, and how far it got
         settings["gemini_key"] = bool(cfg.worker_gemini_api_key)   # only whether one is set; the key itself never leaves the config
+        from . import hymem   # 记忆增强: the settings without the keys, and how far writing has got
+        settings["memory_boost"] = {"enabled": cfg.memory_boost_enabled, "base_url": cfg.memory_base_url, "has_key": bool(cfg.memory_api_key),
+                                    "llm": cfg.memory_llm_model, "embed_base_url": cfg.memory_embed_base_url, "has_embed_key": bool(cfg.memory_embed_api_key),
+                                    "embed": cfg.memory_embed_model, "dims": cfg.memory_embed_dims, "installed": hymem.installed(),
+                                    "ready": hymem.ready(cfg), "presets": hymem.PRESETS, "status": hymem.status(root)}
         settings["me"] = {"name": cfg.owner_name, "aliases": cfg.owner_aliases}
         settings.update(intake_mode=cfg.intake_mode, brief_channel=cfg.brief_channel,
                         sources={"meetings": cfg.meeting_watch_enabled, "chats": cfg.chat_watch_enabled, "tasks": cfg.feishu_tasks_enabled})
@@ -304,7 +316,7 @@ def memory_view(root, items):
                     "quote": (m.get("quote") or "")[:200], "source": m.get("source_title") or "", "at": str(m["at"])[5:16],
                     "wait_for": m.get("wait_for"), "due": (m.get("due") or "")[:10] or None, "status": m.get("status")}
         waiting = [moment(m) for m in memory.moments(root, kind="waiting", limit=40) if m["status"] in {"open", "alerted"}]
-        recent = [moment(m) for m in memory.moments(root, limit=60) if m["kind"] in {"decision", "open_question"}][:20]
+        recent = [moment(m) for m in memory.moments(root, limit=60) if m["kind"] in {"decision", "open_question"} and m["status"] != "stale"][:20]
         history = {}
         for i in items:
             if i["hidden"] or i["status"] in {"完成", "取消"}:
@@ -312,9 +324,37 @@ def memory_view(root, items):
             lines = [moment(m) for m in memory.recall(root, f"{i['title']} {i.get('next') or ''}", limit=4)]
             if lines:
                 history[i["n"]] = lines
-        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent}, "history": history}
+        from .jobstore import open_jobs
+        jobs = open_jobs(root)
+        scanning = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "profile"), None)
+        from . import tidy, versions
+        n_of = {i["rid"]: i for i in items}
+        archive = [{**v, "items": [{"n": n_of[x["rid"]]["n"], "title": n_of[x["rid"]]["title"], "status": n_of[x["rid"]]["status"], "by": x["by"]}
+                                   for x in v["items"] if x["rid"] in n_of]} for v in versions.all(root)]
+        organizing = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "organize"), None)
+        since = (datetime.now(TZ) - timedelta(days=30)).isoformat(timespec="seconds")
+        verdicts = memory.outcomes(root, since=since)
+        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent,
+                           "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning},
+                           "versions": archive, "organize": {"asked": versions.organize_asked(root), "doing": organizing},
+                           "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")},
+                           "effect": _effect(root),
+                           "updates": [{k: u[k] for k in ("id", "type", "label", "content", "why", "created")} | {"old": u["data"].get("old") or ""}
+                                       for u in tidy.updates(root)],
+                           "tidying": next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "tidy"), None)},
+                "history": history}
     except Exception as exc:
         return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
+
+
+def _effect(root):
+    """效果: how the AI's deliverables fared, week by week (stats.py, cached ~10 minutes)."""
+    try:
+        from . import stats
+        return stats.cached(root)
+    except Exception as exc:
+        activity.swallowed(root, "app.effect", exc)
+        return {"has": False}
 
 
 def system_info(root):
@@ -501,6 +541,66 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/commands/dismiss":
                 self.server.commands.dismiss(str(body.get("id") or ""))
                 return self._send(200, {"ok": True})
+            if path == "/api/hymem":  # 记忆增强: save the owner's endpoint and key, test them, or search (for AI jobs)
+                from . import hymem
+                from .config import load as load_config, save as save_config
+                config = load_config(root / "config.yaml")
+                if body.get("search") is not None:
+                    try:
+                        return self._send(200, {"ok": True, "lines": hymem.search(root, config, body["search"], int(body.get("limit") or 8))})
+                    except Exception as exc:
+                        return self._send(200, {"ok": False, "lines": [], "error": f"{type(exc).__name__}: {exc}"[:200]})
+                if body.get("test"):
+                    return self._send(200, hymem.test(root, config))
+                save = body.get("save") or {}
+                fields = {"enabled": "memory_boost_enabled", "base_url": "memory_base_url", "llm": "memory_llm_model",
+                          "embed_base_url": "memory_embed_base_url", "embed": "memory_embed_model", "dims": "memory_embed_dims",
+                          "key": "memory_api_key", "embed_key": "memory_embed_api_key"}
+                was_on = hymem.ready(config)
+                for k, attr in fields.items():
+                    if k not in save or (k in ("key", "embed_key") and not str(save[k] or "").strip()):
+                        continue   # an empty key box keeps the key already saved
+                    v = save[k]
+                    setattr(config, attr, bool(v) if k == "enabled" else int(v or 1024) if k == "dims" else str(v or "").strip()[:300])
+                save_config(root / "config.yaml", config)
+                hymem.mark(root, hymem.ready(config))
+                queued = hymem.backfill(root) if hymem.ready(config) and not was_on else 0   # just switched on: start from what 心响 knows
+                return self._send(200, {"ok": True, "ready": hymem.ready(config), "queued": queued})
+            if path == "/api/profile":  # 关于你: the owner writes or corrects it; every AI reads it before work
+                from . import memory
+                if body.get("scan") is not None:   # 让 AI 认识我: the places the owner ticked
+                    if not body["scan"]:
+                        memory.cancel_scan(root)
+                        return self._send(200, {"ok": True})
+                    try:
+                        memory.ask_scan(root, list(body["scan"]))
+                    except ValueError as exc:
+                        return self._send(400, {"ok": False, "reply": str(exc)})
+                    return self._send(200, {"ok": True, **setup_view(root)["driver"]})
+                if "draft" in body:                # the owner keeps the AI's draft, or throws it away
+                    got = memory.drop_draft(root, use=bool(body["draft"]))
+                else:
+                    got = memory.set_profile(root, body.get("text"))
+                from . import hymem   # 记忆增强: the owner's own account of who they are
+                if got.get("text"):
+                    hymem.remember(root, "profile", "关于本人：\n" + got["text"], ref="profile:" + got.get("at", ""))
+                return self._send(200, {"ok": True, "profile": got})
+            if path == "/api/organize":  # 整理项目和版本: the AI sorts the work; the owner fixes what it got wrong
+                from . import versions
+                from .snapshot import _snapshot
+                if body.get("ask"):
+                    versions.ask_organize(root)
+                    return self._send(200, {"ok": True, **setup_view(root)["driver"]})
+                if body.get("cancel"):
+                    versions.organize_done(root)
+                if body.get("expected") and body.get("status"):
+                    versions.set_expected(root, body["expected"], body["status"])
+                if body.get("n") is not None and "version" in body:   # the owner moves one item (0 = out of any version)
+                    rid = next((r["record_id"] for r in _snapshot(root).get("rows") or [] if str(r.get("编号")) == str(body["n"])), None)
+                    if not rid:
+                        return self._send(400, {"ok": False, "reply": "找不到这件事。"})
+                    versions.place(root, rid, int(body["version"] or 0) or None, by=versions.OWNER)
+                return self._send(200, {"ok": True})
             if path == "/api/rules":
                 from . import memory
                 if body.get("add"):
@@ -512,6 +612,14 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
                 return self._send(200, {"ok": True, "rules": memory.rules(root)})
+            if path == "/api/memory/updates":  # 记忆更新: 用 applies what the daily tidy proposed, 不要 leaves the memory alone
+                from . import tidy
+                pick = lambda v: [u["id"] for u in tidy.updates(root)] if v == "all" else [int(x) for x in (v if isinstance(v, list) else [v])]
+                used, failed = tidy.use(root, pick(body["use"])) if body.get("use") else ([], {})
+                if body.get("drop"):
+                    tidy.drop(root, pick(body["drop"]))
+                return self._send(200, {"ok": not failed, "used": len(used), "failed": {str(k): v for k, v in failed.items()},
+                                        "reply": "；".join(failed.values())[:200], "left": len(tidy.updates(root))})
             if path == "/api/item/new":  # the owner adds an item by hand
                 from . import manual
                 from .models import MatrixBusy, MatrixError
@@ -543,6 +651,22 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, update.start(root))
                 update.check(root, force=True)
                 return self._send(200, {"ok": True, **update.status(root)})
+            if path == "/api/onboard/start":  # the guide's last step: what the owner chose goes to the AI, in order
+                from . import memory, setupasks, thread
+                s = system_info(root)
+                have = {"feishu": bool((s.get("record") or {}).get("feishu_ready")), "slack": bool(s.get("slack")),
+                        "wechat": bool((s.get("wechat") or {}).get("enabled") and (s.get("wechat") or {}).get("installed"))}
+                for tool in [t for t in body.get("tools") or [] if t in have]:
+                    thread.set_setting(root, "want_" + tool, True)
+                    if not have[tool]:
+                        setupasks.ask(root, tool)
+                scan = [x for x in body.get("scan") or [] if x in memory.SCAN_SOURCES]
+                if scan:
+                    memory.ask_scan(root, scan)
+                if body.get("organize"):   # after 认识你: sort the work into project → version
+                    from . import versions
+                    versions.ask_organize(root)
+                return self._send(200, {"ok": True, **setup_view(root)["driver"]})
             if path == "/api/setup":  # 接入飞书 / Slack / 微信, or 剩下没配好的: the AI that drives 心响 does it
                 from . import setupasks, thread
                 what = str(body.get("what") or "")
@@ -690,6 +814,8 @@ class Handler(BaseHTTPRequestHandler):
                     thread.set_setting(root, "builtin_driver", bool(body["builtin_driver"]))
                 if "onboarded" in body:
                     thread.set_setting(root, "onboarded", bool(body["onboarded"]))
+                if isinstance(body.get("guide_version"), int):
+                    thread.set_setting(root, "guide_version", body["guide_version"])
                 switches = ("meeting_watch_enabled", "chat_watch_enabled", "feishu_tasks_enabled", "wechat_enabled")
                 if (body.get("intake_mode") in ("all", "accepted", "manual") or body.get("brief_channel") in ("feishu", "local")
                         or any(k in body for k in switches)):

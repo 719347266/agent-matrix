@@ -103,6 +103,12 @@ foreach ($i in 1..5) { $null = Api "api/state"; Start-Sleep 1 }
 $after = @((Procs "*agent_matrix.listen*") | ForEach-Object { $_.ProcessId })
 Check "连看五次面板，后台还是同一个、没被重启" ($before.Count -ge 1 -and ($before -join ",") -eq ($after -join ",")) "before=$($before -join ',') after=$($after -join ',')"
 
+Write-Host "[3c] 记忆增强（混元 Hy Memory）随安装包带上了"
+$hy = (& "$app\python\python.exe" -c "import hy_memory, chromadb; print('hy ok')" 2>&1 | Out-String)
+Check "安装包里带着混元记忆 SDK，能加载" ($hy -match "hy ok") ($hy.Substring(0, [Math]::Min(300, $hy.Length)))
+$mb = (Api "api/state").settings.memory_boost
+Check "设置里能看到记忆增强，默认关着" ($mb -and $mb.installed -eq $true -and $mb.enabled -eq $false) "installed=$($mb.installed) enabled=$($mb.enabled)"
+
 Write-Host "[4] 用一用"
 $a = Api "api/item/new" @{ title = "整理十二月活动排期"; who = "我"; due = "明天" }
 $b = Api "api/item/new" @{ title = "写季度复盘"; who = "我" }
@@ -154,7 +160,9 @@ $d = Api "api/item/new" @{ title = "改一下首页的按钮文案"; who = "AI";
 $h = Api "api/item/ai" @{ n = $d.n; to = "handoff" }
 Check "这一件单独交给另一个 AI，拿到给它的话" ($h.ok -and $h.message -match "--n $($d.n)" -and $h.message -match "--helper") "$($h.reply)"
 $idle = (& cmd /c "`"$xin`" next --driver Antigravity" 2>&1 | Out-String)
-Check "原来的 AI 不会领走这一件" ($idle -match '"idle": true') $idle
+$other = $null; try { $other = $idle | ConvertFrom-Json } catch { }
+Check "原来的 AI 不会领走这一件（空下来可以去整理记忆）" ($other -and ($other.idle -or ($other.n -ne $d.n -and $other.kind -ne "item"))) ($idle.Substring(0, [Math]::Min(200, $idle.Length)))
+if ($other -and $other.job) { & cmd /c "`"$xin`" release --job $($other.job)" | Out-Null }
 $hello2 = (& cmd /c "`"$xin`" hello --name Cursor --app Cursor --model gpt-5 --helper" 2>&1 | Out-String)
 $raw2 = (& cmd /c "`"$xin`" next --driver Cursor --n $($d.n)" 2>&1 | Out-String)
 $job2 = $null; try { $job2 = $raw2 | ConvertFrom-Json } catch { }

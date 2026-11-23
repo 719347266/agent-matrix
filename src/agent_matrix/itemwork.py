@@ -322,6 +322,12 @@ class Item:
         if str(result.get("reply") or "").strip():   # waits in 心响 for the owner's 发送; never sent from here
             from . import replies
             replies.save(self.root, self.rid, result["reply"])
+        try:   # 记忆增强: what was delivered and its conclusions, for later work to build on
+            from . import hymem
+            hymem.remember(self.root, "deliverable", f"交付「{self.title}」第 {version} 版：{result.get('summary', '')}\n{doc[:1500]}",
+                           ref=f"deliverable:{self.rid}:{version}")
+        except Exception as exc:
+            activity.swallowed(self.root, "itemwork.publish", exc)
         self.done_status("已交付", result["summary"], tokens, url=published["url"])
         return {"record_id": self.rid, "result": "published", "url": published["url"]}
 

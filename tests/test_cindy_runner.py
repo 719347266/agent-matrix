@@ -37,9 +37,9 @@ class CindyRunner(unittest.TestCase):
             self.assertEqual(seen, ["item"])
 
     def test_the_owner_decides_what_cindy_takes_and_the_builtin_driver_takes_the_rest(self):
-        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([], [*drive.SORTING, "item"]))
+        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([], ["profile", "organize", "tidy", *drive.SORTING, "item"]))
         set_setting(self.root, "engine_sort", "cindy")                      # Cindy sorts, a local AI does the items
-        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING], ["item"]))
+        self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING], ["profile", "organize", "tidy", "item"]))
         set_setting(self.root, "engine", "cindy")                           # Cindy does everything
         self.assertEqual((drive.cindy_kinds(self.root), drive.local_kinds(self.root)), ([*drive.SORTING, "item"], ["item"]))  # items handed to a local AI one by one
         seen = []
@@ -75,7 +75,7 @@ class CindyRunner(unittest.TestCase):
             seen.clear()
             aidrivers.hello(self.root, "Antigravity", app="Antigravity", model="gemini-3")
             self.assertEqual((drive.item_runner(self.root), drive.sort_runner(self.root), drive.local_kinds(self.root)), ("driver", "driver", ["item"]))
-            self.assertEqual(drive.kinds_for(self.root, "Antigravity"), ["setup", *drive.SORTING, "item"])
+            self.assertEqual(drive.kinds_for(self.root, "Antigravity"), ["setup", "profile", "organize", "tidy", *drive.SORTING, "item"])
             drive.next_job(self.root, None, "Antigravity")
             self.assertEqual(seen, ["triage", "meeting", "chat", "learn", "item"])
             seen.clear()
@@ -95,7 +95,7 @@ class CindyRunner(unittest.TestCase):
         with patch.object(drive, "install_shim"), redirect_stdout(io.StringIO()) as out:
             self.assertEqual(drive.main(["hello", "--name", "Gemini", "--app", "Gemini CLI", "--model", "gemini-2.5-pro", "--config", str(self.root / "config.yaml")]), 0)
         self.assertIn('"you": "Gemini"', out.getvalue()); self.assertIn("--wait 600", out.getvalue())
-        self.assertEqual(drive.kinds_for(self.root, "Gemini"), ["setup", *drive.SORTING, "item"])
+        self.assertEqual(drive.kinds_for(self.root, "Gemini"), ["setup", "profile", "organize", "tidy", *drive.SORTING, "item"])
 
     def test_gemini_is_a_local_ai_like_the_others(self):
         import json
