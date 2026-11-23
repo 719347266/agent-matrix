@@ -220,7 +220,10 @@ def validate(config, review, root):
                 a.due_date = a.due_phrase = None
         if (getattr(config, "intake_mode", "all") == "accepted" and a.owner_name == config.owner_name
                 and not owner_accepted(config, a, m)):
-            continue  # 全自动: asked of the owner but not taken on by them, so it is not an item
+            if not private(m):
+                continue  # 全自动: asked of the owner in a group but not taken on by them, so it is not an item
+            # someone asked the owner directly: never dropped in silence, it waits for the owner's yes (待确认 + ask)
+            m["handed"] = True
         # A private message is someone talking to the owner: no "宁可漏" there, any confidence is kept.
         if a.confidence >= MIN_CONFIDENCE or private(m):
             kept.append((a, m))
@@ -300,7 +303,13 @@ def publish(config, client, state, review):
                        detail=f"{m['sender_name']}：{m['text'][:120]}", key=key + ":merge", now=datetime.now(TZ))
             merged.append(target.get("编号"))
             continue
-        created.append(gateway.create(task_fields(config, a, m), key, "chat-review")["record_id_list"][0])
+        fields = task_fields(config, a, m)
+        if m.get("handed"):
+            fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
+        created.append(gateway.create(fields, key, "chat-review")["record_id_list"][0])
+        if m.get("handed"):
+            from .thread import judge
+            judge(client.root, created[-1], "ask", f"{m['sender_name']} 私聊找你的，等你确认接不接")
         itemlinks.link_by_number(client.root, rows, created[-1], a.follows)
     state.db.execute("UPDATE chat_candidates SET status='done' WHERE batch=?", (review.batch_id,))
     state.db.commit()
