@@ -119,5 +119,15 @@ class ReplyTests(unittest.TestCase):
                                        encoding="utf-8")
         self.assertNotIn("notify", check_result(work, None)[1] or "")
 
+    def test_an_item_without_a_dedupe_key_still_replies_to_the_slack_message_in_its_source_link(self):
+        link = "https://cwill-global.slack.com/archives/D09D1MVJ97W/p1795404325071989"
+        row = {"去重键": None, "来源链接": f"[{link}]({link})"}                       # markdown link, as stored
+        self.assertEqual(replies.target(row), {"kind": "slack", "channel": "D09D1MVJ97W", "thread_ts": None})
+        self.assertEqual(replies.where(replies.target(row)), "Slack 里回复原消息")
+        self.assertEqual(replies.target({"去重键": "", "来源链接": "https://acme.slack.com/archives/C06T7/p1795085477898239"}),
+                         {"kind": "slack", "channel": "C06T7", "thread_ts": "1795085477.898239"})
+        self.assertIsNone(replies.target({"去重键": "meeting:xyz", "来源链接": link}))   # a real key still decides
+        self.assertIsNone(replies.target({"去重键": None, "来源链接": "https://docs.example.com/x"}))
+
 if __name__ == "__main__":
     unittest.main()

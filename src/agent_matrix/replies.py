@@ -107,15 +107,25 @@ def send_notice(root, config, record_id, text, *, slack_post=None):
     return {"ok": True, "where": "slack"}
 
 
+SLACK_LINK = r"https://[^/\s\])]+\.slack\.com/archives/([A-Z0-9]+)/p(\d{10})(\d{6})(?:\?thread_ts=(\d+\.\d+))?"
+
+
 def target(row):
-    """Where a reply to this item goes, or None."""
+    """Where a reply to this item goes, or None. Read from the 去重键; an item without one (made by hand or from
+    another store) falls back to a Slack message link in its 来源链接."""
     key = str((row or {}).get("去重键") or "")
-    if not key.startswith("chat:"):
+    if key.startswith("chat:"):
+        message = key[len("chat:"):].rsplit(":", 1)[0]
+    elif not key:
+        found = re.search(SLACK_LINK, str((row or {}).get("来源链接") or ""))
+        if not found:
+            return None
+        message = found.group(0)
+    else:
         return None
-    message = key[len("chat:"):].rsplit(":", 1)[0]
     if re.fullmatch(r"om_[A-Za-z0-9_-]+", message):
         return {"kind": "lark", "message_id": message}
-    found = re.match(r"https://[^/]+\.slack\.com/archives/([A-Z0-9]+)/p(\d{10})(\d{6})(?:\?thread_ts=(\d+\.\d+))?", message)
+    found = re.match(SLACK_LINK, message)
     if found:
         channel, ts = found.group(1), f"{found.group(2)}.{found.group(3)}"
         # A DM gets a plain answer; in a channel the answer goes under the message, in its thread.
