@@ -1,6 +1,6 @@
 """Chats → a small pile of candidate messages. Pure code, no model.
 
-Reads the owner's most active chats as the owner (user identity). Every line the owner's account can see goes
+Reads every chat the owner is in, as the owner (user identity), through one cross-chat search per poll. Every line the owner's account can see goes
 to the model, which decides who it is for and whether it is work for the owner (like 数字分身's intake):
 code does not guess from names or ask words, which lose too much ("你们帮忙升级一下" right after the owner
 spoke names nobody). The kind only tells the model what code already knows: 我说的 / @你 / 找你的 (a private
@@ -14,7 +14,8 @@ import re
 # Nothing but an acknowledgement, a laugh, emoji or punctuation: never a request.
 SMALL_TALK = re.compile(r"^(?:好的?|好嘞|好滴|行|收到|嗯+|哦+|噢+|ok(?:ay)?|谢谢|感谢|多谢|thx|thanks|哈+|呵+|嘿+|:[\w+-]+:|[\W_])*$", re.I)
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
-MAX_CHATS = 25
+MAX_CHATS = 25   # Slack: conversations read per poll
+SEEN_KEEP = 2000
 
 
 def table(state):
@@ -93,58 +94,65 @@ def mentions_all(message):
 
 
 def poll(config, client, state, now, *, skip_chat_ids=()):
+    """One cross-chat search per poll (plus a message fetch when anything is new) instead of a call per chat:
+    Lark's API quota is per company (10000 a month on the standard plan) and shared with every other app."""
     table(state)
-    data = client._exec(["im", "+chat-list", "--as", "user", "--types", "p2p,group",  # muted in Lark too: customer groups often are
-                         "--sort", "active_time", "--page-size", str(MAX_CHATS), "--format", "json"])
-    chats = (data.get("items") or data.get("chats") or []) if isinstance(data, dict) else data
+    since = state.get("chats:cursor") or (now - timedelta(hours=2)).isoformat()
+    # The search index lags a little: look back a few minutes more each time; seen ids drop the repeats.
+    # whole seconds: search passes the times to the API as they are, and it refuses fractions (99992402)
+    start = min(datetime.fromisoformat(since), now - timedelta(minutes=10)).isoformat(timespec="seconds")
+    got = client._exec(["im", "+messages-search", "--query", "", "--sender-type", "user", "--start", start,
+                        "--end", now.isoformat(timespec="seconds"), "--page-size", "50", "--page-limit", "4", "--no-reactions",
+                        "--as", "user", "--format", "json"])
+    messages = (got.get("messages") or got.get("items") or []) if isinstance(got, dict) else got or []
     names = owner_words(config)
     exclude = set(skip_chat_ids) | set(state.get("chats:exclude", []))
+    seen = list(state.get("chats:seen", []))
+    seen_set, mine = set(seen), set(state.get("chats:mine", []))
     kept = scanned = 0
-    for chat in chats[:MAX_CHATS]:
-        cid, cname = chat.get("chat_id"), str(chat.get("name") or "")
-        if not cid or cid in exclude or skipped_chat(config, cname):
+    chats = set()
+    for m in sorted(messages, key=lambda m: str(m.get("create_time") or "")):
+        mid, cid, cname = m.get("message_id"), m.get("chat_id"), str(m.get("chat_name") or "")
+        if not mid or mid in seen_set or not cid or cid in exclude or skipped_chat(config, cname):
             continue
-        muted = muted_chat(config, cname)
-        cursor_key = "chats:cursor:" + cid
-        since = state.get(cursor_key) or (now - timedelta(hours=2)).isoformat()
-        got = client._exec(["im", "+chat-messages-list", "--chat-id", cid, "--start", since, "--end", now.isoformat(),
-                            "--order", "asc", "--no-reactions", "--as", "user", "--format", "json"])
-        messages = got.get("messages") or got.get("items") or []
+        seen_set.add(mid)
+        seen.append(mid)
+        chats.add(cid)
+        sender = m.get("sender") or {}
+        text = _text(m)
+        if (sender.get("sender_type") not in (None, "user") or m.get("msg_type") not in {"text", "post"} or not text
+                or skipped_text(config, text)):
+            continue
+        scanned += 1
+        chat_mode = m.get("chat_type") or m.get("chat_mode")
         history_key = "chats:recent:" + cid
         history = recent_lines(state, history_key)
-        mine = set(state.get("chats:mine", []))
-        for m in messages:
-            sender = m.get("sender") or {}
-            text = _text(m)
-            if (sender.get("sender_type") != "user" or m.get("msg_type") not in {"text", "post"} or not text
-                    or skipped_text(config, text)):
-                continue
-            scanned += 1
-            from_owner = sender.get("id") == config.owner_open_id
-            if from_owner:
-                remember_mine(state, "chats:mine", m.get("message_id"))
-                mine.add(m.get("message_id"))
-            kind = classify(text, from_owner=from_owner, chat_mode=chat.get("chat_mode"), names=names,
-                            mentioned=not from_owner and mentions_owner(m, config.owner_open_id),
-                            replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
-                            broadcast=mentions_all(m))
-            if kind and (not muted or kind == "@你"):
-                state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
-                    m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
-                    "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],
-                    json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
-                kept += 1
-            history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
-        state.db.commit()
+        from_owner = sender.get("id") == config.owner_open_id
+        if from_owner:
+            remember_mine(state, "chats:mine", mid)
+            mine.add(mid)
+        kind = classify(text, from_owner=from_owner, chat_mode=chat_mode, names=names,
+                        mentioned=not from_owner and mentions_owner(m, config.owner_open_id),
+                        replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
+                        broadcast=mentions_all(m))
+        if kind and (not muted_chat(config, cname) or kind == "@你"):
+            state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
+                mid, cid, cname, chat_mode, sender.get("id"),
+                "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],
+                json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
+            kept += 1
+        history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
         state.set(history_key, history[-2:])
-        state.set(cursor_key, now.isoformat())
+    state.db.commit()
+    state.set("chats:seen", seen[-SEEN_KEEP:])
+    state.set("chats:cursor", now.isoformat())
     if kept:
         from .. import activity
         pace = (f"其余 {config.chat_review_every_minutes} 分钟内统一提取" if config.chat_review_every_minutes
                 else f"其余到下一个整理时间（{'、'.join(config.chat_review_times)}）统一提取")
         activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话：@你或带时间、催办的马上提取，{pace}")
     state.set("chats:last-poll", now.isoformat())
-    return {"chats": len(chats), "messages_scanned": scanned, "candidates": kept}
+    return {"chats": len(chats), "messages_scanned": scanned, "candidates": kept, "via": "search"}
 
 
 def pending(state):

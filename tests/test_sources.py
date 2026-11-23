@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -300,6 +301,37 @@ class SlackSourceTests(unittest.TestCase):
         a = ChatAction(message_id=rows["Slack · ops"]["message_id"], title="定投放预算", quote="周五前帮忙把投放预算定一下",
                        commitment_phrase="帮忙把投放预算定一下", owner_name="王小明", executor="我", confidence=0.9)
         self.assertEqual(chat_fields(CONFIG, a, rows["Slack · ops"])["来源链接"], rows["Slack · ops"]["message_id"])
+
+    def test_lark_reads_every_chat_with_one_search_call_and_never_repeats_a_line(self):
+        # Lark's API quota is per company (10000 a month): one call per poll, not one per chat.
+        from agent_matrix.sources import chats
+        from agent_matrix.state import State
+        state = State(Path(tempfile.mkdtemp()) / "state.db")
+        msg = lambda mid, cid, cname, who, text, **k: {"message_id": mid, "chat_id": cid, "chat_name": cname,
+            "chat_type": k.get("mode", "group"), "msg_type": "text", "create_time": k.get("at", "2026-11-23 10:00"),
+            "sender": {"id": who, "name": "Yami", "sender_type": "user"}, "content": text, "mentions": k.get("mentions")}
+        found = [msg("om_2", "oc_a", "Aiper 会员群", "ou_y", "那我先把app装上，你们帮忙升级一下？", at="2026-11-23 10:01"),
+                 msg("om_1", "oc_a", "Aiper 会员群", "ou_me", "发个店铺来"),
+                 msg("om_3", "oc_m", "team-rd5-dev", "ou_y", "帮忙 review 一下"),            # muted chat, not @你
+                 msg("om_4", "oc_m", "team-rd5-dev", "ou_y", "@王小明 线上报错了", mentions=[{"id": "ou_me"}]),
+                 msg("om_5", "oc_b", "审批助手", "ou_y", "请审批")]                          # built-in noise
+        calls = []
+        client = SimpleNamespace(root=None, _exec=lambda argv: calls.append(argv) or {"messages": found})
+        config = CONFIG.model_copy(update={"chat_skip_chats": ["team-rd5-dev"]})
+        now = datetime(2026, 11, 23, 10, 5, 0, 123456, tzinfo=TZ)
+        with unittest.mock.patch("agent_matrix.activity.log"):
+            out = chats.poll(config, client, state, now)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][:2], ["im", "+messages-search"])
+            self.assertEqual(calls[0][calls[0].index("--end") + 1], "2026-11-23T10:05:00+08:00")  # no fractions
+            self.assertEqual(out["candidates"], 3)
+            got = {r["message_id"]: r["kind"] for r in chats.pending(state)}
+            self.assertEqual(got, {"om_1": "我说的", "om_2": "群聊", "om_4": "@你"})
+            self.assertEqual(json.loads(dict((r["message_id"], r["context"]) for r in chats.pending(state))["om_2"]),
+                             ["我：发个店铺来"])                                              # read in time order
+            # the next poll looks back a little (search lags) and gets the same lines again: nothing is repeated
+            out = chats.poll(config, client, state, now + timedelta(minutes=10))
+            self.assertEqual((out["messages_scanned"], out["candidates"]), (0, 0))
 
     def test_search_finds_new_lines_in_any_conversation_and_moves_one_cursor(self):
         from agent_matrix.sources import slack

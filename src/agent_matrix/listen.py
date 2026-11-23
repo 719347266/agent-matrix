@@ -431,11 +431,16 @@ class Listener:
                 monitor.save_snapshot(self.root, rows)
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
-        if self.every("chats", 120) and not no_source:
+        # Lark's API quota is per company and small (10000 calls a month on the standard plan): poll every
+        # 10 minutes, working hours only; the first poll of the day catches up on the night.
+        if self.every("chats", 600) and not no_source:
             def chat_poll(config, client, state):
                 from .sources import chats
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
+                hour = datetime.now(TZ).strftime("%H:%M")
+                if hour < config.chat_extract_from or hour >= config.chat_extract_until:
+                    return "off_hours"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
         if self.every("slack", 60):  # search: ~2 calls per poll, well under Slack limits
@@ -448,7 +453,7 @@ class Listener:
                     self.wake_worker(config)  # don't wait for the 2-minute kick; the worker decides if it's time
                 return out
             jobs.append(("slack", slack_poll))
-        if self.every("tasks", 900) and not no_source:
+        if self.every("tasks", 3600) and not no_source:   # hourly: the same company-wide quota
             def tasks(config, client, state):
                 from .sources import feishu_tasks
                 on = config.feishu_tasks_enabled and config.intake_mode != "manual"
