@@ -328,8 +328,12 @@ def main(argv=None):
     args = p.parse_args(argv)
     path = args.config.resolve(); root = path.parent
     try:
-        config = load(path)
         with exclusive_lock(root / "state", wait=0 if args.command == "check" else 90):
+            config = load(path)
+            if args.command != "validate" and not (config.chat_watch_enabled or config.wechat_enabled):
+                print(js({"ok": args.command == "check", "run_model": False, "reason": "paused",
+                          "note": "聊天待办提取已暂停。"}))
+                return 2
             state = State(root / "state/state.db")
             try:
                 now = datetime.now(TZ)
