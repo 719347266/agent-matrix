@@ -88,13 +88,25 @@ def build_state(root):
     from .snapshot import _snapshot
     from .workenv import is_running, read_status
     root = Path(root)
-    snap = _snapshot(root)
+    broken = {}
+
+    def part(name, fn, default):
+        """One part of the page. If it fails the page still opens: that part is left empty and says why."""
+        try:
+            return fn()
+        except Exception as exc:
+            import traceback
+            broken[name] = f"{type(exc).__name__}: {exc}"[:240]
+            activity.swallowed(root, f"app.build_state.{name}", exc)
+            print(f"心响页面「{name}」出错：", traceback.format_exc(), file=sys.stderr, flush=True)
+            return default
+    snap = part("事项", lambda: _snapshot(root), {})
     rows = snap.get("rows") or []
     n_of = {r.get("record_id"): _num(r.get("编号")) for r in rows}
-    history = thread.history(root)
+    history = part("对话记录", lambda: thread.history(root), {})
     from .reply_timing import measure
-    timings, timing_summary = measure(history, datetime.now(TZ))
-    closures = thread.closures(root)
+    timings, timing_summary = part("回复速度", lambda: measure(history, datetime.now(TZ)), ({}, {}))
+    closures = part("完成记录", lambda: thread.closures(root), {})
     try:
         from . import sessions as ai_sessions
         sessions_of, running_sessions = ai_sessions.by_item(root), ai_sessions.running(root)
@@ -122,10 +134,10 @@ def build_state(root):
         joined = {x for pair in linked if rid in pair for x in pair}
         scored = sorted(((similarity(title, t), other) for other, t in titled if other != rid and other not in joined), reverse=True)
         return [n_of[other] for score, other in scored[:3] if score >= 0.45]
-    for r in rows:
+    def add_item(r):   # one item at a time: a broken record is left out and named, the rest still shows
         n = n_of.get(r.get("record_id"))
         if n is None:
-            continue
+            return
         parent = (r.get("父事项") or [None])[0] if isinstance(r.get("父事项"), list) else r.get("父事项")
         url = _url(r.get("交付物链接"))
         item = {"n": n, "rid": r["record_id"], "title": r.get("标题") or "", "who": r.get("执行方") or "", "status": r.get("状态") or "",
@@ -140,7 +152,8 @@ def build_state(root):
                 "before": before_of.get(r["record_id"], []), "after": after_of.get(r["record_id"], []),
                 "ai_linked": ai_of.get(r["record_id"], []),
                 "related": suggest(r["record_id"], r.get("标题") or "") if linked is not None else [],
-                "draft_reply": _draft_reply(root, r), "draft_notice": _draft_notice(root, r)}
+                "draft_reply": part("回复草稿", lambda: _draft_reply(root, r), None),
+                "draft_notice": part("群通知草稿", lambda: _draft_notice(root, r), None)}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -152,6 +165,9 @@ def build_state(root):
         if dv and not any(m["kind"] == "deliver" for m in msgs):
             msgs += [{"at": v["at"], "from": "ai", "kind": "deliver", "text": v["summary"] or "交付", "url": v["url"], "driver": "AI"} for v in dv]
         threads[n], deliverables[n] = msgs, dv
+
+    for r in rows:
+        part(f"事项 #{_num(r.get('编号')) or r.get('record_id')}", lambda r=r: add_item(r), None)
     try:  # which project each item is in: where the owner put it, or a guess shown as a guess
         from . import projects
         project_list, placed = projects.all(root), projects.place(root, rows)
@@ -160,14 +176,14 @@ def build_state(root):
     for item in items:
         item["project"], item["project_by"] = placed.get(item["rid"], (None, None))
     from . import local_sessions
-    external = local_sessions.view(root, sessions_of, running_sessions, items)
+    external = part("本机 AI 会话", lambda: local_sessions.view(root, sessions_of, running_sessions, items), [])
     from . import cindy_pickup
-    pickups = cindy_pickup.latest(root)
+    pickups = part("Cindy 接手", lambda: cindy_pickup.latest(root), {})
     from . import aidrivers
-    handed = aidrivers.assignments(root)
+    handed = part("单件交给的 AI", lambda: aidrivers.assignments(root), {})
     from . import versions as version_store
     in_version = {}
-    for v in version_store.all(root):
+    for v in part("项目和版本", lambda: version_store.all(root), []):
         for x in v["items"]:
             in_version[x["rid"]] = {"id": v["id"], "name": f"{v['project']} · {v['name']}", "status": v["status_label"]}
     for item in items:
@@ -176,8 +192,8 @@ def build_state(root):
         item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
     from . import drive
-    ws, running = read_status(root), is_running(root)
-    jobs = drive.open_jobs(root)
+    ws, running = part("AI 员工状态", lambda: (read_status(root), is_running(root)), ({}, False))
+    jobs = part("正在做的活", lambda: drive.open_jobs(root), [])
 
     def minutes(at):
         try:
@@ -188,15 +204,15 @@ def build_state(root):
               "step": j.get("step") or "", "minutes": minutes(j.get("created"))} for j in jobs]
     current = next((d for d in doing if d["kind"] == "item"), doing[0] if doing else None)
     last = ws.get("last") or None
-    worker = {"running": running or bool(jobs), "current": current, "doing": doing, "drivers": drive.drivers(root),
+    worker = {"running": running or bool(jobs), "current": current, "doing": doing, "drivers": part("AI 列表", lambda: drive.drivers(root), []),
               "queue": [n_of.get(q.get("record_id")) for q in (ws.get("queue") or []) if n_of.get(q.get("record_id"))] if running else [],
               "last": {"n": _num(last.get("n")), "title": last.get("title"), "outcome": last.get("outcome"), "text": last.get("text"),
                        "time": str(last.get("at", ""))[11:16]} if last else None}
     box = [{"id": m["id"], "time": m["time"] if m["day"] == datetime.now(TZ).date().isoformat() else m["day"][5:] + " " + m["time"],
             "title": m["title"], "text": m["summary"], "kind": m["kind"], "n": (m["refs"] or [None])[0], "refs": m["refs"] or [],
             "blocks": m["blocks"], "at": str(m.get("at") or "")[:19], "read": m["read"]}  # blocks: the whole message, opened in place
-           for m in inbox.messages(root, 150)]
-    judged = {n_of[rid]: j for rid, j in thread.judgments(root).items() if n_of.get(rid)}
+           for m in part("动态", lambda: inbox.messages(root, 150), [])]
+    judged = {n_of[rid]: j for rid, j in part("判断记录", lambda: thread.judgments(root), {}).items() if n_of.get(rid)}
     settings = {"auto_assign": bool(thread.setting(root, "auto_assign", False)),
                 "builtin_driver": bool(thread.setting(root, "builtin_driver", True)),
                 "engine": thread.setting(root, "engine", "codex"),
@@ -264,11 +280,12 @@ def build_state(root):
         activity.swallowed(root, "app.build_state", exc)
     return {"demo": False, "page": page_version(), "today": datetime.now(TZ).date().isoformat(), "generated_at": datetime.now(TZ).strftime("%H:%M:%S"),
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
-            "guide": drive.guide_text(str(drive.shim_path())),
-            **memory_view(root, items),
+            "guide": part("接入说明", lambda: drive.guide_text(str(drive.shim_path())), ""),
+            **part("记忆", lambda: memory_view(root, items), {}),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
-            "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}, "bugs": _bugs(root)}
+            "system": {**part("系统状态", lambda: system_info(root), {}), "store": part("存储", lambda: store_info(root), {}),
+                       "update": part("版本更新", lambda: _update_status(root), {})}, "bugs": _bugs(root), "broken": broken}
 
 
 def _draft_notice(root, row):
@@ -538,6 +555,8 @@ class Handler(BaseHTTPRequestHandler):
                 commands = self.server.commands.recent()
                 return self._send(200, {**build_state(self.server.root), "commands": commands})
             except Exception as exc:
+                import traceback
+                print("心响页面数据出错：", traceback.format_exc(), file=sys.stderr, flush=True)   # into logs/listen.log
                 return self._send(500, {"error": f"{type(exc).__name__}: {exc}"[:300]})
         return self._send(404, {"error": "not found"})
 

@@ -130,5 +130,15 @@ const response=data=>({ok:true,status:200,json:async()=>clone(data)});
   await brief.run('apply(1,"done",null)');
   assert.equal(sent[1][1].text,"1 完成");
   assert.match(brief.run("inboxPage()"),/disabled/,"the brief's button waits like the list's");
-  console.log("Live client checks passed: immediate feedback, double click, verified success, lost acknowledgement, reload, safe retry, stale response.");
+  // the page says why it cannot show anything: the service answered with an error (its own words), or is not there at all
+  const broken=harness(async url=>url==="/api/state"?{ok:false,status:500,json:async()=>({error:"KeyError: 'superseded'"})}:response({}));
+  await broken.run("load()");
+  assert.match(broken.run("demoBar()"),/后台出错了：KeyError: &#39;superseded&#39;|后台出错了：KeyError: 'superseded'/);
+  const gone=harness(async()=>{ throw new TypeError("Failed to fetch"); });
+  await gone.run("load()");
+  assert.match(gone.run("demoBar()"),/后台程序没在运行/);
+  const partly=harness(async url=>response({...base,broken:{"本机 AI 会话":"OSError: no such folder"}}));
+  await partly.run("load()");
+  assert.match(partly.run("demoBar()"),/有 1 部分这次没读出来：本机 AI 会话（OSError: no such folder）/);
+  console.log("Live client checks passed: immediate feedback, double click, verified success, lost acknowledgement, reload, safe retry, stale response, why it failed.");
 })().catch(e=>{console.error(e);process.exitCode=1});

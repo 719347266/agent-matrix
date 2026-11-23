@@ -528,19 +528,19 @@ async function api(path, body, ms=12000){
     const r=await fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Xinxiang-Token":TOKEN},
       ...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
     const data=await r.json();
-    if(!r.ok){ const e=new Error(data.reply||data.error||("服务返回 "+r.status)); e.confirmed=r.status===400; throw e; }
+    if(!r.ok){ const e=new Error(data.reply||data.error||("服务返回 "+r.status)); e.confirmed=r.status===400; e.status=r.status; throw e; }
     return data;
   } finally { clearTimeout(timer); }
 }
-let failing = false, loadSequence=0, refreshTimer, newestSeen=0;
+let failing = false, failWhy = null, loadSequence=0, refreshTimer, newestSeen=0;
 /* never reload under the owner's hands: something typed and not yet sent, or the first-run guide is open */
 function midEdit(){ return !!S.ob||!!S.bugging||!!S.adding||!!S.moving||!!S.picking||!!S.newProj||!!S.dvEdit||[...document.querySelectorAll("input,textarea")].some(f=>f.id!=="q"&&f.type!=="password"&&f.value&&f.value!==f.defaultValue); }
 async function load(){
   const seq=++loadSequence;
   try{ const data=await api("/api/state"); if(seq!==loadSequence)return;
     if(PAGE&&data.page&&data.page!==PAGE&&!midEdit()){ location.reload(); return; }  // the page itself was updated
-    D=data; TODAY=D.today; failing=false; syncCommands(); announce(); }
-  catch(e){ if(seq!==loadSequence)return; failing=true; }
+    D=data; TODAY=D.today; failing=false; failWhy=null; syncCommands(); announce(); }
+  catch(e){ if(seq!==loadSequence)return; failing=true; failWhy=e&&e.status?{status:e.status,text:String(e.message||"")}:null; }
   if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item or the inbox
   clearTimeout(refreshTimer);
   if(!document.hidden) refreshTimer=setTimeout(load,commands().some(waiting)?1500:S.ob&&OB[S.ob.step]?.key==="ai"||(D&&setupBusy())?2500:60000);   // waiting for the AI to say hello: look often
@@ -2252,7 +2252,18 @@ async function decide(id, allow){
   try{ await api("/api/approval",{id,allow,note}); toast(allow?"已批准，AI 继续":"已拒绝，AI 会换个做法或停下问你"); }catch(e){ toast(e.message||"没提交成功"); }
   load();
 }
-function demoBar(){ if(LIVE) return failing ? `连不上本机的心响服务。确认常驻监听程序在运行（菜单栏 ⋯ → 重启监听）。` : ""; if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
+/* what went wrong, said plainly: the service is not running at all, or it answered with an error (then its own words) */
+function failText(){
+  if(failWhy&&failWhy.status===403) return `这个窗口和本机的心响对不上了：关掉窗口，重新打开心响。`;
+  if(failWhy) return `心响的后台出错了：${esc(failWhy.text)}。详细记录在数据目录的 logs/listen.log，把这句话发给开发者就能查。`;
+  return `连不上本机的心响服务：后台程序没在运行。Windows 在托盘图标上右键「退出」再重新打开心响；Mac 在菜单栏点 ⋯ →「重启监听」。`;
+}
+/* parts of the page that could not be read this time: the rest still works, and these say why */
+function brokenText(){
+  const b=(D&&D.broken)||{}, keys=Object.keys(b); if(!keys.length) return "";
+  return `有 ${keys.length} 部分这次没读出来：${keys.slice(0,3).map(k=>`${esc(k)}（${esc(b[k])}）`).join("；")}${keys.length>3?" 等":""}。其余照常能用；详细记录在 logs/listen.log。`;
+}
+function demoBar(){ if(LIVE) return failing ? failText() : brokenText(); if(!D.demo) return ""; return `原型：数据来自你的真实事项（${esc(D.generated_at)} 只读），按钮只在页面里模拟。演示：<label><input type="checkbox" ${S.blocked?"checked":""} onchange="demoBlock(this.checked)"> AI 卡住</label><label><input type="checkbox" ${S.working?"checked":""} onchange="demoWork(this.checked)"> AI 正在做</label>`; }
 function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={status:i.status,blocker:i.blocker,tried:i.tried}; Object.assign(i,{status:"卡住",blocker:"缺广告归因的实付和退款，收入 ROI 算不出来。能给一份收入导出吗？",tried:"数据平台查了两次都被限流；搜了飞书文档和群聊，没有收入明细"}); } else if(S.blocked){ Object.assign(i,S.blocked); S.blocked=null; } render(); }
 function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
 /* after drawing: in every list, give the status column and the button column the width of their widest entry */
@@ -2276,7 +2287,7 @@ function render(){
   putHTML("#actions",commandView());
   for(const b of document.querySelectorAll("[data-n]")) b.disabled=!!pendingFor(Number(b.dataset.n));
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
-  $("#demo").className=(D.demo||failing)?"demo":""; $("#demo").innerHTML=demoBar();
+  $("#demo").className=(D.demo||failing||brokenText())?"demo":""; $("#demo").innerHTML=demoBar();
   if(!S.view) S.view="today";
   if(S.ob===undefined&&D.settings){ const g=guideFor(D.settings,(D.memory||{}).profile); S.ob=LIVE&&g.ob?{step:0,again:!!D.settings.onboarded}:null; S.news=LIVE&&g.news; }   // decided once the settings are read
   if(S.item&&!byN(S.item)) S.item=null;
