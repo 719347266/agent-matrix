@@ -15,6 +15,10 @@ class Config(BaseModel):
     base_url: str = ""
     tables: dict[str, str] = Field(default_factory=dict)
     lark_binary: str = "lark-cli"
+    lark_brand: Literal["feishu", "lark"] = "feishu"
+    # Items stay on this computer (item_store: device / notion) but Feishu/Lark is still read like Slack:
+    # meetings, chats and tasks come in; nothing is written to a Feishu table.
+    feishu_as_source: bool = False   # "lark": the international Lark (larksuite.com); same as lark-cli's --brand
     timeout_seconds: int = Field(default=60, ge=5, le=300)
     llm_backend: Literal["disabled", "cindy_current"] = "disabled"
     transcripts_to_llm_allowed: bool = False
@@ -93,6 +97,8 @@ class Config(BaseModel):
     # (safe mode). Non-empty: the owner's own hooks/plugins stay off, only these MCP tools are allowed.
     worker_mcp_tools: list[str] = Field(default_factory=list)
     worker_claudeai_mcp: bool = False  # also the claude.ai connectors (they shadow same-server plugins until signed in)
+    # exact MCP tool names let through the send/create ban (e.g. Slack's send, for cw5-pr-notify); asked in 开发模式
+    worker_mcp_send: list[str] = Field(default_factory=list)
     worker_concurrency: int = Field(default=10, ge=1, le=20)  # jobs the built-in GPT works on at the same time
 
     @model_validator(mode="after")

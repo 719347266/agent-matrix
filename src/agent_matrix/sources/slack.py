@@ -24,6 +24,17 @@ def token(config):
     return config.slack_token or os.environ.get("SLACK_USER_TOKEN", "")
 
 
+def post(tok, method, **params):
+    """A write (chat.postMessage): form body, not the query string. Only replies.send uses it, after the owner said so."""
+    req = Request(API + method, data=urlencode({k: v for k, v in params.items() if v is not None}).encode(),
+                  headers={"Authorization": "Bearer " + tok, "Content-Type": "application/x-www-form-urlencoded"})
+    with urlopen(req, timeout=30) as resp:
+        data = json.load(resp)
+    if not data.get("ok"):
+        raise MatrixError(f"Slack {method} 失败：{data.get('error')}")
+    return data
+
+
 def call(tok, method, **params):
     req = Request(API + method + "?" + urlencode({k: v for k, v in params.items() if v is not None}),
                   headers={"Authorization": "Bearer " + tok})

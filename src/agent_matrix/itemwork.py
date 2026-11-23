@@ -61,6 +61,12 @@ def check_result(workdir, row):
     summary = str(result.get("summary") or "").strip()
     if not summary or len(summary) > 40:
         return result, "summary 要有，且不超过 40 字。"
+    if result.get("reply") is not None and (not isinstance(result["reply"], str) or len(result["reply"]) > 2000):
+        return result, "reply 是要发给对方的原话，文字，不超过 2000 字；不用回复就不写这一项。"
+    notice = result.get("notify")
+    if notice is not None and not (isinstance(notice, dict) and re.fullmatch(r"[CG][A-Z0-9]{6,}", str(notice.get("channel") or ""))
+                                   and isinstance(notice.get("text"), str) and 0 < len(notice["text"].strip()) <= 2000):
+        return result, 'notify 是群通知：{"channel": "Slack 频道 ID（C 开头）", "label": "#频道名", "text": "原话，不超过 2000 字"}；不用通知就不写这一项。'
     if len(str(result.get("confirmation") or "")) > 30:
         return result, "confirmation 不超过 30 字。"
     if not result.get("sources"):
@@ -317,6 +323,12 @@ class Item:
             self.root, self.rid, summary=result.get("summary", ""), url=published["url"], confirm=result.get("confirmation", ""),
             assumptions=conversation.assumptions_of(doc), sources=[x for x in result.get("sources", []) if str(x).startswith("http")])
         add_note(self.root, self.rid, f"已交付 v{version}：{published['url']}；{result.get('note', '')}")
+        if str(result.get("reply") or "").strip():   # waits in 心响 for the owner's 发送; never sent from here
+            from . import replies
+            replies.save(self.root, self.rid, result["reply"])
+        if isinstance(result.get("notify"), dict):   # a group notice (e.g. PR is up): also waits for 发送
+            from . import replies
+            replies.save_notice(self.root, self.rid, result["notify"])
         try:   # 记忆增强: what was delivered and its conclusions, for later work to build on
             from . import hymem
             hymem.remember(self.root, "deliverable", f"交付「{self.title}」第 {version} 版：{result.get('summary', '')}\n{doc[:1500]}",

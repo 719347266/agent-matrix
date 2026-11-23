@@ -435,6 +435,8 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .sum.bad{background:var(--red-soft)}.sum.todo{background:var(--amber-soft)}.sum b{font-size:15px}.sum span{color:var(--ink2);font-size:12.5px}.sum .btn{margin-left:auto}
 .inner-list{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--field)}
 .dv-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border-top:1px solid var(--line2)}
+.dv-row>:only-child{grid-column:1/-1}   /* a sent reply / notice is one block: the full row, not the 30px number column */
+.d-body .d-sec{padding-left:0;padding-right:0}   /* reply / notice inside the conversation: d-body already pads */
 .dv-row:first-child,.dv-form:first-child{border-top:0}.dv-row b.cur{color:var(--brand)}.dv-row .acts{flex-wrap:nowrap}
 .dv-form{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line2)}.dv-form input{width:100%}
 /* a narrow window: the options sit under the menu, and a row's control drops under its text instead of squeezing it */
@@ -788,7 +790,8 @@ function inboxBucket(m){
 function inboxRow(m,list){
   const one=itemOf(m), unread=one?unreadOf(one.n).length>0:!m.read, more=one?list.filter(x=>itemOf(x)===one).length-1:0;
   const [k,c,title,sub]=inboxText(m,one), opens=!one&&hasBody(m), open=opens&&S.openMsg===m.id;
-  const click=one?`openItem(${one.n})`:opens?`openMsg(${m.id})`:"";
+  // a bare notice (no item, nothing to unfold) still clicks: it is read, and it goes to the page it names
+  const click=one?`openItem(${one.n})`:opens?`openMsg(${m.id})`:`readMsg(${m.id})`;
   const join=m.kind==="prep"&&meetingSoon(m)&&(leadOf(m).match(MD_LINK)||[])[2];
   const acts=join?`<a class="btn pri" href="${esc(join)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">进入会议</a>`
     :one?rowButtons(one).map(b=>btn(one,b)).join(""):opens?`<span class="fold">${open?"收起":"展开"}</span>`:"";
@@ -810,6 +813,12 @@ function inboxPage(){
   return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('today')">‹ 今天</button>${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
     ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天发生的",groups.today,all?"":"今天还没有新动态。")}
     ${all?sec("更早",groups.old,""):groups.old.length?`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxTab='全部';render();return false">查看更早的 ${groups.old.length} 条</a></p>`:""}`;
+}
+function readMsg(id){
+  const m=D.inbox.find(x=>x.id===id); if(!m) return;
+  if(!m.read){ m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); announce(); }
+  if(/「记忆」/.test(String(m.title)+String(m.text||""))) return go("mem");
+  render();
 }
 function openMsg(id){ const m=D.inbox.find(x=>x.id===id); if(!m) return; if(!m.read){ m.read=true; if(LIVE) api("/api/read",{ids:[id]}).catch(()=>{}); announce(); } S.openMsg=S.openMsg===id?null:id; render(); }
 
@@ -1805,7 +1814,10 @@ function storeLine(t, mode){
 async function retryBackup(){ try{ await api("/api/backup/retry",{}); toast("已重新排队备份"); }catch(e){ toast("暂时连不上服务"); } load(); }
 
 /* ---------- one item: what it is, what to do now, the whole conversation ---------- */
-function openItem(n){ if(!byN(n)) return; if(S.item!==n){ S.tab="talk"; S.mode="ai"; } S.item=n; S.inline=null; markItemRead(n); render(); const d=$("#detail"); if(d) d.scrollTop=0; if(!wide()) window.scrollTo(0,0); }
+function openItem(n){ if(!byN(n)) return; if(S.item!==n){ S.tab="talk"; S.mode="ai"; } S.item=n; S.inline=null; markItemRead(n); render(); const d=$("#detail");
+  // the conversation opens at its newest message, like a chat (a reply / notice waiting for 发送 sits right there,
+  // at the end of it); other tabs start at the top
+  const end=S.tab==="talk"; if(d) d.scrollTop=end?d.scrollHeight:0; if(!wide()) window.scrollTo(0,end?document.documentElement.scrollHeight:0); }
 function closeItem(){ S.item=null; S.inline=null; render(); }
 function pastOf(i){
   const past=(D.history||{})[i.n]||[];
@@ -1952,7 +1964,7 @@ function itemView(i){
     ${aiPickView(i)}${chainView(i)}${deliverView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
     <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
-    <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
+    <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)+replyView(i)+noticeView(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
 }
 /* ---------- 这一件交给哪个 AI：默认是设置里选的那个，单独换只影响这一件 ---------- */
@@ -1960,7 +1972,10 @@ const HANDOFF="handoff";
 function aiOfItem(i){
   const st=D.settings||{}, mine=i.ai_for;
   const name=mine===HANDOFF?"等另一个 AI 来接":mine?engName(mine):engName(st.engine||"codex");
-  return `<button class="proj-chip" onclick="S.aiPick=S.aiPick===${i.n}?null:${i.n};S.handoff=null;render()" title="只换这一件">${esc(name)}</button>${mine&&mine!==HANDOFF?`<span class="quiet-link" style="margin:0">只这一件</span>`:""}`;
+  // the built-in Claude's own conversation on this item: open it in Claude to take over when the AI keeps missing
+  const claude=(i.sessions||[]).find(s=>s.engine==="claude"&&s.can_open&&!s.local&&!s.link);
+  const take=claude?`<button class="quiet-link" style="margin:0 0 0 6px;border:0;background:none;padding:0" data-job="${esc(claude.job)}" onclick="event.stopPropagation();openSession(this.dataset.job)" title="接着这件事的对话，在 Claude 里自己跟它说。AI 正在做时最好等这一轮做完再说话，免得两边同时写一段对话">在 Claude 里打开 ↗</button>`:"";
+  return `<button class="proj-chip" onclick="S.aiPick=S.aiPick===${i.n}?null:${i.n};S.handoff=null;render()" title="只换这一件">${esc(name)}</button>${mine&&mine!==HANDOFF?`<span class="quiet-link" style="margin:0">只这一件</span>`:""}${take}`;
 }
 function aiPickView(i){
   const st=D.settings||{}, h=S.handoff&&S.handoff.n===i.n?S.handoff:null;
@@ -1981,6 +1996,50 @@ async function handTo(n,to){
     await load(); }
   catch(e){ toast(e.message||"没换成，连不上本机服务"); render(); }
 }
+/* ---------- 回复对方：AI 起草，本人看过、可以改，点「发送」才以本人身份回到原消息下面 ---------- */
+function replyView(i){
+  const r=i.draft_reply; if(!r) return "";
+  if(r.status==="sent") return `<div class="d-sec" style="padding-top:14px"><h3>已回复对方</h3><div class="inner-list"><div class="dv-row"><div style="min-width:0"><div class="t wrap">${linkify(r.text)}</div><div class="s">${esc(String(r.sent_at||"").slice(5,16).replace("T"," "))} 发出</div></div></div></div></div>`;
+  const can=!!r.where;
+  return `<div class="d-sec" style="padding-top:14px"><h3>要回给对方的话<span class="hint" style="margin:0 0 0 8px;font-weight:400">${can?`AI 起草，你点「发送」才会以你的身份在${esc(r.where)}`:"这件事不是从 Lark / 飞书或 Slack 的消息来的，复制过去自己发"}</span></h3>
+    <textarea id="reply-${i.n}" data-draft="reply-${i.n}" rows="5" style="width:100%" aria-label="要回给对方的话">${esc(r.text)}</textarea>
+    <div class="acts" style="margin-top:6px">${can?`<button class="btn pri" onclick="sendReply(${i.n})">发送</button>`:""}<button class="btn" onclick="copyReply(${i.n})">复制</button><button class="btn ghost" onclick="dropReply(${i.n})">不发</button></div></div>`;
+}
+function replyText(n){ const el=$("#reply-"+n); return String(el?el.value:(byN(n).draft_reply||{}).text||"").trim(); }
+async function sendReply(n){
+  const i=byN(n), text=replyText(n); if(!text) return toast("回复是空的");
+  if(!LIVE) return toast("原型：不会真的发出去");
+  try{ await api("/api/reply/send",{rid:i.rid,text},40000); drafts.delete("reply-"+n); toast("已发出"); }catch(e){ toast(e.message||"没发出去"); }
+  load();
+}
+async function dropReply(n){
+  const i=byN(n);
+  if(LIVE){ try{ await api("/api/reply/drop",{rid:i.rid}); }catch(e){ return toast(e.message||"没改成"); } } else i.draft_reply=null;
+  drafts.delete("reply-"+n); toast("这条不发了"); LIVE?load():render();
+}
+function copyReply(n){ navigator.clipboard?.writeText(replyText(n)).then(()=>toast("已复制"),()=>toast("复制不了，手动选中复制吧")); }
+/* ---------- 群通知：AI 起草（比如 PR 发了通知 reviewer），本人看过、可以改，点「发送」才以本人身份发到那个 Slack 频道 ---------- */
+function noticeView(i){
+  const r=i.draft_notice; if(!r) return "";
+  const where=esc(r.label||r.channel);
+  if(r.status==="sent") return `<div class="d-sec" style="padding-top:14px"><h3>已发群通知</h3><div class="inner-list"><div class="dv-row"><div style="min-width:0"><div class="t wrap">${linkify(r.text)}</div><div class="s">${esc(String(r.sent_at||"").slice(5,16).replace("T"," "))} 发到 Slack ${where}</div></div></div></div></div>`;
+  return `<div class="d-sec" style="padding-top:14px"><h3>要发的群通知<span class="hint" style="margin:0 0 0 8px;font-weight:400">AI 起草，你点「发送」才会以你的身份发到 Slack ${where}</span></h3>
+    <textarea id="notice-${i.n}" data-draft="notice-${i.n}" rows="6" style="width:100%" aria-label="要发的群通知">${esc(r.text)}</textarea>
+    <div class="acts" style="margin-top:6px"><button class="btn pri" onclick="sendNotice(${i.n})">发送</button><button class="btn" onclick="copyNotice(${i.n})">复制</button><button class="btn ghost" onclick="dropNotice(${i.n})">不发</button></div></div>`;
+}
+function noticeText(n){ const el=$("#notice-"+n); return String(el?el.value:(byN(n).draft_notice||{}).text||"").trim(); }
+async function sendNotice(n){
+  const i=byN(n), text=noticeText(n); if(!text) return toast("群通知是空的");
+  if(!LIVE) return toast("原型：不会真的发出去");
+  try{ await api("/api/notice/send",{rid:i.rid,text},40000); drafts.delete("notice-"+n); toast("群通知已发出"); }catch(e){ toast(e.message||"没发出去"); }
+  load();
+}
+async function dropNotice(n){
+  const i=byN(n);
+  if(LIVE){ try{ await api("/api/notice/drop",{rid:i.rid}); }catch(e){ return toast(e.message||"没改成"); } } else i.draft_notice=null;
+  drafts.delete("notice-"+n); toast("这条群通知不发了"); LIVE?load():render();
+}
+function copyNotice(n){ navigator.clipboard?.writeText(noticeText(n)).then(()=>toast("已复制"),()=>toast("复制不了，手动选中复制吧")); }
 /* ---------- 交付：每一版的链接和说明都能改、能删，也能自己加一版 ---------- */
 function deliverView(i){
   const list=D.deliverables[i.n]||[], e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;

@@ -636,7 +636,12 @@ def open_session(root, config, job_id):
     if link:
         return {"link": link}
     if engine == "claude" and session:
-        return {**open_claude(session), "engine": engine}
+        try:
+            return {**open_claude(session), "engine": engine}
+        except MatrixError:
+            # no Claude desktop app to take claude:// links: the command line, resumed in the item's folder
+            sessions.open_terminal(sessions.command(root, config, job_id))
+            return {"opened": "terminal", "engine": engine}
     # the built-in GPT runs `codex exec`: read here (default), in the ChatGPT app, or resumed in Terminal (设置 → AI 对话)
     where = gpt_open_choice(root)
     if where == "chatgpt" and session:

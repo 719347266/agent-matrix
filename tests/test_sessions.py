@@ -58,3 +58,19 @@ class SessionTests(unittest.TestCase):
         self.assertEqual((audit["by"], audit["note"]), ("你", "这段也是私人的"))
         self.assertTrue(audit["at"])
         self.assertTrue(any(m["kind"]=="note" for m in thread.history(self.root)["rec12"]["messages"]))
+
+
+class TerminalPickTests(unittest.TestCase):
+    def test_the_owners_own_terminal_comes_first(self):
+        import subprocess
+        from unittest.mock import patch
+        from agent_matrix import sessions
+
+        def pick(running, installed):
+            fake = lambda argv, **kw: subprocess.CompletedProcess(argv, 0 if argv[-1] in running else 1)
+            with patch("os.path.exists", lambda p: any(p.startswith(f"/Applications/{a}") for a in installed)):
+                return sessions._terminal(fake)
+        self.assertEqual(pick({"iTerm2"}, ["Tabby", "iTerm"]), "iterm")        # the one in use wins
+        self.assertEqual(pick(set(), ["Tabby", "iTerm"]), "tabby")             # none running: installed one
+        self.assertEqual(pick({"Tabby", "iTerm2"}, ["Tabby", "iTerm"]), "tabby")
+        self.assertEqual(pick(set(), []), "terminal")                          # Apple's Terminal last

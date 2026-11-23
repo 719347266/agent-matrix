@@ -10,10 +10,12 @@ Cursor …) says which conversation it is with `xinxiang next --session <id or l
 """
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 import shlex
 import subprocess
+import tempfile
 
 from .models import MatrixError
 from .timeutil import TZ
@@ -143,10 +145,44 @@ def command(root, config, job_id):
 
 
 
+TABBY = "/Applications/Tabby.app/Contents/MacOS/Tabby"
+ITERM = "/Applications/iTerm.app"
+
+
+def _terminal(run=None):
+    """The owner's own terminal: a running Tabby / iTerm first, then an installed one, else Apple's Terminal.
+    ponytail: Tabby and iTerm only (both take a command from outside); add Ghostty/Warp when someone uses them."""
+    run = run or subprocess.run
+
+    def running(name):
+        return run(["pgrep", "-xq", name], capture_output=True).returncode == 0
+    have = [(name, ok) for name, ok in (("tabby", os.path.exists(TABBY)), ("iterm", os.path.exists(ITERM))) if ok]
+    for name, _ in have:
+        if running({"tabby": "Tabby", "iterm": "iTerm2"}[name]):
+            return name
+    return have[0][0] if have else "terminal"
+
+
 def open_terminal(line):
-    script = 'on run argv\n tell application "Terminal"\n do script (item 1 of argv)\n activate\n end tell\nend run'
+    run = subprocess.run   # looked up per call, so tests can stand in for it
     try:
-        subprocess.run(["osascript", "-e", script, line], check=True, capture_output=True, timeout=20)
+        where = _terminal(run)
+        if where == "tabby":
+            # a new tab running the line; the shell stays open after it so the owner can keep going
+            # Tabby's own option parser eats "-lc", so the line goes in a script file and only plain words are passed
+            shell = os.environ.get("SHELL") or "/bin/zsh"
+            fd, script_path = tempfile.mkstemp(prefix="xinxiang-", suffix=".sh")
+            with os.fdopen(fd, "w") as script_file:
+                script_file.write(f"rm -f {shlex.quote(script_path)}\n{line}\nexec {shlex.quote(shell)} -l\n")
+            subprocess.Popen([TABBY, "run", shell, script_path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return
+        if where == "iterm":
+            script = ('on run argv\n tell application "iTerm"\n activate\n set w to (create window with default profile)\n'
+                      ' tell current session of w to write text (item 1 of argv)\n end tell\nend run')
+        else:
+            script = 'on run argv\n tell application "Terminal"\n do script (item 1 of argv)\n activate\n end tell\nend run'
+        run(["osascript", "-e", script, line], check=True, capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
         raise MatrixError("未能在终端中打开原对话，请检查终端是否可用以及系统的自动化权限。") from exc
 

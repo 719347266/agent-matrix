@@ -142,7 +142,8 @@ class Feishu:
         return itemstore.feishu_free(self.config)
 
     def _exec(self, args, *, auth=False, manifest=False):
-        if self.feishu_free():
+        from . import itemstore
+        if not itemstore.reads_feishu(self.config):
             raise MatrixError("没接飞书：事项记在 Notion 或本机，这一步要用飞书，已跳过。")
         scope = permission_scope(args)
         # A later failure must supersede any earlier success in this same run.

@@ -24,6 +24,7 @@ class ChatAcceptanceTests(unittest.TestCase):
             {**base, "message_id": "yes", "sender_name": "李", "text": "记得做季度总结", "after": ["[11-19 17:58 王小明] 好的"]},
             {**base, "message_id": "silent", "sender_name": "李", "text": "记得做竞品调研表", "after": ["[11-19 17:59 李] 好的"]},
             {**base, "message_id": "own", "sender_name": "我", "text": "周报我来写", "after": []},
+            {**base, "message_id": "group", "chat_mode": "group", "sender_name": "李", "text": "记得写发布说明", "after": []},
         ]
         (folder / "candidates.json").write_text(json.dumps({"batch_id": "b1", "messages": messages}, ensure_ascii=False))
 
@@ -34,22 +35,25 @@ class ChatAcceptanceTests(unittest.TestCase):
         return chat_review.ChatReview(batch_id="b1", actions=[
             action("yes", "做季度总结", "记得做季度总结", "记得做"),
             action("silent", "做竞品调研表", "记得做竞品调研表", "记得做"),
-            action("own", "写周报", "周报我来写", "我来")])
+            action("own", "写周报", "周报我来写", "我来"),
+            action("group", "写发布说明", "记得写发布说明", "记得写")])
 
     def kept(self, mode, **quotes):
         config = Config(**OWNER, intake_mode=mode)
-        return [a.message_id for a, _ in chat_review.validate(config, self.review(**quotes), self.root)]
+        # "?" = kept but waiting for the owner's yes (待确认 + ask)
+        return [a.message_id + ("?" if m.get("handed") else "") for a, m in chat_review.validate(config, self.review(**quotes), self.root)]
 
     def test_all_mode_takes_everything_asked_of_the_owner(self):
-        self.assertEqual(self.kept("all"), ["yes", "silent", "own"])
+        self.assertEqual(self.kept("all"), ["yes", "silent", "own", "group"])
 
     def test_accepted_mode_takes_only_what_the_owner_agreed_to_or_said_themself(self):
-        self.assertEqual(self.kept("accepted", yes="好的"), ["yes", "own"])
+        # a private ask not yet taken on is kept, waiting for the owner; a group one is not an item
+        self.assertEqual(self.kept("accepted", yes="好的"), ["yes", "silent?", "own"])
 
     def test_the_model_cannot_invent_the_owners_yes(self):
         # "好的" was said, but by the other person: it does not count as the owner agreeing
-        self.assertEqual(self.kept("accepted", yes="好的", silent="好的"), ["yes", "own"])
-        self.assertEqual(self.kept("accepted", yes="没问题我来做"), ["own"])  # words the owner never wrote
+        self.assertEqual(self.kept("accepted", yes="好的", silent="好的"), ["yes", "silent?", "own"])
+        self.assertEqual(self.kept("accepted", yes="没问题我来做"), ["yes?", "silent?", "own"])  # words the owner never wrote
 
 
 class ManualItemTests(unittest.TestCase):

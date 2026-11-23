@@ -63,7 +63,8 @@ def fields_for(task, config, tz):
 
 def sync(config, client, state, now, *, notify=True):
     from ..workflow import Gateway, ensure_options
-    if not state.get("v1:source-options"):
+    from ..itemstore import feishu_free
+    if not state.get("v1:source-options") and not feishu_free(config):  # items kept here already carry every option
         ensure_options(client, state, "来源", ["飞书任务", "聊天"])
         state.set("v1:source-options", True)
     started = state.get("feishu-tasks:started")

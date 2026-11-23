@@ -396,24 +396,27 @@ class Listener:
 
     def timers(self):
         jobs = []
-        from .itemstore import feishu_free
+        from .itemstore import feishu_free, reads_feishu
         cfg = load(self.path)
         auto = cfg.intake_mode != "manual"
-        no_feishu = feishu_free(cfg)  # Feishu meetings, chats and tasks need Feishu; Slack does not
-        if self.every("minute", 300) and not no_feishu:
+        no_feishu = feishu_free(cfg)        # no Feishu table: briefs, meeting prep cards, weekly review are off
+        no_source = not reads_feishu(cfg)   # Feishu / Lark meetings, chats and tasks need it; Slack does not
+        lark = cfg.lark_brand == "lark"     # Lark's API quota is per company and small: read less often
+        if self.every("minute", 300) and not no_source:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
                 from . import monitor
                 now = datetime.now(TZ)
                 parts = []
-                if self.every("meeting_prep", 600):
+                if not no_feishu and self.every("meeting_prep", 600):
                     parts.append(("prep", lambda: meeting_prep.run(config, client, state, now, horizon=35, lead=20)))
-                if state.get("brief-v1:migration-stage") == "v1_active":
+                if state.get("brief-v1:migration-stage") == "v1_active" and not no_feishu:
                     parts += [("catch_up", lambda: catch_up_briefs(config, client, state, now)),
                               ("weekly", lambda: weekly_review.run(config, client, state, now))]
-                parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now)),
-                          ("meetings", lambda: self.meeting_check(config, client, state, now))]
+                if not no_feishu:
+                    parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now))]
+                parts += [("meetings", lambda: self.meeting_check(config, client, state, now))]
                 out, wrong = {}, []
                 for name, part in parts:   # each on its own: one that fails must not stop the others
                     try:
@@ -435,10 +438,14 @@ class Listener:
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
         from .sources import chats, slack
-        if auto and cfg.chat_watch_enabled and not no_feishu and self.every("chats", chats.POLL_MINUTES * 60):
+        # every POLL_MINUTES, working hours only (chat_poll); the first poll of the day catches up on the night
+        if auto and cfg.chat_watch_enabled and not no_source and self.every("chats", chats.POLL_MINUTES * 60):
             def chat_poll(config, client, state):
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
+                hour = datetime.now(TZ).strftime("%H:%M")
+                if hour < config.chat_extract_from or hour >= config.chat_extract_until:
+                    return "off_hours"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
         if auto and cfg.chat_watch_enabled and slack.token(cfg) and self.every("slack", chats.POLL_MINUTES * 60):
@@ -450,7 +457,7 @@ class Listener:
                     self.wake_worker(config)  # don't wait for the periodic kick; the worker decides if it's time
                 return out
             jobs.append(("slack", slack_poll))
-        if auto and cfg.feishu_tasks_enabled and not no_feishu and self.every("tasks", 900):
+        if auto and cfg.feishu_tasks_enabled and not no_source and self.every("tasks", 3600 if lark else 900):   # Lark: hourly
             def tasks(config, client, state):
                 from .sources import feishu_tasks
                 on = config.feishu_tasks_enabled and config.intake_mode != "manual"
