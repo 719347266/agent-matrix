@@ -227,6 +227,7 @@ def _triage_relations(root, job, item, verdict):
 
 
 LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
+LEARN_RETRY_MINUTES = (30, 120, 1440)
 
 
 def _prepare_setup(root, config, driver):
@@ -512,6 +513,16 @@ def _prepare_learn(root, config, driver):
     checked_at = now().isoformat(timespec="seconds")
     db = _db(root)
     try:
+        # The job table survives restarts. A completed round resets the delay for the next batch.
+        recent = db.execute("SELECT status,updated FROM jobs WHERE kind='learn' AND status IN ('done','failed') "
+                            "ORDER BY updated DESC,rowid DESC LIMIT ?", (len(LEARN_RETRY_MINUTES),)).fetchall()
+        failures = 0
+        for status, _ in recent:
+            if status != "failed":
+                break
+            failures += 1
+        if failures and now() < datetime.fromisoformat(recent[0][1]) + timedelta(minutes=LEARN_RETRY_MINUTES[failures - 1]):
+            return None
         messages = db.execute("SELECT record_id,at,text FROM messages WHERE sender='me' AND kind='feedback' "
                               "AND at>? AND length(text)>=6 ORDER BY at,id", (since,)).fetchall()
     finally:
@@ -543,38 +554,64 @@ def _prepare_learn(root, config, driver):
 
 
 def _submit_learn(root, job):
-    from . import activity, memory, thread as conversation
-    try:
-        learned = json.loads((Path(job["folder"]) / "learned.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    from . import activity, memory
+    folder = Path(job["folder"])
+    problem = "缺少学规矩的结果。请按说明返回 JSON，至少含 add 数组；没有新规矩可以留空。"
+    for name in ("learned.json", ".last.txt"):
+        try:
+            raw = (folder / name).read_text(encoding="utf-8-sig").strip()
+            fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", raw, re.S | re.I)
+            learned = json.loads(fenced[1] if fenced else raw)
+            if (not isinstance(learned, dict) or not learned or learned.keys() - {"add", "wins", "losses", "retire"}
+                    or not all(isinstance(v, list) for v in learned.values())
+                    or not all(isinstance(r, dict) and isinstance(r.get("rule"), str) and r["rule"].strip()
+                               and isinstance(r.get("why"), str) and r["why"].strip() for r in learned.get("add", []))
+                    or not all(type(i) is int for key in ("wins", "losses", "retire") for i in learned.get(key, []))):
+                raise ValueError
+            break
+        except FileNotFoundError:
+            continue
+        except (ValueError, UnicodeError):
+            problem = "结果格式有误。请返回含 add、wins、losses、retire 数组的 JSON。每条新规矩要有 rule 和 why，后三项只填规矩编号。"
+    else:
+        if job["rounds"] >= MAX_FIX_ROUNDS:
+            return fail(root, job, problem)
         job["rounds"] += 1
         _save(root, job)
-        return {"ok": False, "status": "fix", "problem": "没有找到有效的 learned.json（格式见说明里的例子）。"}
+        return {"ok": False, "status": "fix", "problem": problem}
     added = []
-    from . import projects as project_store
-    known = {x["id"] for x in memory.rules(root)}
-    projects = {str(p["id"]) for p in project_store.all(root)}
-    for r in (learned.get("add") or [])[:3]:
-        if not isinstance(r, dict):
-            continue
-        scope = str(r.get("scope") or "")
-        if not (scope == "" or (scope.startswith("project:") and scope[8:] in projects) or (scope.startswith("type:") and 1 < len(scope) <= 15)):
-            scope = ""   # a scope that names nothing known: the rule holds everywhere
-        rule = memory.add_rule(root, r.get("rule"), r.get("why", ""), source="AI 学的", scope=scope)
-        if rule:
-            added.append(rule)
-    for key, won in (("wins", True), ("losses", False)):
-        for rid in learned.get(key) or []:
-            if isinstance(rid, int) and rid in known:
-                memory.credit(root, rid, won)
-    ai_rules = {x["id"] for x in memory.rules(root) if x["source"] == "AI 学的"}
-    for rid in learned.get("retire") or []:
-        if rid in ai_rules:
-            memory.remove_rule(root, rid)
-    conversation.set_setting(root, "learned_at", job["ref"].get("checked_at") or now().isoformat(timespec="seconds"))
+    known = {r["id"] for r in memory.rules(root)}
+    checked_at = job["ref"].get("checked_at") or job.get("created") or now().isoformat(timespec="seconds")
+    db = _db(root)
+    try:
+        with db:
+            # The receipt, the rules and their scores must survive a restart together.
+            db.execute("BEGIN IMMEDIATE")
+            closed = db.execute("UPDATE jobs SET status='done',updated=?,lease_until=NULL WHERE id=? AND status='open'",
+                                (now().isoformat(timespec="seconds"), job["id"]))
+            if not closed.rowcount:
+                return _closed(get(root, job["id"]))
+            last = db.execute("SELECT value FROM settings WHERE key='learned_at'").fetchone()
+            if last and checked_at <= json.loads(last[0]):
+                return {"ok": True, "status": "done", "added": []}
+            projects = {str(p[0]) for p in db.execute("SELECT id FROM projects")}
+            for r in learned.get("add", [])[:3]:
+                scope = str(r.get("scope") or "")
+                if not (scope.startswith("project:") and scope[8:] in projects or scope.startswith("type:") and 1 < len(scope) <= 15):
+                    scope = ""
+                rule = memory.insert_rule(db, r["rule"], r["why"], "AI 学的", scope)
+                if rule:
+                    added.append(rule)
+            for field in ("wins", "losses"):
+                db.executemany(f"UPDATE preferences SET {field}={field}+1 WHERE active=1 AND id=?",
+                               [(rid,) for rid in known.intersection(learned.get(field, []))])
+            db.executemany("UPDATE preferences SET active=0 WHERE id=? AND source='AI 学的'",
+                           [(rid,) for rid in known.intersection(learned.get("retire", []))])
+            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('learned_at',?)", (json.dumps(checked_at),))
+    finally:
+        db.close()
     if added:
         activity.log(root, "detect", "从你的反馈里学到新规矩：" + "；".join(added)[:200])
-    _close(root, job, "done")
     return {"ok": True, "status": "done", "added": added}
 
 
@@ -896,10 +933,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
     for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
         if kind not in wanted:
             continue
-        if kind == "chat":
+        if kind in {"chat", "learn"}:
             from .state import exclusive_lock
             try:
-                with exclusive_lock(root / "state" / "chat-claim", wait=0):
+                with exclusive_lock(root / "state" / (kind + "-claim"), wait=0):
                     job = prepare(root, config, driver)
                     if job:
                         return _open(root, job, driver)
@@ -1044,6 +1081,9 @@ def fail(root, job, problem):
     job.update(status="failed", lease_until=None)
     if not _save(root, job):
         return _closed(get(root, job["id"]))
+    if job["kind"] == "learn":
+        activity.log(root, "learn", "学规矩已延后，后台会再试", detail=str(problem)[:300], status="deferred", ref=job["id"])
+        return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
     activity.log(root, "error", f"{job.get('title') or job['kind']}：没做成", detail=str(problem)[:300], status="failed")
     try:
         key = f"job-failed:{job['id']}:{job.get('rounds', 0)}"

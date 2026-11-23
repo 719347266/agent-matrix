@@ -44,6 +44,14 @@ class DatabaseTest(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT id, session, link FROM jobs").fetchall(), [("j1", None, None)])
             self.assertEqual(db.version(conn), len(db.SCHEMAS["xinxiang"]))
 
+    def test_old_learning_alerts_are_archived_without_hiding_other_failures(self):
+        with closing(db.open(self.root, "inbox")) as conn, conn:
+            keys = ["job-failed:learn-123:2", "job-failed:item-123:2"]
+            conn.executemany("INSERT INTO messages(key,at,kind,title,blocks) VALUES (?,'t','system','test','{}')", [(k,) for k in keys])
+            conn.execute(f"PRAGMA user_version={len(db.SCHEMAS['inbox'])-1}")
+        with closing(db.open(self.root, "inbox")) as conn:
+            self.assertEqual(conn.execute("SELECT read,superseded FROM messages ORDER BY id").fetchall(), [(1, 1), (0, 0)])
+
     def test_a_failed_step_leaves_the_file_at_its_old_version(self):
         with closing(db.open(self.root, "inbox")) as conn:
             before = shape(conn)

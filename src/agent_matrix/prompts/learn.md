@@ -36,4 +36,4 @@
  "wins": [3], "losses": [], "retire": []}
 ```
 
-只写 `learned.json`，不改任何东西。
+把结果写到当前目录的 `learned.json`。如果文件写入失败，直接在最终回复中返回同样的完整 JSON，心响会读取。

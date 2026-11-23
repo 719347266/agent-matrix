@@ -197,18 +197,22 @@ def scope_name(scope, names=None):
     return "全部"
 
 
-def add_rule(root, rule, why="", source="本人", scope=""):
+def insert_rule(db, rule, why, source, scope):
     rule = " ".join(str(rule or "").split())[:120]
     if not rule:
         return None
+    conflict = ("DO NOTHING" if source == "AI 学的" else
+                "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope")
+    added = db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
+                       "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
+    return rule if added.rowcount else None
+
+
+def add_rule(root, rule, why="", source="本人", scope=""):
     db = _db(root)
     try:
         with db:
-            conflict = ("DO NOTHING" if source == "AI 学的" else
-                        "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope")
-            added = db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
-                               "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
-        return rule if added.rowcount else None
+            return insert_rule(db, rule, why, source, scope)
     finally:
         db.close()
 

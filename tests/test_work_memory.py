@@ -1,4 +1,5 @@
 """The work memory: verdicts become scoped rules with a record, and work is kept as project → version → items."""
+from datetime import timedelta
 import json
 import tempfile
 import unittest
@@ -56,6 +57,72 @@ class WorkMemory(unittest.TestCase):
         self.assertEqual(rules["方案控制在一屏"]["scope"], "type:方案")
         self.assertEqual(rules["乱填的范围"]["scope"], "", "a scope naming nothing known holds everywhere")
         self.assertEqual(next(r for r in memory.rules(self.root) if r["id"] == seed)["wins"], 1)
+
+    def test_failed_learning_is_quiet_and_spaces_retries_across_restarts(self):
+        from agent_matrix import inbox
+        from agent_matrix.thread import setting
+        memory.record_outcome(self.root, "r1", "退回", "先讲清楚用途")
+        for minutes in (30, 120, 1440):
+            job = drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True)
+            self.assertIsNotNone(job)
+            drive.fail(self.root, job, "模型未返回结果")
+            self.assertEqual(inbox.messages(self.root), [])
+            self.assertIsNone(setting(self.root, "learned_at"))
+            self.assertIsNone(drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True))
+            # Age every failure together so that their order across process restarts is preserved.
+            db = drive._db(self.root)
+            with db:
+                db.execute("UPDATE jobs SET updated=? WHERE kind='learn' AND status='failed'",
+                           ((drive.now()-timedelta(minutes=minutes + 1)).isoformat(),))
+            db.close()
+        job = drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True)
+        (Path(job["folder"]) / "learned.json").write_text('{"add":[]}')
+        self.assertEqual(drive.submit(self.root, None, job["id"])["status"], "done")
+        self.assertEqual(inbox.unread(self.root), 0)
+
+    def test_ai_repairs_bad_output_in_its_reply_and_credit_applies_once(self):
+        from types import SimpleNamespace
+        from agent_matrix import worker, inbox
+        from agent_matrix.models import Config
+        memory.record_outcome(self.root, "r1", "通过")
+        rule = memory.rules(self.root)[0]["id"]
+        job = drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True)
+        folder = Path(job["folder"])
+        prompts = []
+        class Run:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self, prompt):
+                prompts.append(prompt)
+                if len(prompts) == 1:
+                    (folder / "learned.json").write_text('{"add":{}}')
+                else:
+                    (folder / ".last.txt").write_text(json.dumps({"wins": [rule]}))
+                return SimpleNamespace(thread=None, returncode=0, timed_out=False)
+        with patch("agent_matrix.worker.engine", return_value=Run):
+            result = worker.run_job(self.root, Config(), job)
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("结果格式有误", prompts[1])
+        self.assertEqual(drive.submit(self.root, None, job["id"])["status"], "done")
+        self.assertEqual(next(r["wins"] for r in memory.rules(self.root) if r["id"] == rule), 1)
+        self.assertEqual(inbox.unread(self.root), 0)
+
+    def test_model_outage_waits_instead_of_requesting_immediate_repair(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from agent_matrix import worker, inbox
+        from agent_matrix.models import Config
+        memory.record_outcome(self.root, "r1", "通过")
+        job = drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True)
+        engine = Mock()
+        engine.return_value.run.return_value = SimpleNamespace(thread=None, returncode=1, timed_out=False)
+        with patch("agent_matrix.worker.engine", return_value=engine):
+            self.assertEqual(worker.run_job(self.root, Config(), job)["status"], "failed")
+        self.assertEqual(engine.call_count, 1)
+        self.assertIsNone(drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True))
+        self.assertEqual(inbox.unread(self.root), 0)
 
     def test_the_ai_sorts_work_into_versions_and_the_owner_has_the_last_word(self):
         versions.ask_organize(self.root)

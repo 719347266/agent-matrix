@@ -215,9 +215,16 @@ def run_job(root, config, job):
         reason = "AI 运行超时" if run.timed_out else f"AI 命令退出（状态码 {run.returncode}）"
         return drive.fail(root, job, reason + "，没有生成聊天提取结果 review.json。")
     result = drive.submit(root, config, job["id"])
-    if result.get("status") == "fix" and run.thread:
-        Run(config, folder, thread=run.thread, effort=config.extract_effort, timeout_minutes=10).run(
-            f"程序检查没通过：{result['problem']}\n改好 {'、'.join(job.get('output') or [])} 再结束。")
+    if result.get("status") == "fix" and job["kind"] == "learn" and (run.returncode or run.timed_out):
+        reason = "AI 请求超时" if run.timed_out else f"AI 命令退出（状态码 {run.returncode}）"
+        return drive.fail(root, job, reason)
+    if result.get("status") == "fix" and (run.thread or job["kind"] == "learn"):
+        prompt = f"程序检查没通过：{result['problem']}\n改好 {'、'.join(job.get('output') or [])} 再结束。"
+        if job["kind"] == "learn":
+            if not run.thread:
+                prompt = job["instructions"] + "\n" + prompt
+            prompt += "\n也可以直接在最终回复中返回完整 JSON。"
+        Run(config, folder, thread=run.thread, effort=config.extract_effort, timeout_minutes=10).run(prompt)
         result = drive.submit(root, config, job["id"])
     if result.get("status") == "fix":
         return drive.fail(root, drive.get(root, job["id"]), result.get("problem") or "改了一轮还是没通过检查")
@@ -266,9 +273,10 @@ def run_loop(root, config, *, max_jobs=200):
                 if job.get("ref", {}).get("record_id"):
                     with take:
                         failed.add(job["ref"]["record_id"])
-                activity.log(root, "error", f"{name}处理「{str(job.get('title'))[:16]}」出错", detail=str(exc)[:300], status="failed")
+                if job["kind"] != "learn":
+                    activity.log(root, "error", f"{name}处理「{str(job.get('title'))[:16]}」出错", detail=str(exc)[:300], status="failed")
                 try:
-                    if job["kind"] == "chat":
+                    if job["kind"] in {"chat", "learn"}:
                         drive.fail(root, job, str(exc))
                     else:
                         drive.release(root, config, job["id"])

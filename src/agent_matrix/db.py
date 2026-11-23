@@ -148,10 +148,15 @@ SCHEMAS = {
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
             at TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
             blocks TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0)""",
-    ], [_group_chat_failures]],
+    ], [_group_chat_failures], [
+        "UPDATE messages SET read=1,superseded=1 WHERE key GLOB 'job-failed:learn-*'",
+    ]],
     "activity": [[
         "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, at TEXT, kind TEXT, title TEXT, detail TEXT, status TEXT, ref TEXT)",
         "CREATE TABLE IF NOT EXISTS beats (component TEXT PRIMARY KEY, at TEXT, summary TEXT)",
+    ], [
+        "UPDATE events SET kind='learn',status='deferred' WHERE kind='error' AND status='failed' "
+        "AND title LIKE '从你最近 %里学规矩：没做成'",
     ]],
     "commands": [[
         """CREATE TABLE IF NOT EXISTS commands (
