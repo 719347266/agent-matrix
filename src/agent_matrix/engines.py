@@ -207,9 +207,24 @@ MCP_CACHE_SECONDS = 6 * 3600
 LARK_DENY = " ".join(f"Bash(lark-cli {c}:*)" for c in (
     "im +messages-send", "im +messages-reply", "im +messages-edit", "im +messages-forward", "im +chat-create",
     "im +chat-update", "mail", "approval", "api"))
-MCP_DENY = " ".join(f"mcp__*{w}*" for w in ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply",
-                                              "create", "update", "move", "restore", "resolve", "comment", "duplicate",
-                                              "spawn", "cancel", "upload"))
+from .approvals import MCP_DENY_WORDS  # noqa: E402  (shared with 开发模式, which asks for a let-through send)
+MCP_DENY = " ".join(f"mcp__*{w}*" for w in MCP_DENY_WORDS)
+
+
+def mcp_deny(servers, let_through=()):
+    """MCP_DENY, except the exact tools the owner lets through (worker_mcp_send). A deny always beats an allow, so
+    a word that hits a let-through tool is denied server by server, skipping that tool's own server.
+    ponytail: that server loses the whole word (Slack's *send* also frees send_message_draft); fine for one or two tools."""
+    if not let_through:
+        return MCP_DENY
+    out = []
+    for w in MCP_DENY_WORDS:
+        freed = [t for t in let_through if w in t]
+        if not freed:
+            out.append(f"mcp__*{w}*")
+            continue
+        out += [f"mcp__{p}__*{w}*" for p in servers if not any(t.startswith(f"mcp__{p}__") for t in freed)]
+    return " ".join(out)
 
 
 def mcp_servers(binary, *, run=subprocess.run, cache=None):
@@ -256,6 +271,7 @@ class ClaudeRun(CodexRun):
         # MCP servers live) but switch all hooks off, and allow only MCP tools (dontAsk denies everything unlisted).
         settings = {**json.loads(self.SANDBOX), **({"disableAllHooks": True} if mcp else {})}
         allowed = ["--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch", *mcp])]
+        send = [t for t in self.config.worker_mcp_send if t.startswith("mcp__")] if mcp else []
         if self.guard:
             # 开发模式: whatever would prompt comes to us over stdin/stdout (control_request can_use_tool) and waits
             # for the owner in 心响. "risky": the RISKY commands prompt; "every": nothing is pre-allowed.
@@ -264,14 +280,14 @@ class ClaudeRun(CodexRun):
             if self.guard["mode"] == "every":
                 allowed = []
             else:
-                settings["permissions"] = {"ask": RISKY}
+                settings["permissions"] = {"ask": [*RISKY, *send]}   # a let-through send still waits for the owner
             permission = ["--permission-mode", "default", "--input-format", "stream-json", "--permission-prompt-tool", "stdio"]
         else:
             permission = ["--permission-mode", "dontAsk"]
         argv = [binary, "-p", *(["--setting-sources", "user,project"] if mcp else ["--safe-mode"]),
                 "--output-format", "stream-json", "--verbose", *permission, *allowed,
                 "--settings", json.dumps(settings),
-                "--disallowedTools", " ".join([LARK_DENY, *([MCP_DENY] if mcp else [])])]
+                "--disallowedTools", " ".join([LARK_DENY, *([mcp_deny([m.split("__")[1] for m in mcp], send)] if mcp else [])])]
         if self.config.worker_claude_model:
             argv += ["--model", self.config.worker_claude_model]
         if self.effort in {"low", "medium", "high", "xhigh", "max"}:
@@ -295,6 +311,7 @@ class ClaudeRun(CodexRun):
             return super()._send_prompt(proc, prompt)
         # stdin stays open: the answers to permission requests go back this way; closed once the turn ends
         self.waiting = {}
+        self.started = time.time() - 2  # files born after this were made by the AI in this turn (2 s clock slack)
         proc.stdin.write(json.dumps({"type": "user", "message": {"role": "user", "content": prompt}}, ensure_ascii=False) + "\n")
         proc.stdin.flush()
 
@@ -312,6 +329,9 @@ class ClaudeRun(CodexRun):
         if request.get("subtype") != "can_use_tool":
             return self._reply(event.get("request_id"), {})
         root = self.guard["root"]
+        if not approvals.needs_owner(root, request.get("tool_name"), request.get("input"), self.workdir,
+                                     getattr(self, "started", None)):
+            return self._reply(event.get("request_id"), {"behavior": "allow", "updatedInput": request.get("input") or {}})
         approval_id = approvals.ask(root, self.guard.get("record_id"), request.get("tool_name"), request.get("input"),
                                     request.get("description"))
         self.waiting[approval_id] = (event.get("request_id"), request.get("input") or {})

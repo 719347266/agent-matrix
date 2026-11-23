@@ -264,7 +264,7 @@ class ConversationTests(unittest.TestCase):
                 prompt = json.loads(sys.stdin.readline())["message"]["content"]
                 print(json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}), flush=True)
                 seen = []
-                for rid, cmd in (("r1", "git push"), ("r2", "rm -rf build")):
+                for rid, cmd in (("r1", "git push"), ("r0", "cd ~/x && ls | head -3"), ("r2", "git reset --hard")):
                     print(json.dumps({"type": "control_request", "request_id": rid, "request": {"subtype": "can_use_tool",
                           "tool_name": "Bash", "input": {"command": cmd}, "description": "收尾"}}), flush=True)
                     seen.append(json.loads(sys.stdin.readline())["response"])
@@ -275,6 +275,8 @@ class ConversationTests(unittest.TestCase):
             root, work = Path(tmp) / "root", Path(tmp) / "work"
             work.mkdir()
             guard = {"root": root, "mode": "risky", "record_id": "rec1"}
+            from agent_matrix import thread
+            thread.set_setting(root, "dev_mode", "risky")   # read again per request, not only at start
 
             def owner():
                 answered = set()
@@ -292,7 +294,8 @@ class ConversationTests(unittest.TestCase):
             self.assertFalse(run.timed_out)
             seen = json.loads((work / "seen.json").read_text())
             self.assertEqual(seen["prompt"], "开始")
-            allow, deny = seen["answers"]
+            allow, plain, deny = seen["answers"]
+            self.assertEqual((plain["request_id"], plain["response"]["behavior"]), ("r0", "allow"))   # not risky: no ask
             self.assertEqual((allow["request_id"], allow["response"]["behavior"], allow["response"]["updatedInput"]),
                              ("r1", "allow", {"command": "git push"}))
             self.assertEqual((deny["request_id"], deny["response"]["behavior"]), ("r2", "deny"))
@@ -306,6 +309,57 @@ class ConversationTests(unittest.TestCase):
             every = ClaudeRun(Config(worker_claude=str(fake)), work, guard={**guard, "mode": "every"}).argv()
             self.assertNotIn("--allowedTools", every)                            # nothing pre-allowed
             self.assertEqual(approvals.pending(root), [])
+            self.assertTrue(approvals.needs_owner(root, "Bash", {"command": "ls && FOO=1 git push -f"}))
+            self.assertFalse(approvals.needs_owner(root, "Bash", {"command": "git status; echo rmdir-ish"}))
+            self.assertFalse(approvals.needs_owner(root, "Edit", {"file_path": "a.py"}))
+            # rm: only what the AI did not make asks
+            other = Path(tmp) / "repo"
+            other.mkdir()
+            (other / "old.go").write_text("x")
+            since = time.time() + 1                          # old.go existed before the turn began
+            ask = lambda cmd, t=since: approvals.needs_owner(root, "Bash", {"command": cmd}, work, t)
+            patch.object(approvals, "_TEMP", []).start()      # tmp itself lives under a temp folder
+            self.addCleanup(patch.stopall)
+            (work / "scratch").write_text("x")
+            self.assertFalse(ask(f"cat > {other}/zz_test.go <<'EOF'\nx\nEOF\ngo test ./...; rm {other}/zz_test.go"))
+            self.assertFalse(ask("rm -rf scratch"))                         # inside the item's own folder
+            self.assertTrue(ask(f"rm {other}/old.go"))                       # the owner's file
+            self.assertTrue(ask(f"cd {other} && rm -f old.go"))
+            self.assertFalse(ask(f"cd {other} && rm -f old.go", time.time() - 60))   # born during this turn
+            self.assertTrue(ask(f"cd {other} && rm -rf *"))                  # globs are never guessed
+            self.assertTrue(ask('rm -rf "$SOMEWHERE"'))
+            self.assertTrue(ask("rm -rf ."))                                 # the item's folder itself
+            self.assertTrue(ask("git push origin dev"))
+            # aws: reading is fine, changing or reading secrets asks
+            self.assertFalse(ask("cat out.txt; aws codebuild batch-get-builds --ids x:1 --query 'builds[0].{s:buildStatus}' --output json"))
+            self.assertFalse(ask("aws --region us-east-1 logs tail /aws/x; aws s3 ls s3://b/; aws sts get-caller-identity"))
+            self.assertTrue(ask("aws codebuild start-build --project-name x"))
+            self.assertTrue(ask("aws --debug s3 rm list-thing"))             # a global flag does not hide the operation
+            self.assertTrue(ask("aws secretsmanager get-secret-value --secret-id prod/db"))
+            self.assertTrue(ask("aws ssm get-parameter --name p --with-decryption"))
+            # 只读都放行: kubectl / docker / helm / gcloud / terraform / SQL / redis
+            for cmd in ("kubectl -n prod get pods -o wide | grep api", "kubectl logs deploy/api --tail 50",
+                        "kubectl config current-context", "docker ps -a; docker compose logs web", "docker image ls",
+                        "helm -n x list; helm status r", "gcloud compute instances list --project p",
+                        "terraform plan -out p; terraform state list", "terraform fmt -check",
+                        'mysql -h db -e "select id from t limit 3"', "psql -c 'SHOW search_path'", "redis-cli -h r GET k"):
+                self.assertFalse(ask(cmd), cmd)
+            for cmd in ("kubectl delete pod x", "kubectl -n get delete pod x", "kubectl exec -it x -- sh",
+                        "kubectl get secret db -o yaml", "docker rm -f x", "docker compose up -d", "helm upgrade r c",
+                        "gcloud compute instances delete x", "gcloud auth print-access-token", "terraform apply",
+                        'mysql -e "select 1; drop table t"', "mysql -e 'update t set a=1'", "psql -f migrate.sql",
+                        "mysql db < dump.sql", "mysql -h db", "redis-cli DEL k", "redis-cli -h r FLUSHALL",
+                        "ssh host ls", "mongosh --eval 'db.x.find()'"):
+                self.assertTrue(ask(cmd), cmd)
+            # gh: reading is fine, writing outside asks
+            self.assertFalse(ask("gh auth token >/dev/null 2>&1 && echo ok; gh pr view 3 --json state; gh pr checks 3"))
+            self.assertTrue(ask("gh pr create --base dev --fill"))
+            self.assertTrue(ask("gh api -X POST repos/o/r/issues"))
+            # an MCP send the owner let through still waits for the owner in 开发模式; reads do not
+            self.assertTrue(approvals.needs_owner(root, "mcp__plugin_slack_slack__slack_send_message", {"channel_id": "C1"}))
+            self.assertFalse(approvals.needs_owner(root, "mcp__plugin_slack_slack__slack_read_channel", {}))
+            thread.set_setting(root, "dev_mode", "every")   # switched mid-run: everything asks again
+            self.assertTrue(approvals.needs_owner(root, "Bash", {"command": "ls"}))
 
 
 class CardTests(unittest.TestCase):
@@ -439,3 +493,15 @@ class PublishOnAsciiPathTests(unittest.TestCase):
             self.assertEqual(out["result"], "published")
             self.assertEqual((item.workdir / "交付.md").read_text(encoding="utf-8").splitlines()[0], "# 周报")
             self.assertEqual(thread.history(root, ["recA1"])["recA1"]["deliverables"][0]["url"], "https://x/docx/a")
+
+
+class McpLetThroughTests(unittest.TestCase):
+    def test_only_the_named_send_tool_escapes_the_ban(self):
+        from agent_matrix.engines import MCP_DENY, mcp_deny
+        self.assertEqual(mcp_deny(["plugin_slack_slack", "plugin_Notion_notion"]), MCP_DENY)
+        deny = mcp_deny(["plugin_slack_slack", "plugin_Notion_notion"], ["mcp__plugin_slack_slack__slack_send_message"]).split()
+        self.assertNotIn("mcp__*send*", deny)
+        self.assertIn("mcp__plugin_Notion_notion__*send*", deny)          # other servers still cannot send
+        self.assertNotIn("mcp__plugin_slack_slack__*send*", deny)
+        self.assertIn("mcp__*delete*", deny)                               # every other word stays global
+        self.assertIn("mcp__*schedule_message*", deny)
