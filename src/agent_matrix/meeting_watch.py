@@ -52,6 +52,12 @@ class MeetingQueue:
     def list(self):
         return [self.get(row[0]) for row in self.db.execute("SELECT meeting_id FROM meeting_queue ORDER BY next_check,meeting_id")]
 
+    def ready(self, now):
+        rows = self.db.execute("SELECT meeting_id,metadata,status,next_check FROM meeting_queue "
+                               "WHERE status IN ('ready','prepared','needs_attention') ORDER BY next_check,meeting_id")
+        return [{"meeting_id": mid, "topic": json.loads(meta).get("topic"), "status": status}
+                for mid, meta, status, due in rows if parse_time(due) <= now]
+
     def put(self, meta, now):
         mid = meta.get("meeting_id", "")
         if not re.fullmatch(r"\d{10,30}", mid):
@@ -198,8 +204,7 @@ def check(config, source, queue, now):
             delay = (1,2,5,10,30)[min(attempt-1,4)]
             queue.update(row["meeting_id"],meta=meta,status="waiting_transcript",attempts=attempt,
                          next_check=(now+timedelta(minutes=delay)).isoformat())
-    ready = [{"meeting_id":r["meeting_id"],"topic":r["metadata"].get("topic"),"status":r["status"]}
-             for r in queue.list() if r["status"] in {"ready","prepared","needs_attention"} and parse_time(r["next_check"])<=now]
+    ready = queue.ready(now)
     allowed = config.transcripts_to_llm_allowed and config.llm_backend=="cindy_current"
     actionable=any(r["status"]=="needs_attention" for r in ready) or (bool(ready) and allowed)
     # Calendar reservations remain metadata; elapsed scheduled time is not proof

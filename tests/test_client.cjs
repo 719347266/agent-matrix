@@ -204,6 +204,10 @@ function reset(item) {
   evaluate('S.scanPick=null; D.memory.profile={text:"",scanning:{by:"Antigravity",step:"2/4 看飞书文档"}}'); assert.match(evaluate("memPage()"),/Antigravity 正在认识你<\/b>：2\/4 看飞书文档/);
   evaluate('D.memory.profile={text:"",draft:{text:"## 岗位和职责\\n产品经理",by:"Antigravity",at:"11-21 10:00"}}'); let dr = evaluate("memPage()");
   for (const label of ["Antigravity 写好了一份「关于你」草稿","产品经理","useDraft(true)","editDraft()","useDraft(false)"]) assert.ok(dr.includes(label), label);
+  evaluate('D.memory.profile.text="已经确认的正式版"');
+  const archived=evaluate("memPage()");
+  assert.match(archived,/查看旧版草稿/); assert.match(archived,/核对新变化/);
+  assert.doesNotMatch(archived,/useDraft\(true\)/);
   evaluate('D.memory.profile=null');
   // 项目与版本 and scoped rules
   assert.match(evaluate("memPage()"),/让 AI 整理项目和版本/, "nothing sorted yet: one button");

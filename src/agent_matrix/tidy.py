@@ -11,6 +11,7 @@ Kept in state/xinxiang.db (memory_updates). Each proposal: its type, what it say
 """
 from datetime import datetime, timedelta
 import json
+import re
 
 from . import db as database
 from .timeutil import TZ
@@ -21,7 +22,7 @@ MAX_CHANGES = 30
 MAX_PROFILE = 2
 LABEL = {"merge_rules": "合并规矩", "retire_rule": "退休规矩", "stale_moment": "经历过时", "place_item": "归类事项",
          "version_status": "版本状态", "profile": "关于你"}
-STATE = {"pending": "待定", "used": "已用", "dropped": "不要"}
+STATE = {"pending": "待定", "used": "已用", "dropped": "不要", "superseded": "已有更新"}
 
 
 def _db(root):
@@ -43,6 +44,19 @@ def _max_n(rows):
 
 # ---- when ---------------------------------------------------------------------------------------------------
 
+def _new_records(root, db, since):
+    from .thread import setting
+    cursor = setting(root, "tidy_cursor", {})
+    result = {}
+    for table, field in (("outcomes", "at"), ("moments", "created")):
+        if cursor.get("at") == since and table in cursor:
+            clause, value = "id>?", cursor[table]
+        else:
+            clause, value = field + ">?", since
+        result[table] = [r[0] for r in db.execute("SELECT id FROM " + table + " WHERE " + clause + " ORDER BY id", (value,))]
+    return result
+
+
 def due(root, now=None):
     """None, or what is new since the last tidy. At most once a day, and only when there is something new."""
     from .thread import setting
@@ -53,8 +67,8 @@ def due(root, now=None):
     since = setting(root, "tidied_at", "")
     db = _db(root)
     try:
-        verdicts = db.execute("SELECT count(*) FROM outcomes WHERE at>?", (since,)).fetchone()[0]
-        moments = db.execute("SELECT count(*) FROM moments WHERE created>?", (since,)).fetchone()[0]
+        new = _new_records(root, db, since)
+        verdicts, moments = len(new["outcomes"]), len(new["moments"])
     finally:
         db.close()
     items = max(0, _max_n(_rows(root)) - int(setting(root, "tidy_max_n", 0) or 0))
@@ -68,17 +82,33 @@ def tried(root):
     set_setting(root, "tidy_tried_at", _now())
 
 
-def done(root, rows=None):
+def done(root, cursor=None):
     from .thread import set_setting
-    set_setting(root, "tidied_at", _now())
-    set_setting(root, "tidy_max_n", _max_n(_rows(root) if rows is None else rows))
+    if cursor:
+        set_setting(root, "tidy_cursor", cursor)
+        set_setting(root, "tidied_at", cursor["at"])
+        set_setting(root, "tidy_max_n", cursor["max_n"])
+    else:  # a job prepared by a previous version
+        set_setting(root, "tidied_at", _now())
+        set_setting(root, "tidy_max_n", _max_n(_rows(root)))
 
 
 # ---- what the AI reads ------------------------------------------------------------------------------------------
 
 def prepare(root, folder):
     from . import memory, projects, versions
+    from .thread import setting
     rows = _rows(root)
+    last_n = setting(root, "tidy_max_n", 0) or 0
+    db = _db(root)
+    try:
+        db.execute("BEGIN")
+        cursor = {"at": _now(), "max_n": _max_n(rows)}
+        new = _new_records(root, db, setting(root, "tidied_at", ""))
+        for table in ("outcomes", "moments"):
+            cursor[table] = db.execute("SELECT coalesce(max(id),0) FROM " + table).fetchone()[0]
+    finally:
+        db.close()
     since = (datetime.now(TZ) - timedelta(days=DAYS)).isoformat(timespec="seconds")
     write = lambda name, data: (folder / name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     write("rules.json", [{k: r[k] for k in ("id", "rule", "why", "source", "scope", "scope_name", "wins", "losses")}
@@ -102,7 +132,10 @@ def prepare(root, folder):
     one = lambda v: (v[0] if isinstance(v, list) and v else v) or ""
     write("unplaced.json", [{"n": r["编号"], "title": r.get("标题"), "status": one(r.get("状态")), "project": names.get(chosen.get(r["record_id"]), "")}
                             for r in rows if not versions.of(root, r["record_id"]) and one(r.get("状态")) != "取消"][-200:])
-    return rows
+    evidence = [f"moment:{i}" for i in new["moments"]] + [f"outcome:{i}" for i in new["outcomes"]]
+    evidence += [f"item:{r['编号']}" for r in rows if str(r["编号"]).isdigit() and int(r["编号"]) > last_n]
+    write("new-evidence.json", evidence)
+    return {"cursor": cursor, "profile_evidence": evidence}
 
 
 # ---- checking tidy.json ------------------------------------------------------------------------------------------
@@ -111,24 +144,49 @@ def _clean(text, n):
     return " ".join(str(text or "").split())[:n]
 
 
-def check(root, plan, rows=None):
+def _profile_change(text, old, new):
+    """Return the edited text, or the original for an already-known fact."""
+    compact = lambda value: " ".join(value.split()).rstrip("。.")
+    if not new or len(new) > 2000:
+        raise ValueError("new 应是一处完整的改动，最多 2000 字")
+    if compact(old) == compact(new) or (not old and compact(new) in compact(text)):
+        return text
+    if old and text.count(old) != 1:
+        raise ValueError("原句对不上或出现多次，请选能唯一定位的一处原文")
+    headings = re.findall(r"^#{1,6} +.+$", new, re.M)
+    if len(headings) > 1 or len(re.findall(r"^#{1,6} +.+$", old, re.M)) > 1:
+        raise ValueError("每处更新只能改一个小节")
+    if not old and text and not headings:
+        raise ValueError("请摘录要补充的原文，或给全新的小节写标题")
+    if not old and headings and headings[0] in text.splitlines():
+        raise ValueError("已有同名小节，请在原段落补充")
+    edited = text.replace(old, new, 1) if old else (text + "\n\n" + new).strip()
+    from .memory import PROFILE_MAX
+    if len(edited.strip()) > PROFILE_MAX:
+        raise ValueError("修改后超出「关于你」的长度，请缩小这处改动")
+    return edited
+
+
+def check(root, plan, rows=None, *, profile_evidence=None):
     """(proposals, problems): each proposal is (type, content, why, data); problems say what to fix, one line each."""
     from . import memory, versions
     if not isinstance(plan, dict) or not isinstance(plan.get("changes"), list):
         return [], ["tidy.json 要写成 {\"changes\": [...]}"]
-    rows = _rows(root) if rows is None else rows
-    rules = {r["id"]: r for r in memory.rules(root)}
-    moments = {m["id"]: m for m in memory.moments(root, limit=2000)}
+    kinds = {c["type"] for c in plan["changes"] if isinstance(c, dict) and isinstance(c.get("type"), str)}
+    if rows is None:
+        rows = _rows(root) if "place_item" in kinds else []
+    rules = {r["id"]: r for r in memory.rules(root)} if kinds & {"merge_rules", "retire_rule"} else {}
+    moments = {m["id"]: m for m in memory.moments(root, limit=2000)} if "stale_moment" in kinds else {}
     rid_of = {str(r.get("编号")): r["record_id"] for r in rows}
     title_of = {str(r.get("编号")): str(r.get("标题") or "") for r in rows}
-    have = {(v["project"], v["name"]): v for v in versions.all(root)}
-    profile = memory.profile(root)["text"]
+    have = {(v["project"], v["name"]): v for v in versions.all(root)} if "version_status" in kinds else {}
+    profile = memory.profile(root)["text"].strip() if "profile" in kinds else ""
     out, problems, profiles = [], [], 0
     for i, c in enumerate(plan["changes"][:MAX_CHANGES], 1):
         kind = (c or {}).get("type") if isinstance(c, dict) else None
         why = _clean((c or {}).get("why") if isinstance(c, dict) else "", 200)
         bad = lambda text: problems.append(f"第 {i} 条（{kind or '?'}）：{text}")
-        if kind not in LABEL:
+        if not isinstance(kind, str) or kind not in LABEL:
             bad("type 只能是 " + " / ".join(LABEL)); continue
         if not why:
             bad("要写一句 why（理由）"); continue
@@ -168,9 +226,16 @@ def check(root, plan, rows=None):
             out.append((kind, f"{key[0]} · {key[1]}：{have[key]['status_label']} → {versions.STATUS[new]}", why,
                         {"project": key[0], "version": key[1], "status": new}))
         else:
-            old, new = str(c.get("old") or "").strip(), str(c.get("new") or "").strip()[:2000]
-            if not new or (old and old not in profile) or profiles >= MAX_PROFILE:
-                bad("new 写改后的完整段落；old 要原样摘自 profile.md（补充新内容就留空）；最多两处"); continue
+            old, new = str(c.get("old") or "").strip(), str(c.get("new") or "").strip()
+            try:
+                if _profile_change(profile, old, new) == profile:
+                    continue
+            except ValueError as exc:
+                bad(str(exc)); continue
+            if profile_evidence is not None and c.get("evidence") not in profile_evidence:
+                bad("关于你的变化要引用 new-evidence.json 里的本轮依据"); continue
+            if profiles >= MAX_PROFILE:
+                bad("每轮最多两处局部更新"); continue
             profiles += 1
             out.append((kind, new, why, {"old": old, "new": new}))
     return out, problems
@@ -184,8 +249,17 @@ def save(root, proposals, job=""):
     added = 0
     try:
         with db:
+            db.execute("BEGIN IMMEDIATE")
             for kind, content, why, data in proposals:
+                anchor = data.get("old")
                 data = json.dumps(data, ensure_ascii=False, sort_keys=True)
+                if kind == "profile":
+                    if db.execute("SELECT 1 FROM memory_updates WHERE kind='profile' AND data=? "
+                                  "AND status IN ('pending','dropped')", (data,)).fetchone():
+                        continue
+                    if anchor:
+                        db.execute("UPDATE memory_updates SET status='superseded',decided=? WHERE kind='profile' "
+                                   "AND status='pending' AND json_extract(data,'$.old')=?", (_now(), anchor))
                 if db.execute("SELECT 1 FROM memory_updates WHERE kind=? AND data=? AND status='pending'", (kind, data)).fetchone():
                     continue
                 db.execute("INSERT INTO memory_updates (job, kind, content, why, data, status, created) VALUES (?,?,?,?,?,'pending',?)",
@@ -263,13 +337,12 @@ def _apply(root, kind, d):
         versions.upsert(root, d["project"], d["version"], d["status"])
     elif kind == "profile":
         text = memory.profile(root)["text"].strip()
-        if d.get("old"):
-            if d["old"] not in text:
-                return "「关于你」后来改过，这一处对不上了"
-            text = text.replace(d["old"], d["new"], 1)
-        else:
-            text = (text + "\n\n" + d["new"]).strip()
-        memory.set_profile(root, text)
+        try:
+            edited = _profile_change(text, d["old"], d["new"])
+            if edited != text:
+                memory.set_profile(root, edited, expected=text)
+        except ValueError as exc:
+            return str(exc)
     return ""
 
 

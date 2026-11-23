@@ -226,13 +226,50 @@ def test(root, config):
         return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
 
 
+def remember_profile(root, text, previous=""):
+    """A confirmed revision is one event. Give the SDK only changed lines after the first snapshot."""
+    from hashlib import sha256
+    from difflib import SequenceMatcher
+    from . import memory
+    text, previous = text.strip(), previous.strip()
+    if not text or not on(root):
+        return False
+    digest = lambda value: sha256(value.encode()).hexdigest()
+    db = _db(root)
+    try:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            if memory.profile(root)["text"].strip() != text:
+                return False  # a newer confirmed edit reached the file first
+            last = db.execute("SELECT id,ref,text FROM hymem_queue WHERE kind='profile' ORDER BY id DESC LIMIT 1").fetchone()
+            full = "关于本人：\n" + text
+            if last and (last[1].endswith(digest(text)) or last[2] == full):
+                return False
+            content = full
+            if previous and last and (last[1].endswith(digest(previous)) or last[2] == "关于本人：\n" + previous):
+                old, new = previous.splitlines(), text.splitlines()
+                changes = []
+                for tag, i, j, k, l in SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+                    if tag == "equal":
+                        continue
+                    heading = next((line for line in reversed(new[:k]) if line.startswith("#")), "")
+                    changes.append(f"{heading}\n原文：{' '.join(old[i:j]) or '（无）'}\n更新为：{' '.join(new[k:l]) or '（已移除）'}")
+                content = "本人确认的画像修订：\n" + "\n".join(changes)
+            ref = f"profile:{last[0] if last else 0}:{digest(text)}"
+            db.execute("INSERT INTO hymem_queue (at,kind,text,workspace,ref) VALUES (?, 'profile', ?, '', ?)",
+                       (_now(), content, ref))
+        return True
+    finally:
+        db.close()
+
+
 def backfill(root):
     """When 记忆增强 is switched on: queue what 心响 already knows, so Hy Memory does not start empty."""
     from . import memory
     n = 0
     prof = memory.profile(root)["text"].strip()
     if prof:
-        n += remember(root, "profile", "关于本人：\n" + prof, ref="profile:" + prof[:40])
+        n += remember_profile(root, prof)
     for m in memory.moments(root, limit=300):
         n += remember(root, "moment", f"{m.get('at', '')[:10]} {m.get('source_title') or ''}：{m.get('text')}", ref=f"moment:{m.get('id')}")
     for o in memory.outcomes(root):

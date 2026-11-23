@@ -541,7 +541,7 @@ async function load(){
   catch(e){ if(seq!==loadSequence)return; failing=true; }
   if(failing || !openFromHash()) render();  // a notification or the menu may ask for one item or the inbox
   clearTimeout(refreshTimer);
-  refreshTimer=setTimeout(load,commands().some(waiting)||(D&&D.approvals||[]).length?1500:S.ob&&OB[S.ob.step]?.key==="ai"||(D&&setupBusy())?2500:8000);   // waiting for the AI to say hello: look often
+  if(!document.hidden) refreshTimer=setTimeout(load,commands().some(waiting)?1500:S.ob&&OB[S.ob.step]?.key==="ai"||(D&&setupBusy())?2500:60000);   // waiting for the AI to say hello: look often
 }
 /* while the window is open, new things say so instead of waiting to be found */
 function announce(){
@@ -1054,7 +1054,7 @@ function memPage(){
     +(!editing&&!P.text?"":editing?`<div class="list" style="padding:12px 14px"><textarea id="prof" data-draft="prof" rows="9" style="width:100%" placeholder="${esc(PROFILE_HINT)}">${esc(P.text||"")}</textarea>
         <div class="acts" style="margin-top:8px;justify-content:flex-end">${P.text?`<button class="btn" onclick="S.profEdit=false;render()">取消</button>`:""}<button class="btn pri" onclick="saveProfile()">保存</button></div></div>`
       :`<div class="list" style="padding:12px 14px"><div class="prof-text">${esc(P.text)}</div><div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.profEdit=true;render()">改</button></div></div>`);
-  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你手上的项目和版本、你的规矩。</p>`+updatesView()+about+scanView(P)+versionsView()
+  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你手上的项目和版本、你的规矩。</p>`+updatesView()+about+scanView(P)+(P.text&&P.draft?`<details style="margin-top:10px"><summary>查看旧版草稿</summary><div class="prof-text">${esc(P.draft.text)}</div></details>`:"")+versionsView()
    +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
    +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span>${verdictLine()}</div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,ruleMeta(r),
@@ -1084,13 +1084,13 @@ const SCAN=[["feishu","飞书近 30 天","文档、群、会议、任务"],["fol
 function scanReady(k){ const s=D.system||{}; return k==="feishu"?!!(s.record||{}).feishu_ready:k==="wechat"?wxOn(s):true; }
 function scanView(P){
   const who=esc(((D.settings||{}).setup||{}).driver?.name||"你的 AI");
-  if(P.draft) return `<div class="callout" style="margin-top:12px"><div class="what"><b>${esc(P.draft.by||"AI")} 写好了一份「关于你」草稿</b>　${esc(P.draft.at||"")}<div class="prof-text" style="margin-top:8px;max-height:320px;overflow:auto">${esc(P.draft.text)}</div></div>
+  if(P.draft&&!P.text) return `<div class="callout" style="margin-top:12px"><div class="what"><b>${esc(P.draft.by||"AI")} 写好了一份「关于你」草稿</b>　${esc(P.draft.at||"")}<div class="prof-text" style="margin-top:8px;max-height:320px;overflow:auto">${esc(P.draft.text)}</div></div>
     <div class="acts"><button class="btn pri" onclick="useDraft(true)">用这份</button><button class="btn" onclick="editDraft()">改一改再用</button><button class="btn ghost" onclick="useDraft(false)">不要</button></div></div>`;
-  if(P.scanning) return `<div class="callout" style="margin-top:12px"><div class="what"><b>${esc(P.scanning.by||"AI")} 正在认识你</b>${P.scanning.step?`：${esc(P.scanning.step)}`:""}<br><span class="hint" style="margin:0">看完会写一份草稿放在这里，你确认了才生效。</span></div></div>`;
+  if(P.scanning) return `<div class="callout" style="margin-top:12px"><div class="what"><b>${esc(P.scanning.by||"AI")} 正在认识你</b>${P.scanning.step?`：${esc(P.scanning.step)}`:""}<br><span class="hint" style="margin:0">${P.text?"有变化时会列在记忆更新里。":"草稿写好后由你确认。"}</span></div></div>`;
   if(P.asked) return `<div class="callout" style="margin-top:12px"><div class="what">等 ${who} 来看：${esc((P.asked.sources||[]).map(k=>(SCAN.find(x=>x[0]===k)||[])[1]).filter(Boolean).join("、"))}</div><div class="acts"><button class="btn ghost" onclick="askScan([])">不看了</button></div></div>`;
-  if(!S.scanPick) return `<div class="acts" style="margin-top:10px;justify-content:flex-end"><button class="btn" onclick="S.scanPick=SCAN.filter(x=>scanReady(x[0])).map(x=>x[0]);render()">让 AI 认识我</button></div>`;
+  if(!S.scanPick) return `<div class="acts" style="margin-top:10px;justify-content:flex-end"><button class="btn" onclick="S.scanPick=SCAN.filter(x=>scanReady(x[0])).map(x=>x[0]);render()">${P.text?"核对新变化":"让 AI 认识我"}</button></div>`;
   return `<div class="list" style="margin-top:12px;padding:12px 14px"><div class="k" style="font-weight:600">让 AI 看哪些地方</div>
-    <p class="hint" style="margin:4px 0 10px">${who} 会按你勾的地方看一遍，整理成一份「关于你」草稿给你确认。只写摘要，不保存聊天原文和文档内容。</p>
+    <p class="hint" style="margin:4px 0 10px">${who} ${P.text?"只核对你选的来源，有新认识时会在「记忆更新」里列出改动。":"会从你选的来源整理一份草稿给你确认。"}只写摘要，不保存聊天原文和文档内容。</p>
     ${SCAN.map(([k,l,d])=>{ const ok=scanReady(k), on=S.scanPick.includes(k); return `<label class="scan-pick ${ok?"":"off"}"><input type="checkbox" ${on?"checked":""} ${ok?"":"disabled"} onchange="scanToggle('${k}')"><span><b>${l}</b>　${ok?d:"还没接入"}</span></label>`; }).join("")}
     <div class="acts" style="margin-top:10px;justify-content:flex-end"><button class="btn" onclick="S.scanPick=null;render()">取消</button><button class="btn pri" ${S.scanPick.length?"":"disabled"} onclick="askScan(S.scanPick)">同意，开始看</button></div></div>`;
 }
@@ -1099,7 +1099,7 @@ async function askScan(list){
   if(!LIVE) return toast("原型里不能扫");
   try{ const r=await api("/api/profile",{scan:list},15000); S.scanPick=null;
     if(!list.length) toast("好，不看了");
-    else if(r.name&&r.online) toast(`已交给 ${r.name}，看完会把草稿放在这里`);
+    else if(r.name&&r.online) toast(`已交给 ${r.name}，${D.memory?.profile?.text?"有变化会列在记忆更新里":"草稿会放在这里"}`);
     else { copySetupPrompt(); toast(r.name?`${r.name} 现在不在：已复制那段话，再发给它一次`:"还没有 AI 在驱动心响：已复制一段话，发给你常用的 AI，它报到后就会来看"); }
     await load(); }
   catch(e){ toast(e.message||"没交出去，连不上本机服务"); }
@@ -1112,7 +1112,7 @@ function editDraft(){ const P=(D.memory||{}).profile||{}; drafts.set("prof",P.dr
 async function saveProfile(){
   const text=String($("#prof")?.value||"").trim();
   if(!LIVE){ (D.memory ||= {}).profile={text,at:"刚刚"}; S.profEdit=false; drafts.delete("prof"); return render(); }
-  try{ const had=!!((D.memory||{}).profile||{}).draft, r=await api("/api/profile",{text},15000);
+  try{ const had=D.memory?.profile?.draft&&!D.memory.profile.text, r=await api("/api/profile",{text},15000);
     if(had) await api("/api/profile",{draft:false},15000);   // the AI's draft went into what was just saved
     (D.memory ||= {}).profile=r.profile; S.profEdit=false; drafts.delete("prof"); toast("记下了，AI 做事前都会先读"); await load(); }
   catch(e){ toast("没保存成功，连不上本机服务"); }
@@ -1276,8 +1276,8 @@ function setupSteps(){
   out.push({k:"driver",name:"AI 接手",state:d?"ok":"wait",text:d?`${d.name} 在这儿`:"等你把那段话发给 AI"});
   out.push({k:"listener",name:"后台程序",state:s.listener==="运行中"?"ok":"wait",text:s.listener==="运行中"?"在运行":"等 AI 启动"});
   tool("feishu","飞书",!!r.feishu_ready); tool("slack","Slack",!!s.slack); tool("wechat","微信",wxOn(s));
-  if(P.asked||P.scanning||P.draft) out.push({k:"know",name:"认识你",state:P.draft?"ok":P.scanning?"doing":"wait",
-    text:P.draft?"草稿写好了，去「记忆」里确认":P.scanning?(P.scanning.step||"正在看"):"排着队",go:P.draft?"mem":""});
+  if(P.asked||P.scanning||(P.draft&&!P.text)) out.push({k:"know",name:"认识你",state:P.draft&&!P.text?"ok":P.scanning?"doing":"wait",
+    text:P.draft&&!P.text?"草稿写好了，去「记忆」里确认":P.scanning?(P.scanning.step||"正在看"):"排着队",go:P.draft&&!P.text?"mem":""});
   const O=(D.memory||{}).organize||{}, V=(D.memory||{}).versions||[];
   if(O.asked||O.doing||S.organizedNow) out.push({k:"organize",name:"整理项目和版本",state:O.doing?"doing":O.asked?"wait":"ok",
     text:O.doing?(O.doing.step||"正在整理"):O.asked?"排着队":`理出 ${V.length} 个版本，去「记忆」里看`,go:!O.doing&&!O.asked?"mem":""});
@@ -1301,7 +1301,7 @@ const OB=[
   {key:"tools",title:"平时在哪收到工作",sub:"点选你用的，等会儿你的 AI 会一个个帮你接好。都不选也能用，要做的事自己加。",body:(st,s)=>{ const r=s.record||{};
     return `<div class="chips ob-tools">${obTool("want_feishu",st.want_feishu,r.feishu_ready,"飞书")}${obTool("want_slack",st.want_slack,!!s.slack,"Slack")}${obTool("want_wechat",st.want_wechat,wxOn(s),"微信")}</div>`; }},
   {key:"know",title:"让 AI 认识你和你的项目",sub:"勾选 AI 能看的地方，它会写一份「关于你」（岗位、在做的事、和谁合作、喜欢怎样的交付），再把你手上的事按「项目 → 版本」理清楚。之后做事会更贴你的意图。",body:()=>{
-    if(!S.ob.scan) S.ob.scan=SCAN.filter(x=>obCanScan(x[0])).map(x=>x[0]);
+    if(!S.ob.scan) S.ob.scan=(D.memory?.profile?.text||D.memory?.profile?.draft)?[]:SCAN.filter(x=>obCanScan(x[0])).map(x=>x[0]);
     if(S.ob.organize===undefined) S.ob.organize=true;
     return SCAN.map(([k,l,d])=>{ const ok=obCanScan(k), on=S.ob.scan.includes(k); return `<label class="scan-pick ${ok?"":"off"}"><input type="checkbox" ${on&&ok?"checked":""} ${ok?"":"disabled"} onchange="obScan('${k}')"><span><b>${l}</b>　${ok?d:"没选这个工具"}</span></label>`; }).join("")
       +`<label class="scan-pick" style="margin-top:6px;border-top:1px solid var(--line2);padding-top:12px"><input type="checkbox" ${S.ob.organize?"checked":""} onchange="S.ob.organize=!S.ob.organize;render()"><span><b>整理项目和版本</b>　从你的需求池、排期表里把事归到版本，补上谁先谁后</span></label>`
@@ -2038,7 +2038,7 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["today","今天",todayCount(),"hot"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length+((D.memory||{}).updates||[]).length+(((D.memory||{}).profile||{}).draft?1:0),"need"],["sys","设置",0,""]];
+  const nav=[["today","今天",todayCount(),"hot"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length+((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
@@ -2228,7 +2228,10 @@ function fitWindow(){
   }catch(e){}
 }
 fitWindow();
-if(LIVE){ load(); } else render();
+if(LIVE){
+  document.addEventListener("visibilitychange",()=>{ clearTimeout(refreshTimer); if(!document.hidden) load(); });
+  load();
+} else render();
 </script>
 </body>
 </html>

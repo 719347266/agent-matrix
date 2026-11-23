@@ -567,13 +567,17 @@ class Handler(BaseHTTPRequestHandler):
                     except ValueError as exc:
                         return self._send(400, {"ok": False, "reply": str(exc)})
                     return self._send(200, {"ok": True, **setup_view(root)["driver"]})
+                before = memory.profile(root)["text"].strip()
                 if "draft" in body:                # the owner keeps the AI's draft, or throws it away
-                    got = memory.drop_draft(root, use=bool(body["draft"]))
+                    try:
+                        got = memory.drop_draft(root, use=bool(body["draft"]))
+                    except ValueError as exc:
+                        return self._send(409, {"ok": False, "reply": str(exc)})
                 else:
                     got = memory.set_profile(root, body.get("text"))
-                from . import hymem   # 记忆增强: the owner's own account of who they are
-                if got.get("text"):
-                    hymem.remember(root, "profile", "关于本人：\n" + got["text"], ref="profile:" + got.get("at", ""))
+                if got["text"].strip() != before:
+                    from . import hymem
+                    hymem.remember_profile(root, got["text"], before)
                 return self._send(200, {"ok": True, "profile": got})
             if path == "/api/organize":  # 整理项目和版本: the AI sorts the work; the owner fixes what it got wrong
                 from . import versions
@@ -605,7 +609,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/memory/updates":  # 记忆更新: 用 applies what the daily tidy proposed, 不要 leaves the memory alone
                 from . import tidy
                 pick = lambda v: [u["id"] for u in tidy.updates(root)] if v == "all" else [int(x) for x in (v if isinstance(v, list) else [v])]
+                from . import memory
+                before = memory.profile(root)["text"].strip() if body.get("use") else ""
                 used, failed = tidy.use(root, pick(body["use"])) if body.get("use") else ([], {})
+                if used:
+                    after = memory.profile(root)["text"].strip()
+                    if after != before:
+                        from . import hymem
+                        hymem.remember_profile(root, after, before)
                 if body.get("drop"):
                     tidy.drop(root, pick(body["drop"]))
                 return self._send(200, {"ok": not failed, "used": len(used), "failed": {str(k): v for k, v in failed.items()},

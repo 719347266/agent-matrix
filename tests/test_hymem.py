@@ -79,6 +79,22 @@ class Boost(unittest.TestCase):
         self.assertEqual(hymem.backfill(self.root), 2)
         self.assertEqual(hymem.backfill(self.root), 0, "already queued: not twice")
 
+    def test_profile_sync_keeps_only_new_information_and_can_revert(self):
+        hymem.mark(self.root, True)
+        original = "## 工作\n产品经理\n\n## 格式\n先给结论"
+        edited = original.replace("产品经理", "产品和增长")
+        memory.set_profile(self.root, original)
+        self.assertTrue(hymem.remember_profile(self.root, original))
+        memory.set_profile(self.root, edited)
+        self.assertTrue(hymem.remember_profile(self.root, edited, original))
+        self.assertFalse(hymem.remember_profile(self.root, edited))
+        memory.set_profile(self.root, original)
+        self.assertFalse(hymem.remember_profile(self.root, edited, original))
+        self.assertTrue(hymem.remember_profile(self.root, original, edited))
+        self.assertEqual(hymem.flush(self.root, cfg()), (3, 0))
+        self.assertNotIn("先给结论", self.fake.added[1][0])
+        self.assertIn("更新为：产品经理", self.fake.added[2][0])
+
     def test_settings_go_to_hy_memory_with_the_data_kept_in_this_project(self):
         env = hymem._env(self.root, cfg(memory_embed_base_url="https://emb.example.com/v1"))
         self.assertEqual(env["MEMORY_DATA_DIR"], str(self.root / "state" / "hy_memory"))

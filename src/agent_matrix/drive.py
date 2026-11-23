@@ -297,16 +297,67 @@ def _prepare_profile(root, config, driver):
     if not asked or _busy(root, "profile"):
         return None
     sources = [s for s in asked.get("sources") or [] if s in SCAN_STEPS]
-    stamp = now().strftime("%Y%m%d%H%M%S")
-    current = memory.profile(root)["text"].strip() or "（还没有，本人没写过）"
-    text = read(root, "profile_scan.md").format(sources="、".join(memory.SCAN_SOURCES[s] for s in sources),
-                                                 current=current, steps="\n\n".join(SCAN_STEPS[s] for s in sources))
-    return {"id": f"profile-{stamp}", "kind": "profile", "title": "认识你：写一份「关于你」", "folder": str(scratch(root, "profile", stamp)),
-            "ref": {"sources": sources}, "output": ["画像.md"], "lease_until": _lease(ITEM_LEASE_MINUTES), "instructions": text}
+    stamp = now().strftime("%Y%m%d%H%M%S%f")
+    profile = memory.profile(root)
+    current = profile["text"].strip()
+    folder = scratch(root, "profile", stamp)
+    if current:
+        from .thread import setting
+        checked = setting(root, "profile_checked_sources", {})
+        since = "；".join(f"{memory.SCAN_SOURCES[s]}自 {checked.get(s, profile['modified'])}" for s in sources)
+        output = "profile-updates.json"
+        # Incremental scans never inherit the initial 30-day discovery checklist.
+        text = read(root, "profile_update.md").replace("{current}", current).replace(
+            "{sources}", "、".join(memory.SCAN_SOURCES[s] for s in sources)).replace(
+            "{since}", since)
+        title = "核对「关于你」的变化"
+    else:
+        output = "画像.md"
+        text = read(root, "profile_scan.md").format(sources="、".join(memory.SCAN_SOURCES[s] for s in sources),
+                   current="（还没有，本人没写过）", steps="\n\n".join(SCAN_STEPS[s] for s in sources))
+        title = "认识你：写一份「关于你」"
+    return {"id": f"profile-{stamp}", "kind": "profile", "title": title, "folder": str(folder),
+            "ref": {"sources": sources, "incremental": bool(current), "requested_at": asked.get("at")},
+            "output": [output], "lease_until": _lease(ITEM_LEASE_MINUTES), "instructions": text}
 
 
 def _submit_profile(root, job):
     from . import inbox, memory
+    request = job["ref"].get("requested_at")
+    if request and (memory.scan_asked(root) or {}).get("at") != request:
+        _close(root, job, "done")
+        return {"ok": True, "status": "done", "proposed": 0}
+    if job["ref"].get("incremental"):
+        from . import tidy
+        from .thread import set_setting, setting
+        try:
+            plan = json.loads((Path(job["folder"]) / "profile-updates.json").read_text(encoding="utf-8"))
+            changes = plan["changes"]
+            if not isinstance(changes, list) or len(changes) > tidy.MAX_PROFILE or any(
+                    not isinstance(c, dict) or c.get("type") != "profile" for c in changes):
+                raise ValueError
+            proposals, problems = tidy.check(root, plan, rows=[])
+        except (OSError, ValueError, KeyError, TypeError):
+            proposals, problems = [], ["profile-updates.json 应包含 changes 数组，最多两项关于你的局部改动。"]
+        if problems:
+            job["rounds"] += 1
+            if job["rounds"] > MAX_FIX_ROUNDS:
+                return fail(root, job, problems[0])
+            _save(root, job)
+            return {"ok": False, "status": "fix", "problem": "；".join(problems)}
+        added = tidy.save(root, proposals, job["id"])
+        checked = setting(root, "profile_checked_sources", {})
+        checked.update(dict.fromkeys(job["ref"]["sources"], request))
+        set_setting(root, "profile_checked_sources", checked)
+        if (memory.scan_asked(root) or {}).get("at") == job["ref"].get("requested_at"):
+            memory.cancel_scan(root)
+        _close(root, job, "done")
+        if added:
+            try:
+                inbox.add(root, "profile-update:" + job["id"], f"「关于你」有 {added} 处变化待确认，可在记忆更新里逐条查看。", kind="system")
+            except Exception as exc:
+                activity.swallowed(root, "drive._submit_profile", exc)
+        return {"ok": True, "status": "done", "proposed": added}
     path = Path(job["folder"]) / "画像.md"
     text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
     sections = [x for x in text.split("\n## ")[1:] if x.split("\n", 1)[-1].strip()]
@@ -319,6 +370,10 @@ def _submit_profile(root, job):
             return fail(root, job, problem)
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem}
+    if memory.profile(root)["text"].strip():
+        memory.cancel_scan(root)
+        _close(root, job, "done")
+        return {"ok": True, "status": "done", "proposed": 0}
     memory.save_draft(root, text, by=job.get("driver") or "AI")
     _close(root, job, "done")
     activity.log(root, "learn", "认识你：「关于你」草稿写好了", detail=job.get("driver") or "")
@@ -416,7 +471,7 @@ def _prepare_tidy(root, config, driver):
     tidy.tried(root)
     stamp = now().strftime("%Y%m%d%H%M%S")
     folder = scratch(root, "tidy", stamp)
-    tidy.prepare(root, folder)
+    new.update(tidy.prepare(root, folder))
     return {"id": f"tidy-{stamp}", "kind": "tidy", "title": "整理记忆", "folder": str(folder), "ref": new,
             "output": ["tidy.json"], "lease_until": _lease(OTHER_LEASE_MINUTES), "instructions": promptfile.read(root, "tidy.md")}
 
@@ -428,14 +483,14 @@ def _submit_tidy(root, job):
         plan = json.loads((Path(job["folder"]) / "tidy.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         plan = None
-    proposals, problems = tidy.check(root, plan)
+    proposals, problems = tidy.check(root, plan, profile_evidence=job["ref"].get("profile_evidence"))
     if plan is None or (problems and job["rounds"] < MAX_FIX_ROUNDS):
         job["rounds"] += 1
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": ("没有找到有效的 tidy.json（格式见说明里的例子）。" if plan is None
                                                           else "；".join(problems)[:600] + "。改好或删掉这几条再交。")}
     added = tidy.save(root, proposals, job["id"])
-    tidy.done(root)
+    tidy.done(root, job["ref"].get("cursor"))
     _close(root, job, "done")
     activity.log(root, "learn", f"整理记忆：{added} 条更新等你确认" if added else "整理记忆：没有要改的", detail=job.get("driver") or "")
     if added:   # told once, like the other finished work: the list waits on top of 记忆
@@ -454,24 +509,24 @@ def _prepare_learn(root, config, driver):
     if _busy(root, "learn"):
         return None
     since = conversation.setting(root, "learned_at", "")
-    hist = conversation.history(root)
-    feedback = []
-    snap = {}
+    checked_at = now().isoformat(timespec="seconds")
+    db = _db(root)
     try:
-        from .snapshot import _snapshot
-        snap = {r.get("record_id"): r for r in _snapshot(root).get("rows") or []}
-    except Exception as exc:
-        activity.swallowed(root, "drive._prepare_learn", exc)
-    for rid, h in hist.items():
-        for m in h.get("messages", []):
-            if m["from"] == "me" and m["kind"] == "feedback" and len(m["text"]) >= 6 and m["at"] > (since[5:16].replace("T", " ") if since else ""):
-                feedback.append({"item": str((snap.get(rid) or {}).get("标题") or ""), "at": m["at"], "said": m["text"][:400]})
+        messages = db.execute("SELECT record_id,at,text FROM messages WHERE sender='me' AND kind='feedback' "
+                              "AND at>? AND length(text)>=6 ORDER BY at,id", (since,)).fetchall()
+    finally:
+        db.close()
+    outcomes = memory.outcomes(root, since=since)
+    if not messages and not outcomes:
+        return None
+    from .snapshot import _snapshot
+    snap = {r.get("record_id"): r for r in _snapshot(root).get("rows") or []}
+    feedback = [{"item": str((snap.get(rid) or {}).get("标题") or ""), "at": at, "said": said[:400]}
+                for rid, at, said in messages]
     verdicts = []
-    for o in memory.outcomes(root, since=since):
+    for o in outcomes:
         row = snap.get(o["record_id"]) or {}
         verdicts.append({**{k: v for k, v in o.items() if k != "record_id"}, "n": row.get("编号"), "item": str(row.get("标题") or "")})
-    if not feedback and not verdicts:
-        return None
     fresh_enough = len(feedback) + len(verdicts) >= LEARN_MIN_NEW
     stale = not since or now() - datetime.fromisoformat(since) > timedelta(hours=LEARN_EVERY_HOURS)
     if not (fresh_enough or stale):
@@ -483,7 +538,7 @@ def _prepare_learn(root, config, driver):
     (folder / "rules.json").write_text(json.dumps(memory.rules(root), ensure_ascii=False, indent=1), encoding="utf-8")
     what = "、".join(x for x in (f"{len(verdicts)} 次评审" if verdicts else "", f"{len(feedback)} 条反馈" if feedback else "") if x)
     return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {what}里学规矩", "folder": str(folder),
-            "ref": {"count": len(feedback)}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "ref": {"count": len(feedback), "checked_at": checked_at}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
             "instructions": promptfile.read(root, "learn.md")}
 
 
@@ -516,7 +571,7 @@ def _submit_learn(root, job):
     for rid in learned.get("retire") or []:
         if rid in ai_rules:
             memory.remove_rule(root, rid)
-    conversation.set_setting(root, "learned_at", now().isoformat(timespec="seconds"))
+    conversation.set_setting(root, "learned_at", job["ref"].get("checked_at") or now().isoformat(timespec="seconds"))
     if added:
         activity.log(root, "detect", "从你的反馈里学到新规矩：" + "；".join(added)[:200])
     _close(root, job, "done")
@@ -554,17 +609,44 @@ def _write_related(root, folder):
     (Path(folder) / "related_items.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _ready_meetings(root, config):
+    from . import meeting_watch
+    from .itemstore import feishu_free
+    from .state import State
+    if (not config or not config.meeting_watch_enabled or not config.meeting_watch_started_at
+            or config.intake_mode == "manual" or feishu_free(config)):
+        return []
+    current = now()
+    state = State(Path(root) / "state/state.db")
+    try:
+        queue = meeting_watch.MeetingQueue(state)
+        ready = queue.ready(current)
+        beat = state.get("listen:heartbeat")
+        last = state.get("meeting_watch:last_search")
+        if ready or (beat and current - meeting_watch.parse_time(beat) < timedelta(minutes=3)):
+            return ready
+        if last and current - meeting_watch.parse_time(last) < meeting_watch.SEARCH_WITHOUT_PUSH:
+            return []
+    finally:
+        state.close()
+    # Standalone installations can run a driver without a listener.
+    from .workenv import _check
+    _, checked = _check(root, "agent_matrix.meeting_watch")
+    return checked.get("ready") or []
+
+
 def _prepare_meeting(root, config, driver):
     from .meeting_review import Review
-    from .workenv import _check, _cli, scratch
-    code, checked = _check(root, "agent_matrix.meeting_watch")
+    from .workenv import _cli, scratch
     taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
-    for m in checked.get("ready") or []:
+    for m in _ready_meetings(root, config):
         mid = m["meeting_id"]
         if mid in taken:
             continue
         if m.get("status") == "needs_attention":
             _cli(root, "agent_matrix.meeting_watch", "notify-missing", "--meeting-id", mid)
+            continue
+        if not config.transcripts_to_llm_allowed or config.llm_backend != "cindy_current":
             continue
         code, prep = _cli(root, "agent_matrix.meeting_watch", "prepare", "--meeting-id", mid)
         if code != 0 or not prep.get("transcript_path"):
@@ -595,9 +677,9 @@ def _prepare_meeting(root, config, driver):
     return None
 
 
-def _chat_due(root):
+def _chat_due(root, config=None):
     from .workenv import _check
-    if _busy(root, "chat"):
+    if (config and not (config.chat_watch_enabled or config.wechat_enabled)) or _busy(root, "chat"):
         return False
     code, checked = _check(root, "agent_matrix.chat_review")
     if code != 0 or not checked.get("run_model"):
@@ -618,7 +700,7 @@ def _chat_due(root):
 def _prepare_chat(root, config, driver):
     from .chat_review import ChatReview
     from .workenv import _cli, scratch
-    if not _chat_due(root):
+    if not _chat_due(root, config):
         return None
     code, prep = _cli(root, "agent_matrix.chat_review", "prepare")
     if code != 0 or not prep.get("candidates_path"):
@@ -761,13 +843,11 @@ def item_filter(root, driver, *, builtin=False):
 def has_sorting_for(root, config):
     """Is there a meeting, a round of chats or new items to judge waiting? Cheap: a schedule's pre-run check asks."""
     from . import thread as conversation
-    from .workenv import _check
     try:
-        code, checked = _check(root, "agent_matrix.meeting_watch")
         taken = {j["ref"].get("meeting_id") for j in open_jobs(root) if j["kind"] == "meeting"}
-        if any(m.get("status") == "ready" and m["meeting_id"] not in taken for m in checked.get("ready") or []):
+        if any(m.get("status") == "ready" and m["meeting_id"] not in taken for m in _ready_meetings(root, config)):
             return "meeting"
-        if _chat_due(root):
+        if _chat_due(root, config):
             return "chat"
         if conversation.setting(Path(root), "auto_assign", False) and not _busy(root, "triage"):
             from .itemwork import _pending_new
@@ -1167,7 +1247,8 @@ def release(root, config, job_id, reason="驱动方放回"):
         _item(root, config, job).release()
     if job["kind"] == "profile":   # the AI could not do it: the ask goes away (else it comes straight back); the owner can ask again
         from . import memory
-        memory.cancel_scan(root)
+        if not job["ref"].get("requested_at") or (memory.scan_asked(root) or {}).get("at") == job["ref"]["requested_at"]:
+            memory.cancel_scan(root)
     if job["kind"] == "organize":
         from . import versions
         versions.organize_done(root)

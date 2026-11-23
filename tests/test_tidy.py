@@ -68,8 +68,20 @@ class Tidy(unittest.TestCase):
             later = datetime.now(TZ) + timedelta(hours=25)
             self.assertGreaterEqual(tidy.due(self.root, now=later)["verdicts"], 1, "a day later, with a new verdict: again")
             set_setting(self.root, "tidy_tried_at", (datetime.now(TZ) - timedelta(hours=25)).isoformat(timespec="seconds"))
-            set_setting(self.root, "tidied_at", datetime.now(TZ).isoformat(timespec="seconds"))
-            self.assertIsNone(tidy.due(self.root), "a day passed, but nothing new since")
+            # A second verdict arrived after the input snapshot. Complete the next round to consume it.
+            next_job = take(self.root)
+            (Path(next_job["folder"]) / "tidy.json").write_text('{"changes":[]}')
+            self.assertEqual(drive.submit(self.root, None, next_job["id"])["status"], "done")
+            self.assertIsNone(tidy.due(self.root, now=later), "both verdicts have now been seen")
+
+    def test_old_evidence_cannot_create_a_fresh_profile_change(self):
+        memory.set_profile(self.root, "偏好简短")
+        plan = {"changes": [{"type": "profile", "old": "简短", "new": "先列结论", "why": "较早的评审", "evidence": "outcome:1"}]}
+        ok, problems = tidy.check(self.root, plan, profile_evidence=["outcome:2"])
+        self.assertFalse(ok)
+        self.assertTrue(problems)
+        plan["changes"][0]["evidence"] = "outcome:2"
+        self.assertEqual(len(tidy.check(self.root, plan, profile_evidence=["outcome:2"])[0]), 1)
 
     def test_submit_checks_the_plan_and_keeps_it_waiting_without_changing_the_memory(self):
         memory.record_outcome(self.root, "r1", "退回", "太长了")
@@ -113,8 +125,8 @@ class Tidy(unittest.TestCase):
             {"type": "place_item", "n": 2, "project": "观己 App", "version": "2.3", "why": "会员页在 2.3"},
             {"type": "place_item", "n": 3, "project": "心响", "why": "上线通知"},
             {"type": "version_status", "project": "观己 App", "version": "2.2", "status": "已完成", "why": "上线了"},
-            {"type": "profile", "old": "## 在做的事\n会员体系", "new": "## 在做的事\n会员体系改版，下一步年卡", "why": "最近都在谈年卡"},
-            {"type": "profile", "old": "", "new": "## 常一起干活的人\n张三（设计）", "why": "会上常出现"},
+            {"type": "profile", "old": "## 在做的事\n会员体系", "new": "## 在做的事\n会员体系改版，下一步年卡", "why": "最近都在谈年卡", "evidence": f"moment:{new}"},
+            {"type": "profile", "old": "", "new": "## 常一起干活的人\n张三（设计）", "why": "会上常出现", "evidence": f"moment:{new}"},
         ]})
         self.assertEqual((out["status"], out["proposed"]), ("done", 8))
         ups = {(u["type"], u["data"].get("n")): u["id"] for u in tidy.updates(self.root)}

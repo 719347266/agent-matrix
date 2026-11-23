@@ -38,6 +38,27 @@ class ChatPolling(unittest.TestCase):
     def poll(self, minutes=0):
         return chats.poll(Config(), self.client, self.state, self.now + timedelta(minutes=minutes))
 
+    def test_paused_collectors_and_idle_drivers_do_not_contact_feishu(self):
+        from agent_matrix.listen import Listener
+        config = Config(chat_watch_enabled=False, wechat_enabled=False, meeting_watch_enabled=True,
+                        meeting_watch_started_at=self.now.isoformat())
+        listener = Listener(self.root / "config.yaml")
+        scheduled = []
+        def due(name, seconds):
+            scheduled.append((name, seconds))
+            return name in {"chats", "slack"}
+        with patch("agent_matrix.listen.load", return_value=config), patch.object(listener, "every", side_effect=due), patch.object(listener, "locked") as locked:
+            listener.timers()
+            locked.assert_not_called()
+        self.assertNotIn("chats", dict(scheduled))
+        self.assertNotIn("slack", dict(scheduled))
+        self.assertEqual(dict(scheduled)["worker"], 600)
+        self.state.set("listen:heartbeat", self.now.isoformat())
+        with patch("agent_matrix.drive.now", return_value=self.now), patch("agent_matrix.workenv._check") as remote:
+            self.assertFalse(drive._chat_due(self.root, config))
+            self.assertEqual(drive._ready_meetings(self.root, config), [])
+            remote.assert_not_called()
+
     def test_idle_active_and_restart(self):
         self.poll()
         self.assertEqual(self.client._exec.call_count, 2)

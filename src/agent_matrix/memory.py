@@ -204,10 +204,11 @@ def add_rule(root, rule, why="", source="本人", scope=""):
     db = _db(root)
     try:
         with db:
-            db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
-                       "ON CONFLICT(rule) DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope",
-                       (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
-        return rule
+            conflict = ("DO NOTHING" if source == "AI 学的" else
+                        "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope")
+            added = db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
+                               "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
+        return rule if added.rowcount else None
     finally:
         db.close()
 
@@ -246,10 +247,10 @@ def outcomes(root, since=""):
     db = _db(root)
     try:
         names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
-        return [{"record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
+        return [{"id": oid, "record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
                  "template": t or "", "project": names.get(p, "")}
-                for r, a, v, why, ver, t, p in db.execute(
-                    "SELECT record_id, at, verdict, reason, version, template, project_id FROM outcomes WHERE at>? ORDER BY id", (since,))]
+                for oid, r, a, v, why, ver, t, p in db.execute(
+                    "SELECT id, record_id, at, verdict, reason, version, template, project_id FROM outcomes WHERE at>? ORDER BY id", (since,))]
     finally:
         db.close()
 
@@ -300,18 +301,28 @@ def profile(root):
     path = _profile_path(root)
     if not path.is_file():
         return {"text": "", "at": ""}
-    return {"text": path.read_text(encoding="utf-8"), "at": datetime.fromtimestamp(path.stat().st_mtime, TZ).strftime("%m-%d %H:%M")}
+    modified = datetime.fromtimestamp(path.stat().st_mtime, TZ)
+    return {"text": path.read_text(encoding="utf-8"), "at": modified.strftime("%m-%d %H:%M"), "modified": modified.isoformat(timespec="seconds")}
 
 
-def set_profile(root, text):
+def set_profile(root, text, *, expected=None):
+    from .state import exclusive_lock
+    from tempfile import NamedTemporaryFile
     text = str(text or "").strip()[:PROFILE_MAX]
     path = _profile_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if text:
-        path.write_text(text + "\n", encoding="utf-8")
-    elif path.exists():
-        path.unlink()
-    return profile(root)
+    with exclusive_lock(path.parent / "profile-write", wait=10):
+        current = profile(root)
+        if expected is not None and current["text"].strip() != expected:
+            raise ValueError("「关于你」已被编辑，请重新核对这处改动")
+        if current["text"].strip() == text:
+            return current
+        if text:
+            with NamedTemporaryFile(dir=path.parent, mode="w", encoding="utf-8", delete=False) as tmp:
+                tmp.write(text + "\n")
+            Path(tmp.name).replace(path)
+        else:
+            path.unlink(missing_ok=True)
+        return profile(root)
 
 
 def profile_text(root):
@@ -338,9 +349,14 @@ def ask_scan(root, sources):
     sources = [s for s in sources if s in SCAN_SOURCES]
     if not sources:
         raise ValueError("至少选一个地方")
+    pending = scan_asked(root)
+    if pending and set(pending.get("sources", [])) == set(sources):
+        return
+    if draft(root) and not profile(root)["text"].strip():
+        return
     path = _scan_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"sources": sources, "at": datetime.now(TZ).isoformat(timespec="seconds")}, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps({"sources": sources, "at": datetime.now(TZ).isoformat()}, ensure_ascii=False), encoding="utf-8")
 
 
 def scan_asked(root):
@@ -376,7 +392,7 @@ def drop_draft(root, use=False):
     """The owner decided: use the draft as 关于你 (use=True), or throw it away."""
     d = draft(root)
     if d and use:
-        set_profile(root, d["text"])
+        set_profile(root, d["text"], expected="")
     _draft_path(root).unlink(missing_ok=True)
     _draft_path(root).with_suffix(".json").unlink(missing_ok=True)
     return profile(root)

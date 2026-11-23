@@ -348,7 +348,7 @@ class Listener:
             log("worker kick failed", type(exc).__name__, str(exc)[:200])
 
     def meeting_check(self, config, client, state, now):
-        """Runs every minute: finds finished meetings on the meeting_watch schedule (every 5 minutes while
+        """Finds finished meetings on the meeting_watch schedule (every 5 minutes while
         Feishu does not push meeting events) and starts the AI employee as soon as a transcript is ready.
         Returns the meetings that just became ready (empty when nothing happened, so the log stays quiet).
         A failure here is recorded and never stops the other minute jobs."""
@@ -395,14 +395,18 @@ class Listener:
     def timers(self):
         jobs = []
         from .itemstore import feishu_free
-        no_feishu = feishu_free(load(self.path))  # Feishu meetings, chats and tasks need Feishu; Slack does not
-        if self.every("minute", 60) and not no_feishu:
+        cfg = load(self.path)
+        auto = cfg.intake_mode != "manual"
+        no_feishu = feishu_free(cfg)  # Feishu meetings, chats and tasks need Feishu; Slack does not
+        if self.every("minute", 300) and not no_feishu:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
                 from . import monitor
                 now = datetime.now(TZ)
-                parts = [("prep", lambda: meeting_prep.run(config, client, state, now, horizon=31, lead=20))]
+                parts = []
+                if self.every("meeting_prep", 600):
+                    parts.append(("prep", lambda: meeting_prep.run(config, client, state, now, horizon=35, lead=20)))
                 if state.get("brief-v1:migration-stage") == "v1_active":
                     parts += [("catch_up", lambda: catch_up_briefs(config, client, state, now)),
                               ("weekly", lambda: weekly_review.run(config, client, state, now))]
@@ -420,7 +424,7 @@ class Listener:
                     self.trouble("minute", "；".join(wrong))
                 return out
             jobs.append(("minute", minute))
-        if self.every("snapshot", 120):
+        if self.every("snapshot", 600):
             def snapshot(config, client, state):
                 from .workflow import Gateway
                 from . import monitor
@@ -428,31 +432,30 @@ class Listener:
                 monitor.save_snapshot(self.root, rows)
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
-        from .sources import chats
-        if not no_feishu and self.every("chats", chats.POLL_MINUTES * 60):
+        from .sources import chats, slack
+        if auto and cfg.chat_watch_enabled and not no_feishu and self.every("chats", chats.POLL_MINUTES * 60):
             def chat_poll(config, client, state):
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
-        if self.every("slack", 60):  # search: ~2 calls per poll, well under Slack limits
+        if auto and cfg.chat_watch_enabled and slack.token(cfg) and self.every("slack", chats.POLL_MINUTES * 60):
             def slack_poll(config, client, state):
-                from .sources import slack
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
                 out = slack.poll(config, self.root, state, datetime.now(TZ))
                 if isinstance(out, dict) and out.get("candidates"):
-                    self.wake_worker(config)  # don't wait for the 2-minute kick; the worker decides if it's time
+                    self.wake_worker(config)  # don't wait for the periodic kick; the worker decides if it's time
                 return out
             jobs.append(("slack", slack_poll))
-        if self.every("tasks", 900) and not no_feishu:
+        if auto and cfg.feishu_tasks_enabled and not no_feishu and self.every("tasks", 900):
             def tasks(config, client, state):
                 from .sources import feishu_tasks
                 on = config.feishu_tasks_enabled and config.intake_mode != "manual"
                 return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if on else "off"
             jobs.append(("tasks", tasks))
-        if self.every("worker", 120):
-            self.wake_worker(load(self.path))
+        if self.every("worker", 600):
+            self.wake_worker(cfg)
         if self.every("schedule", 60):
             self.fixed_times()
         if self.every("memory", 600):

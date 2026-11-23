@@ -33,7 +33,7 @@ CINDY = {"routine": "会议复盘与提前代做", "poll": "事项中心｜飞�
 STALE_AI_HOURS = 3
 
 
-# ---- task snapshot (written by the listener every 2 minutes) --------------------
+# ---- task snapshot (written by the listener every 10 minutes) --------------------
 
 
 
@@ -263,7 +263,7 @@ def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=No
     beat = _age((beats.get("会议检查") or {}).get("at"), now)
     if working and (beat is None or beat > 15):
         add("warn", "AI 员工没在检查", f"已经 {int(beat) if beat else '很久'} 分钟没检查会议和事项，会后待办、AI 代做都在等。",
-            "已在飞书提醒你一次（2 小时内不重复）。", "点「重启监听」，它负责每 2 分钟叫醒 AI 员工。", {"kind": "restart_listener"})
+            "已在飞书提醒你一次（2 小时内不重复）。", "点「重启监听」，恢复后台检查。", {"kind": "restart_listener"})
     acks = _acks(root)
     for name in CINDY["jobs"]:
         runs = cindy.get(name, {}).get("runs", [])
