@@ -140,7 +140,7 @@ def build_state(root):
                 "before": before_of.get(r["record_id"], []), "after": after_of.get(r["record_id"], []),
                 "ai_linked": ai_of.get(r["record_id"], []),
                 "related": suggest(r["record_id"], r.get("标题") or "") if linked is not None else [],
-                "draft_reply": _draft_reply(root, r)}
+                "draft_reply": _draft_reply(root, r), "draft_notice": _draft_notice(root, r)}
         items.append(item)
         h = history.get(r["record_id"], {})
         msgs = [{"at": _hm(r.get("创建时间")), "from": "system", "kind": "say", "text": f"从{item['source'] or '手动'}进表"}] \
@@ -257,6 +257,15 @@ def build_state(root):
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
             "system": {**system_info(root), "store": store_info(root), "update": _update_status(root)}, "bugs": _bugs(root)}
+
+
+def _draft_notice(root, row):
+    """The group notice the AI wrote (e.g. a PR is up), waiting for the owner's 发送 (or already sent)."""
+    from . import replies
+    entry = replies.get(root, row["record_id"], replies.NOTICE)
+    if not entry or entry.get("status") == "dropped":
+        return None
+    return entry
 
 
 def _draft_reply(root, row):
@@ -766,6 +775,21 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 except Exception as exc:   # Feishu / Slack refused: say so, the draft stays for another try
                     activity.swallowed(root, "app.reply_send", exc)
+                    return self._send(400, {"ok": False, "reply": f"没发出去（{type(exc).__name__}: {str(exc)[:120]}），草稿还在，可以再点一次。"})
+            if path in ("/api/notice/send", "/api/notice/drop"):   # only ever from the owner's own click
+                from . import replies
+                from .models import MatrixError
+                rid = str(body.get("rid") or "")
+                if path.endswith("drop"):
+                    ok = replies.discard(root, rid, replies.NOTICE)
+                    return self._send(200 if ok else 400, {"ok": ok, "reply": "" if ok else "这条群通知已经发过或不发了。"})
+                from .config import load as load_config
+                try:
+                    return self._send(200, replies.send_notice(root, load_config(root / "config.yaml"), rid, body.get("text")))
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except Exception as exc:   # Slack refused: say so, the draft stays for another try
+                    activity.swallowed(root, "app.notice_send", exc)
                     return self._send(400, {"ok": False, "reply": f"没发出去（{type(exc).__name__}: {str(exc)[:120]}），草稿还在，可以再点一次。"})
             if path == "/api/approval":
                 from . import approvals
