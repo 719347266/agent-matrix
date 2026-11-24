@@ -1461,6 +1461,30 @@ async function bugSave(){
   else (D.bugs ||= []).unshift({id:Date.now(),at:TODAY.slice(5)+" "+clock(),text,status:"open"});
   bugClose(); toast("记下了。攒够了到 设置 → 问题反馈 里一起交","去看看",()=>{ S.setTab="bugs"; go("sys"); });
 }
+/* ---------- 聊天判断：读到的每条消息怎么处理的、为什么 ---------- */
+const CL_TAG={item:["建了事项","ok"],merged:["并入","ok"],skip:["AI 没建","amber"],drop:["没交给 AI","gray"],pending:["等提取","busy"],seen:["AI 看过","gray"]};
+function chatlogPage(){
+  if(!S.chatlog){ if(LIVE&&!S.chatlogLoading){ S.chatlogLoading=true; api("/api/chatlog",{},20000).then(r=>{S.chatlog=r.lines;}).catch(e=>{S.chatlog=[];toast(e.message);}).finally(()=>{S.chatlogLoading=false;render();}); }
+    return `<div class="empty">${LIVE?"正在读…":"原型里没有聊天记录"}</div>`; }
+  const f=S.clFilter||"", q=(S.clQ||"").trim().toLowerCase();
+  const rows=S.chatlog.filter(x=>(!f||x.verdict===f)&&(!q||`${x.who} ${x.chat} ${x.text}`.toLowerCase().includes(q)));
+  const count=k=>S.chatlog.filter(x=>x.verdict===k).length;
+  const chips=[["","全部",S.chatlog.length],...Object.entries(CL_TAG).map(([k,[l]])=>[k,l,count(k)]).filter(x=>x[2])]
+    .map(([k,l,n])=>`<button class="chip ${f===k?"on":""}" onclick="S.clFilter='${k}';render()">${l} ${n}</button>`).join("");
+  const why=x=>x.verdict==="item"||x.verdict==="merged"?(x.why?`<a href="#" onclick="openItem(${x.why});return false">#${x.why}</a>`:"（事项已不在）")
+    :x.verdict==="pending"?"下一轮提取时交给 AI":esc(x.why||"");
+  const line=x=>{ const [l,tone]=CL_TAG[x.verdict]||[x.verdict,"gray"];
+    return `<div class="row" style="display:block"><div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+      <span class="eng-state ${tone==="ok"?"ok":tone==="busy"?"busy":tone==="amber"?"bad":""}">${l}</span><b>${esc(x.who||"")}</b>
+      <span class="hint" style="margin:0">${esc(x.chat||"")}${x.p2p?" · 私聊":""} · ${esc(x.at||"")}</span>
+      ${x.url?`<a class="hint" style="margin:0 0 0 auto" href="${esc(x.url)}" target="_blank" rel="noopener">原消息 ↗</a>`:""}</div>
+      <div style="margin:4px 0 2px;white-space:pre-wrap;word-break:break-word">${esc(String(x.text||"").slice(0,300))}</div>
+      <div class="hint" style="margin:0">${why(x)}</div></div>`; };
+  return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="S.setTab='tool';render()">‹ 接入</button>${chips}<button class="btn ghost" style="margin-left:auto" onclick="S.chatlog=null;render()">刷新</button></div>
+    <input style="width:100%;margin:8px 0" placeholder="按人、会话或内容找，比如 Carl" value="${esc(S.clQ||"")}" oninput="S.clQ=this.value;clearTimeout(S.clT);S.clT=setTimeout(()=>{render();const i=document.querySelector('.set-pane input');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}},250)">
+    <p class="hint">聊天每 ${(D.system?.record||{}).poll_every||30} 分钟读一次（在「接入 → 过滤和节奏」里改），刚发的消息要等下一轮才出现在这里。</p>
+    <div class="list">${rows.slice(0,300).map(line).join("")||'<div class="empty">没有符合的消息。</div>'}</div>`;
+}
 function bugsPage(){
   const list=D.bugs||[], open=list.filter(b=>b.status==="open");
   const row=b=>`<div class="row flat mem"><span class="ud"></span><span class="pill ${b.status==="open"?"amber":"green"}" style="justify-self:start">${b.status==="open"?"待提交":"已提交"}</span><div style="min-width:0"><div class="t wrap">${esc(b.text)}</div><div class="s">${esc(b.at)}</div></div>
@@ -1504,8 +1528,10 @@ async function updateNow(){
 }
 const SET_PAGES={
   ai:(st,s,w)=>["驱动心响的 AI","",aiPage(st,s)],
-  tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收进来的事怎么处理</div>${modePage(st,s)}</div>`],
+  tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收进来的事怎么处理</div>${modePage(st,s)}</div>`
+    +setSec("chatlog","","",setRow("聊天判断","读到的每条消息最后怎么样了，没收进来的写着原因。",`<button class="btn" onclick="S.setTab='chatlog';S.chatlog=null;render()">查看</button>`))],
   data:(st,s,w)=>["数据与通知","",dataSection(s)+boostSection(st)+setSec("notify","通知","",setRow("心响里","做完等你验收、AI 问你、新进来的事。",`<span class="eng-state ok">一直开着</span>`)+notifyRow(s))],
+  chatlog:(st,s,w)=>["聊天判断","读到的每条聊天消息最后怎么样了：建成事项、并入已有的事、AI 看过没建（写了原因），或者在交给 AI 之前就被规则挡掉（也写了原因）。",chatlogPage()],
   bugs:(st,s,w)=>["问题反馈","用着不对劲就记一条，攒几条再一起提交。提交时会附上心响的版本号和它自己的报错记录，方便查原因；你的事项和聊天内容不会附上。",bugsPage()],
   update:(st,s,w)=>["版本与更新","",updatePage(s.update||{})],
   more:(st,s,w)=>["更多","",setSec("look","","",setRow("外观","",`<div class="chips">${Object.entries(THEME_NAME).map(([k,l])=>`<button class="chip ${savedTheme()===k?"on":""}" onclick="setTheme('${k}')">${l}</button>`).join("")}</div>`)
@@ -1603,7 +1629,7 @@ function aiPage(st,s){
       +(useCindy?cindyRows(cindy,st):"")+(standby!==""||outside(work)||outside(sort)?fallbackRow(st,found):"")+used.map(e=>engineRow(e,st,found[e])).join(""))
    +`<p class="hint" style="margin:10px 2px 0">用别的 AI（Claude Code、Cursor、Antigravity…）：点「复制给 AI 的话」发给它，它来报到后就出现在选项里。</p>`
    +setSec("all","","",`<details><summary class="set-sum">每一项现在的状态</summary><div style="padding:12px 14px">${checkList()}</div></details>`)
-   +setSec("dev","","",setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦高危：删除、git push/reset、发布、连服务器和数据库这类命令，先停下等你在心响里批准。",
+   +setSec("dev","","",setRow("开发模式",{off:"关着：AI 自己跑命令，不问你。",risky:"只拦往外发的：git push、合并 PR、发布、部署、连服务器和数据库这类会动到这台电脑以外的命令，先停下等你在心响里批准。本机上的删文件、改代码照常跑。",
         every:"每步都问：AI 每次跑命令、写文件、上网前都等你批准（读本事项文件夹里的文件除外）。"}[st.dev_mode||"off"]
       +(st.dev_mode&&st.dev_mode!=="off"&&work!=="claude"?`<br><span style="color:var(--red)">只对本机 Claude 生效：做事用的不是本机 Claude 时，交给 AI 的事会先等着。</span>`:""),
       choice("dev_mode",st.dev_mode||"off",[["off","关"],["risky","只拦高危"],["every","每步都问"]])));
@@ -1681,8 +1707,29 @@ function slackRow(s){
   if(!me&&!x.ask&&!x.doing&&!S.slackPaste) return connectRow("slack","Slack","团队用 Slack 沟通的话接上，会从里面找出别人找你的事。")+`<p class="hint" style="margin:8px 14px">已经有 Token？<a href="#" onclick="S.slackPaste=true;render();return false">直接粘贴</a></p>`;
   return (me?"":connectRow("slack","Slack",""))+setRow(me?"Slack":"粘贴 Token",slackDesc,slackCtl,slackHelp+tried);
 }
+function jiraRow(s){
+  const me=s.jira;
+  if(me) return setRow("Jira",`已连接 ${esc(me.site||"")}，${esc(me.user||"")}。每 10 分钟把指派给你、没完成的单子同步进来；在 Jira 里完成、改派或删掉，这里跟着关掉。`,
+    `<button class="btn ghost" onclick="jiraOff()">断开</button>`);
+  const field=(id,ph,w,extra="")=>`<input id="${id}" data-draft="${id}" placeholder="${ph}" style="width:${w}px;height:28px;padding:3px 8px" ${extra}>`;
+  return setRow("连接 Jira","指派给你、没完成的 Jira 单子自动收进来。只读，不会改 Jira。",
+    field("jirasite","xxx.atlassian.net",150)+field("jiraemail","登录邮箱",150)
+    +field("jiratok","API Token",120,`type="password" autocomplete="off" onkeydown="if(event.key==='Enter')jiraOn()"`)
+    +`<button class="btn pri" onclick="jiraOn()">连接</button>`,
+    `<details><summary>怎么拿到 API Token</summary><div class="d" style="margin-top:6px">打开 <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">id.atlassian.com → 安全 → API Token</a>，创建一个，复制过来。</div></details>`);
+}
+async function jiraOn(){
+  const v=id=>($("#"+id)||{}).value?.trim()||"", site=v("jirasite"), email=v("jiraemail"), token=v("jiratok");
+  if(!site||!email||!token) return toast("地址、邮箱、API Token 都要填");
+  try{ const r=await api("/api/jira/connect",{site,email,token},30000); ["jiratok","jirasite","jiraemail"].forEach(k=>drafts.delete(k)); toast(`已连接 ${r.user||""}`); load(); }
+  catch(e){ toast(e.name==="AbortError"?"连 Jira 超时了，再试一次":e.message); }
+}
+async function jiraOff(){
+  if(!confirm("断开 Jira？已经收进来的事项不受影响。")) return;
+  try{ await api("/api/jira/disconnect",{}); toast("已断开"); load(); }catch(e){ toast(e.message); }
+}
 function toolPage(st,s){
-  const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack||wxOn(s);
+  const r=s.record||{}, every=r.review_every??5, on=st.sources||{}, manual=st.intake_mode==="manual", fs=r.feishu_ready, any=fs||s.slack||s.jira||wxOn(s);
   const feishu=!fs?connectRow("feishu","飞书","开完会、私聊和群里别人找你的事、分给你的飞书任务，自动收进来。")
     :(r.feishu_broken?setRow("现在读不到",`${esc(r.feishu_broken.why||"原因不明")}（从 ${esc(r.feishu_broken.since||"刚才")} 起）。会议、聊天、飞书任务都收不进来。交给驱动心响的 AI，它带你重新登录。`,`<span class="eng-state bad">读不到</span><button class="btn pri" onclick="setupAsk('feishu')">交给 AI 修</button>`):"")
      +setRow("飞书","","",pushLine(s))
@@ -1691,8 +1738,11 @@ function toolPage(st,s){
      +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));
   return setSec("feishu","飞书",any&&manual?"现在是手动模式，下面这些来源都不会自动收。":"",feishu)
    +setSec("slack","Slack","",slackRow(s))
+   +setSec("jira","Jira","",jiraRow(s))
    +setSec("wechat","微信","",wechatRows(st,s))
    +(any?setSec("filter","过滤和节奏","",filterRow(r)
+      +setRow("多久读一次聊天",`Slack 和飞书聊天每 ${r.poll_every||30} 分钟读一次。越短新消息来得越快，飞书 / Lark 的接口额度用得也越多。`,
+        `<div class="chips">${[1,5,10,15,30,60].map(m=>`<button class="chip ${(r.poll_every||30)===m?"on":""}" onclick="setSetting('chat_poll_minutes',${m})">${m===60?"1 小时":m+" 分钟"}</button>`).join("")}</div>`)
       +setRow("聊天多久整理一次",every?`提到你或催办的马上整理，其余每 ${every} 分钟一次。22:00 以后只处理紧急的。`:`提到你或催办的马上整理，其余每天 ${esc((r.review_times||[]).join("、"))} 各一次。`,
         `<div class="chips">${[[5,"5 分钟"],[15,"15 分钟"],[30,"30 分钟"],[60,"1 小时"],[0,"固定时间"]].map(([m,l])=>`<button class="chip ${every===m?"on":""}" onclick="setSetting('chat_review_every_minutes',${m})">${l}</button>`).join("")}</div>`))
      :`<p class="hint" style="margin:14px 2px 0">现在没有接任何工具。要做的事点右上角「＋ 新建事项」自己添加。</p>`);

@@ -29,6 +29,8 @@ from . import activity
 from . import db as database
 from .timeutil import TZ
 
+POLL_CHOICES = (1, 5, 10, 15, 30, 60)  # 多久读一次聊天, minutes
+
 PAGE = Path(__file__).with_name("app") / "xinxiang.html"
 
 
@@ -65,6 +67,10 @@ def _url(value):
 def _clean(text):
     text = re.sub(r"<cite[^>]*>|</cite>", "", str(text or ""))
     return re.sub(r"<[^>]+>", "", text).strip()
+
+
+def _first(value):
+    return (value or [None])[0] if isinstance(value, list) else value
 
 
 def _day(value):
@@ -130,15 +136,18 @@ def build_state(root):
             before_of.setdefault(b, []).append(n_of[a])
     titled = [(r["record_id"], r.get("标题") or "") for r in rows if n_of.get(r.get("record_id")) is not None and not r.get("排除本人提醒")]
 
+    parent_of = {r.get("record_id"): _first(r.get("父事项")) for r in rows}
+
     def suggest(rid, title):
         joined = {x for pair in linked if rid in pair for x in pair}
+        joined |= {parent_of.get(rid)} | {c for c, p in parent_of.items() if p == rid}  # its own 备材料 / parent
         scored = sorted(((similarity(title, t), other) for other, t in titled if other != rid and other not in joined), reverse=True)
         return [n_of[other] for score, other in scored[:3] if score >= 0.45]
     def add_item(r):   # one item at a time: a broken record is left out and named, the rest still shows
         n = n_of.get(r.get("record_id"))
         if n is None:
             return
-        parent = (r.get("父事项") or [None])[0] if isinstance(r.get("父事项"), list) else r.get("父事项")
+        parent = _first(r.get("父事项"))
         url = _url(r.get("交付物链接"))
         item = {"n": n, "rid": r["record_id"], "title": r.get("标题") or "", "who": r.get("执行方") or "", "status": r.get("状态") or "",
                 "due": _day(r.get("截止日")), "progress": r.get("进度") or "", "blocker": r.get("卡点"), "url": url,
@@ -404,12 +413,13 @@ def system_info(root):
         status = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:status'").fetchone() or ["{}"])[0])
         beat = json.loads((db.execute("SELECT value FROM kv WHERE key='listen:heartbeat'").fetchone() or ["null"])[0])
         slack = json.loads((db.execute("SELECT value FROM kv WHERE key='slack:identity'").fetchone() or ["null"])[0])
+        jira = json.loads((db.execute("SELECT value FROM kv WHERE key='jira:identity'").fetchone() or ["null"])[0])
         wechat_status = json.loads((db.execute("SELECT value FROM kv WHERE key='wechat:status'").fetchone() or ["null"])[0])
         feishu_health = json.loads((db.execute("SELECT value FROM kv WHERE key='feishu:health'").fetchone() or ["null"])[0])
         notion_url = json.loads((db.execute("SELECT value FROM kv WHERE key='notion:url'").fetchone() or ["null"])[0])
         db.close()
     except Exception:
-        status, beat, slack, notion_url, wechat_status, feishu_health = {}, None, None, None, None, None
+        status, beat, slack, jira, notion_url, wechat_status, feishu_health = {}, None, None, None, None, None, None
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
@@ -421,7 +431,7 @@ def system_info(root):
         config = load(Path(root) / "config.yaml")
         found = {"codex": bool(codex_binary(config)), "claude": bool(claude_binary(config)), "gemini": bool(gemini_binary(config))}
         mode = {"local": "feishu", "feishu": "feishu"}.get(config.item_store, config.item_store)
-        record = {"review_every": config.chat_review_every_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
+        record = {"review_every": config.chat_review_every_minutes, "poll_every": config.chat_poll_minutes, "review_times": config.chat_review_times, "mode": mode, "feishu_ready": bool(config.base_token and config.tables.get("事项表") not in (None, "local")),
                   "notion": bool(config.notion_database_id), "notion_url": notion_url,
                   "skip_chats": config.chat_skip_chats, "skip_words": config.chat_skip_words, "recent_chats": _recent_chats(root)}
     except Exception:
@@ -448,7 +458,7 @@ def system_info(root):
         problems = {}
     if not problems.get("proxy") and (down := local_proxy_down()):
         problems["proxy"] = down
-    return {"engines": found, "slack": slack, "wechat": wechat, "here": here, "record": record, "problems": problems, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
+    return {"engines": found, "slack": slack, "jira": jira, "wechat": wechat, "here": here, "record": record, "problems": problems, "push": status, "listener": "运行中" if alive else "没在运行", "subs": "、".join(f"{names.get(k, k)} {'✓' if v == 'live' else '未订阅'}"
                                                                     for k, v in status.items())}
 
 
@@ -470,6 +480,35 @@ def run_command(root, text):
     # Re-read the table in the background; the page reloads a few seconds later.
     threading.Thread(target=_python, args=(root, "agent_matrix.monitor", "--refresh"), kwargs={"timeout": 120}, daemon=True).start()
     return {"ok": "✓" in reply, "reply": reply}
+
+
+def chatlog(root, limit=500):
+    """Every chat line read lately and what became of it, newest first: went to an item, folded into one, skipped by
+    the AI (with its reason), dropped in code before the AI saw it (with the reason), or still waiting."""
+    import sqlite3
+    from .snapshot import _snapshot
+    n_of = {r.get("record_id"): _num(r.get("编号")) for r in _snapshot(Path(root)).get("rows") or []}
+    try:
+        with closing(database.read(Path(root) / "state/state.db")) as db:
+            got = db.execute("SELECT message_id, chat_name, chat_mode, sender_name, sent_at, text, kind, status "
+                             "FROM chat_candidates ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for mid, chat, mode, sender, at, text, kind, status in got:
+        at = str(at or "")
+        if at.isdigit():  # Lark: milliseconds
+            at = datetime.fromtimestamp(int(at) / (1000 if len(at) > 10 else 1), TZ).strftime("%Y-%m-%d %H:%M")
+        status = str(status or "")
+        verdict, _, why = status.partition(":")
+        if verdict in ("item", "merged"):
+            why = n_of.get(why)
+        elif verdict == "done":  # before verdicts were kept: only known that the AI looked at it
+            verdict, why = "seen", ""
+        out.append({"id": mid, "chat": chat, "p2p": mode == "p2p", "who": sender, "at": at[:16], "text": text,
+                    "kind": kind, "verdict": verdict, "why": why,
+                    "url": mid if str(mid).startswith("https://") else None})
+    return out
 
 
 def _recent_chats(root, limit=30):
@@ -671,6 +710,8 @@ class Handler(BaseHTTPRequestHandler):
                     tidy.drop(root, pick(body["drop"]))
                 return self._send(200, {"ok": not failed, "used": len(used), "failed": {str(k): v for k, v in failed.items()},
                                         "reply": "；".join(failed.values())[:200], "left": len(tidy.updates(root))})
+            if path == "/api/chatlog":  # what became of each chat line read (设置 → 聊天判断)
+                return self._send(200, {"ok": True, "lines": chatlog(root)})
             if path == "/api/item/new":  # the owner adds an item by hand
                 from . import manual
                 from .models import MatrixBusy, MatrixError
@@ -930,10 +971,13 @@ class Handler(BaseHTTPRequestHandler):
                     if isinstance(body.get("owner_aliases"), list):
                         config.owner_aliases = list(dict.fromkeys(str(a).strip()[:20] for a in body["owner_aliases"] if str(a).strip()))[:10]
                     save_config(root / "config.yaml", config)
-                if (body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or "prework_enabled" in body or "worker_mcp" in body
+                if (body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60) or body.get("chat_poll_minutes") in POLL_CHOICES
+                        or "prework_enabled" in body or "worker_mcp" in body
                         or "chat_skip_chats" in body or "chat_skip_words" in body):
                     from .config import load, save  # config.yaml: the listener and worker read these there
                     config = load(root / "config.yaml")
+                    if body.get("chat_poll_minutes") in POLL_CHOICES:
+                        config.chat_poll_minutes = body["chat_poll_minutes"]
                     if body.get("chat_review_every_minutes") in (0, 5, 15, 30, 60):
                         config.chat_review_every_minutes = body["chat_review_every_minutes"]
                     if "prework_enabled" in body:
@@ -965,6 +1009,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 except OSError:
                     return self._send(400, {"ok": False, "reply": "连不上 Notion，检查网络后再试。"})
+            if path.startswith("/api/jira/"):
+                from .models import MatrixError
+                from .sources import jira
+                try:
+                    if path == "/api/jira/connect":
+                        return self._send(200, {"ok": True, **jira.connect(root, body.get("site"), body.get("email"), body.get("token"))})
+                    if path == "/api/jira/disconnect":
+                        jira.disconnect(root)
+                        return self._send(200, {"ok": True})
+                except MatrixError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                except OSError:
+                    return self._send(400, {"ok": False, "reply": "连不上 Jira，检查地址和网络后再试。"})
             if path.startswith("/api/slack/"):
                 from .config import load
                 from .models import MatrixError

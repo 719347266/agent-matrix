@@ -295,6 +295,9 @@ def publish(config, client, state, review):
     from . import itemlinks
     from .merge import find_same, merge_into
     rows, merged = gateway.rows(), []
+    # what became of each line, for the 聊天判断 page; a line the model took but code then dropped is said so too
+    outcome = {s.message_id: f"skip:{s.kind}：{s.why}" for s in review.skipped}
+    outcome.update({a.message_id: "drop:AI 拿不准，或是群里问你但你没接" for a in review.actions})
     for a, m in kept:
         key = "chat:" + a.message_id + ":" + sha1(re.sub(r"\s+", "", a.title).encode()).hexdigest()[:10]
         target, _, _ = find_same(rows, a.title)
@@ -302,16 +305,20 @@ def publish(config, client, state, review):
             merge_into(gateway, target, title=a.title, source="聊天「" + m["chat_name"][:10] + "」",
                        detail=f"{m['sender_name']}：{m['text'][:120]}", key=key + ":merge", now=datetime.now(TZ))
             merged.append(target.get("编号"))
+            outcome[a.message_id] = "merged:" + target["record_id"]
             continue
         fields = task_fields(config, a, m)
         if m.get("handed"):
             fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
         created.append(gateway.create(fields, key, "chat-review")["record_id_list"][0])
+        outcome[a.message_id] = "item:" + created[-1]
         if m.get("handed"):
             from .thread import judge
             judge(client.root, created[-1], "ask", f"{m['sender_name']} 私聊找你的，等你确认接不接")
         itemlinks.link_by_number(client.root, rows, created[-1], a.follows)
-    state.db.execute("UPDATE chat_candidates SET status='done' WHERE batch=?", (review.batch_id,))
+    state.db.executemany("UPDATE chat_candidates SET status=? WHERE message_id=?", [(v, k) for k, v in outcome.items()])
+    state.db.execute("UPDATE chat_candidates SET status='skip:AI 看过，不是要你做的事' WHERE batch=? AND status='pending'",
+                     (review.batch_id,))
     state.db.commit()
     state.set("chat-review:open", None)
     message_id = None

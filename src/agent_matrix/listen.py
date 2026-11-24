@@ -438,8 +438,8 @@ class Listener:
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
         from .sources import chats, slack
-        # every POLL_MINUTES, working hours only (chat_poll); the first poll of the day catches up on the night
-        if auto and cfg.chat_watch_enabled and not no_source and self.every("chats", chats.POLL_MINUTES * 60):
+        # every chat_poll_minutes, working hours only (chat_poll); the first poll of the day catches up on the night
+        if auto and cfg.chat_watch_enabled and not no_source and self.every("chats", cfg.chat_poll_minutes * 60):
             def chat_poll(config, client, state):
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
@@ -448,7 +448,7 @@ class Listener:
                     return "off_hours"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
-        if auto and cfg.chat_watch_enabled and slack.token(cfg) and self.every("slack", chats.POLL_MINUTES * 60):
+        if auto and cfg.chat_watch_enabled and slack.token(cfg) and self.every("slack", cfg.chat_poll_minutes * 60):
             def slack_poll(config, client, state):
                 if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
@@ -457,6 +457,15 @@ class Listener:
                     self.wake_worker(config)  # don't wait for the periodic kick; the worker decides if it's time
                 return out
             jobs.append(("slack", slack_poll))
+        if auto and self.every("jira", 600):  # Jira Cloud limits are per user and generous; no Feishu needed
+            from .sources import jira as jira_source
+            if jira_source.connected(cfg):
+                def jira_sync(config, client, state):
+                    from .sources import jira
+                    if config.intake_mode == "manual":
+                        return "off"
+                    return jira.sync(config, client, state, datetime.now(TZ))
+                jobs.append(("jira", jira_sync))
         if auto and cfg.feishu_tasks_enabled and not no_source and self.every("tasks", 3600 if lark else 900):   # Lark: hourly
             def tasks(config, client, state):
                 from .sources import feishu_tasks

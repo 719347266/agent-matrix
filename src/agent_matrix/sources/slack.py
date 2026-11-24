@@ -200,15 +200,17 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
         newest_all = max(newest_all, newest, key=float)
         if c.get("cursor"):
             state.set("slack:cursor:" + cid, newest)
-        if cid in exclude or skipped_chat(config, c["name"]):
-            continue
+        chat_off = ("这个会话你设成了不看" if cid in exclude
+                    else "内置跳过的会话（机器人、通知）" if skipped_chat(config, c["name"]) else None)
         muted = muted_chat(config, c["name"])
         history_key = "slack:recent:" + cid
         history = recent_lines(state, history_key)
         mine = set(state.get("slack:mine", []))
+        from .chats import sent_refs, record, verdict
+        ours = sent_refs(root)
         for m in msgs:
-            if m.get("subtype") not in USER_SUBTYPES or m.get("bot_id") or not m.get("user") or not m.get("text") or skipped_text(config, m["text"]):
-                continue
+            if m.get("subtype") not in USER_SUBTYPES or m.get("bot_id") or not m.get("user") or not m.get("text"):
+                continue  # bots and system lines: not people talking, not worth a verdict
             from_owner = m["user"] == my_id
             # Owner mentions become the owner's name so the "被点名" rule in chat_review sees them.
             text = " ".join(m["text"].replace(f"<@{my_id}>", me_tag).split())
@@ -224,13 +226,11 @@ def poll(config, root, state, now, *, api=call, since_hours=2):
                             mentioned=f"<@{my_id}>" in m["text"],  # a real @, however it is worded
                             replied=bool(thread) and thread != m["ts"] and f"{cid}:{thread}" in mine,
                             broadcast=bool(re.search(r"<!(here|channel|everyone)", m["text"])))
-            if kind and (not muted or kind == "@你"):
-                sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
-                # ponytail: the permalink is the message id, so chat_review can link back without a schema change.
-                state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
-                    permalink(base, cid, m["ts"], thread), cid, cname, mode, m["user"], sender, sent, text[:500],
-                    json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
-                kept += 1
+            why = chat_off or verdict(config, m["text"], kind, muted, m["ts"] in ours)
+            sent = now.fromtimestamp(float(m["ts"]), now.tzinfo).strftime("%Y-%m-%d %H:%M")
+            # ponytail: the permalink is the message id, so chat_review can link back without a schema change.
+            kept += record(state, permalink(base, cid, m["ts"], thread), cid, cname, mode, m["user"], sender, sent,
+                           text, history, kind, why)
             history.append(f"{sender}：{text[:120]}")
         state.set(history_key, history[-2:])
         state.db.commit()

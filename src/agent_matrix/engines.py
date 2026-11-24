@@ -311,7 +311,6 @@ class ClaudeRun(CodexRun):
             return super()._send_prompt(proc, prompt)
         # stdin stays open: the answers to permission requests go back this way; closed once the turn ends
         self.waiting = {}
-        self.started = time.time() - 2  # files born after this were made by the AI in this turn (2 s clock slack)
         proc.stdin.write(json.dumps({"type": "user", "message": {"role": "user", "content": prompt}}, ensure_ascii=False) + "\n")
         proc.stdin.flush()
 
@@ -329,8 +328,7 @@ class ClaudeRun(CodexRun):
         if request.get("subtype") != "can_use_tool":
             return self._reply(event.get("request_id"), {})
         root = self.guard["root"]
-        if not approvals.needs_owner(root, request.get("tool_name"), request.get("input"), self.workdir,
-                                     getattr(self, "started", None)):
+        if not approvals.needs_owner(root, request.get("tool_name"), request.get("input")):
             return self._reply(event.get("request_id"), {"behavior": "allow", "updatedInput": request.get("input") or {}})
         approval_id = approvals.ask(root, self.guard.get("record_id"), request.get("tool_name"), request.get("input"),
                                     request.get("description"))
