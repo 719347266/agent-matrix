@@ -47,63 +47,64 @@ class ContextTests(unittest.TestCase):
 
 
 
-class RulesUsedTests(unittest.TestCase):
-    def test_a_pass_counts_for_the_rules_the_ai_said_it_followed(self):
-        from agent_matrix import memory
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "state/work/r1").mkdir(parents=True)
-            memory.add_rule(root, "查线上数据先核表结构")
-            rid = next(r["id"] for r in memory.rules(root) if r["rule"] == "查线上数据先核表结构")
-            (root / "state/work/r1/结果.json").write_text(json.dumps({"template": "数据汇总", "rules": [rid, 999]}), encoding="utf-8")
-            memory.record_outcome(root, "r1", "要改", "少了测试店铺")   # a send-back may be about something else: not counted here
-            memory.record_outcome(root, "r1", "通过")
-            rule = next(r for r in memory.rules(root) if r["id"] == rid)
-            self.assertEqual((rule["wins"], rule["losses"]), (1, 0))
-            self.assertEqual([o["rules"] for o in memory.outcomes(root)], [[rid, 999], [rid, 999]])
+class LibraryTests(unittest.TestCase):
+    """经验库 the way 数字分身 keeps it: a topic per file, the index goes out, the AI only drafts, the owner says 用."""
 
-
-
-class RecallByActionTests(unittest.TestCase):
     def setUp(self):
+        from agent_matrix import library
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "state").mkdir()
-        self.folder = self.root / "job"
-        self.folder.mkdir()
+        self.lib = library
+        library.save(self.root, "发 PR 经验", "name：发 PR 经验\ndescription：要建分支、发 PR、通知 reviewer 时打开。\n\n"
+                     "## 从 release 切分支\n不要从 dev 切。\n**Why:** 本人说过\n\n## 用 cw5-pr-notify 通知群\n发完 PR 通知 dev 群。\n**Why:** #12", None)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_few_action_rules_are_shown_grouped_many_go_to_a_file_behind_an_index(self):
-        from agent_matrix import memory
-        memory.add_rule(self.root, "交付一律用中文")
-        memory.add_rule(self.root, "统计商家排除开发店", trigger="查线上数据时")
-        text = memory.rules_text(self.root, None, self.folder)
-        self.assertIn("#### 查线上数据", text)                      # "时" is dropped so the same action groups together
-        self.assertIn("统计商家排除开发店", text)
-        self.assertFalse((self.folder / "规矩.md").exists())
-        for k in range(memory.INLINE_MAX):
-            memory.add_rule(self.root, f"发 PR 规矩{k}", trigger="发 PR")
-        text = memory.rules_text(self.root, None, self.folder)
-        self.assertIn("交付一律用中文", text)                         # rules for every job stay in full
-        self.assertNotIn("统计商家排除开发店", text)                   # action rules: only the index
-        self.assertIn(f"- 发 PR · {memory.INLINE_MAX}", text)
-        self.assertIn("## 查线上数据\n- [", (self.folder / "规矩.md").read_text(encoding="utf-8"))
-        self.assertIn("统计商家排除开发店", memory.rules_text(self.root, None, self.root / "missing"))  # no folder: all in full
+    def test_the_index_goes_out_and_the_bodies_go_to_the_job_folder(self):
+        job = self.root / "job"
+        job.mkdir()
+        text = self.lib.memory_text(self.root, job)
+        self.assertIn("- 发 PR 经验 — 要建分支、发 PR、通知 reviewer 时打开。", text)
+        self.assertNotIn("不要从 dev 切", text)
+        self.assertIn("不要从 dev 切", (job / "记忆" / "发 PR 经验.md").read_text(encoding="utf-8"))
+        self.assertIn("发 PR 经验", (job / "记忆" / "目录.md").read_text(encoding="utf-8"))
 
-    def test_tidy_puts_a_rule_under_an_action_only_when_the_owner_says_use(self):
-        from agent_matrix import memory, tidy
-        memory.add_rule(self.root, "统计商家排除开发店")
-        rid = next(r["id"] for r in memory.rules(self.root) if r["rule"] == "统计商家排除开发店")
-        plan = {"changes": [{"type": "rule_trigger", "id": rid, "trigger": "查线上数据", "why": "只在查数据时用得上"},
-                            {"type": "rule_trigger", "id": rid, "trigger": "", "why": "没变"}]}
-        proposals, problems = tidy.check(self.root, plan)
-        self.assertEqual(len(proposals), 1)
-        self.assertEqual(len(problems), 1)
-        self.assertEqual(next(r for r in memory.rules(self.root) if r["id"] == rid)["trigger"], "")   # nothing until 用
-        self.assertEqual(tidy._apply(self.root, "rule_trigger", proposals[0][3]), "")
-        self.assertEqual(next(r for r in memory.rules(self.root) if r["id"] == rid)["trigger"], "查线上数据")
+    def test_revise_is_matched_again_when_the_owner_says_use(self):
+        draft = {"mode": "revise", "name": "发 PR 经验", "old_text": "不要从 dev 切。", "body": "不要从 dev、test 切。", "why": "本人补充"}
+        _, _, data = self.lib.check_draft(self.root, draft)
+        raw = self.lib.get(self.root, "发 PR 经验")["raw"]
+        self.lib.save(self.root, "发 PR 经验", raw.replace("不要从 dev 切。", "严禁从 dev 切。"), "发 PR 经验")  # the owner edits it meanwhile
+        self.assertIn("找不到", self.lib.apply_draft(self.root, data))       # not applied over the owner's edit
+        self.assertIn("严禁从 dev 切", self.lib.get(self.root, "发 PR 经验")["body"])
+
+    def test_drafts_that_would_break_the_library_are_refused(self):
+        bad = [{"mode": "append", "name": "发 PR 经验", "body": "没有小节标题", "why": "w"},
+               {"mode": "append", "name": "发 PR 经验", "body": "## 从 release 切分支\n重复的标题", "why": "w"},
+               {"mode": "remove", "name": "发 PR 经验", "old_text": "**Why:**", "why": "w"},           # matches twice
+               {"mode": "create", "name": "发 PR 经验", "description": "x", "body": "## a\nb", "why": "w"},
+               {"mode": "append", "name": "没有这份", "body": "## a\nb", "why": "w"},
+               {"mode": "append", "name": "发 PR 经验", "body": "## a\nb"}]                              # no why
+        for d in bad:
+            with self.assertRaises(ValueError, msg=d):
+                self.lib.check_draft(self.root, d)
+
+    def test_move_takes_a_whole_section_to_another_memory(self):
+        section = "## 用 cw5-pr-notify 通知群\n发完 PR 通知 dev 群。\n**Why:** #12"
+        _, _, data = self.lib.check_draft(self.root, {"mode": "move", "name": "发 PR 经验", "old_text": section, "to": "通知同事经验",
+                                                       "description": "要在群里通知同事时打开。", "why": "通知不只发 PR 时用"})
+        self.assertEqual(self.lib.apply_draft(self.root, data), "")
+        self.assertEqual([t for t, _ in self.lib.get(self.root, "发 PR 经验")["sections"]], ["从 release 切分支"])
+        self.assertEqual([t for t, _ in self.lib.get(self.root, "通知同事经验")["sections"]], ["用 cw5-pr-notify 通知群"])
+
+    def test_a_verdict_keeps_which_memories_the_ai_said_it_used(self):
+        from agent_matrix import memory
+        (self.root / "state/work/r1").mkdir(parents=True)
+        (self.root / "state/work/r1/结果.json").write_text(json.dumps({"template": "方案", "memory": ["发 PR 经验#从 release 切分支"]}),
+                                                         encoding="utf-8")
+        memory.record_outcome(self.root, "r1", "通过")
+        self.assertEqual(memory.outcomes(self.root)[0]["memory"], ["发 PR 经验#从 release 切分支"])
 
 
 if __name__ == "__main__":

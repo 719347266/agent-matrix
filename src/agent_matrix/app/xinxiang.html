@@ -1056,27 +1056,47 @@ const noteLine=(tag,cls,title,sub,acts,quote="")=>`<div class="row flat mem"><sp
 /* 记忆 is how the system works: the owner's standing rules, read by every AI before any work. What a meeting left
    open or decided is a matter like any other, and lives with the items (事项 → 在等的 / 会上的结论). */
 function memPage(){
-  const R=(D.memory||{}).rules||[], mine=r=>r.source==="seed"||r.source==="本人";
-  const fresh=R.filter(r=>r.fresh), rest=R.filter(r=>!r.fresh);
   const P=(D.memory||{}).profile||{}, editing=S.profEdit||(!P.text&&!P.draft);   // an AI draft waiting: decide on it first
   const about=`<div class="sec-h">关于你${P.at?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">${esc(P.at)} 更新</span>`:""}</div>`
     +(!editing&&!P.text?"":editing?`<div class="list" style="padding:12px 14px"><textarea id="prof" data-draft="prof" rows="9" style="width:100%" placeholder="${esc(PROFILE_HINT)}">${esc(P.text||"")}</textarea>
         <div class="acts" style="margin-top:8px;justify-content:flex-end">${P.text?`<button class="btn" onclick="S.profEdit=false;render()">取消</button>`:""}<button class="btn pri" onclick="saveProfile()">保存</button></div></div>`
       :`<div class="list" style="padding:12px 14px"><div class="prof-text">${esc(P.text)}</div><div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.profEdit=true;render()">改</button></div></div>`);
-  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你手上的项目和版本、你的规矩。</p>`+updatesView()+about+scanView(P)+(P.text&&P.draft?`<details style="margin-top:10px"><summary>查看旧版草稿</summary><div class="prof-text">${esc(P.draft.text)}</div></details>`:"")+versionsView()
-   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><p class="hint">点「对」之前，AI 做事不会照着它做。</p><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
-      `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
-   +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span>${verdictLine()}</div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,ruleMeta(r),
-      `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}
-    <div class="inline" style="padding-left:12px;background:none"><input id="newrule" data-draft="newrule" placeholder="加一条规矩，比如：对外文案先给我两版挑" onkeydown="if(event.key==='Enter')addRule()"><button class="btn pri" onclick="addRule()">加上</button></div></div>`+effectView();
+  return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你手上的项目和版本、你的经验库。</p>`+updatesView()+about+scanView(P)+(P.text&&P.draft?`<details style="margin-top:10px"><summary>查看旧版草稿</summary><div class="prof-text">${esc(P.draft.text)}</div></details>`:"")+versionsView()
+   +libView()+effectView();
+}
+/* 经验库：一个主题一份，开头 name / description（做哪些动作时打开），正文按「## 主题」分节。AI 只拿到目录，按要做的动作自己读；
+   AI 只能提草稿（在上面的记忆更新里），你在这里直接改的不用审 */
+const LIB_NEW="name：\ndescription：要……、……时打开。里面是……\n\n## 主题（一句能照做的话）\n做法……\n**Why:** 从哪件事、你哪句话来的\n**How to apply:** 什么情况下用、怎么用\n";
+function libView(){
+  const L=(D.memory||{}).library||[], bad=(D.memory||{}).library_problems||[], ed=S.libEdit;
+  const editor=(i,text)=>`<div style="padding:12px 14px"><textarea id="libtext" rows="18" style="width:100%;font-family:var(--mono,monospace)">${esc(text)}</textarea>
+      <div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.libEdit=undefined;render()">取消</button><button class="btn pri" onclick="libSave(${i})">保存</button></div></div>`;
+  return `<div class="sec-h">经验库<span class="n">${L.length}</span>${verdictLine()}</div>
+    <p class="hint">AI 每件事只拿到目录（名字 — 什么时候打开），做到哪个动作就读哪份。AI 学到的只能提草稿，等你点「用」才写进来；你在这里直接改的不用审。</p>
+    ${bad.length?`<div class="callout" style="margin:8px 0">${bad.map(esc).join("<br>")}（格式不对的这几份 AI 读不到，改好就行）</div>`:""}
+    <div class="list">${L.map((e,i)=>ed===i?editor(i,e.raw):`<details style="padding:10px 14px"><summary><b>${esc(e.name)}</b> — ${esc(e.description)} <span class="rule-tag">${e.sections.length} 节</span></summary>
+      <div class="prof-text" style="margin-top:8px">${esc(e.raw)}</div>
+      <div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.libEdit=${i};render()">改</button><button class="btn ghost" style="color:var(--red)" onclick="libDelete(${i})">删掉</button></div></details>`).join("")||'<div class="empty">还没有</div>'}
+    ${ed===-1?editor(-1,LIB_NEW):`<div class="acts" style="padding:8px 14px;justify-content:flex-start"><button class="btn" onclick="S.libEdit=-1;render()">新建一份</button></div>`}</div>`;
+}
+async function libSave(i){
+  const text=$("#libtext").value, L=(D.memory||{}).library||[];
+  try{ await api("/api/memory/library",{text,old_name:i>=0?L[i].name:null},15000); S.libEdit=undefined; toast("记下了，AI 会按目录读到它"); }
+  catch(e){ return toast(e.confirmed?e.message:"没保存成功，连不上本机服务"); }
+  load();
+}
+async function libDelete(i){
+  const e=((D.memory||{}).library||[])[i]; if(!e||!confirm(`删掉「${e.name}」这一整份？`)) return;
+  try{ await api("/api/memory/library",{delete:e.name}); toast("删掉了"); }catch(err){ toast("没删成功，连不上本机服务"); }
+  load();
 }
 /* 记忆更新：AI 每天整理一次记忆，提出要改的地方；你点「用」才会改 */
-const TIDY_TAG={merge_rules:"brand",retire_rule:"red",stale_moment:"amber",place_item:"blue",version_status:"green",profile:"violet"};
+const TIDY_TAG={memory:"brand",stale_moment:"amber",place_item:"blue",version_status:"green",profile:"violet"};
 function updatesView(){
   const U=(D.memory||{}).updates||[];
   if(!U.length) return "";
-  return `<div class="callout" style="margin:12px 0 0"><div class="what"><b>记忆更新 · ${U.length} 条</b>　<span class="hint" style="margin:0">AI 整理记忆时提出的，点「用」才会改</span></div>
-    <div class="list">${U.map(u=>noteLine(esc(u.label),TIDY_TAG[u.type]||"",u.content,esc(u.why),
+  return `<div class="callout" style="margin:12px 0 0"><div class="what"><b>记忆更新 · ${U.length} 条</b>　<span class="hint" style="margin:0">AI 整理记忆、学经验、做事时提出的，点「用」才会改</span></div>
+    <div class="list">${U.map(u=>noteLine(esc(u.label),TIDY_TAG[u.type]||"",u.content,esc(u.why)+(u.detail?`<details style="margin-top:6px"><summary>看要改的原文</summary><div class="prof-text">${esc(u.detail)}</div></details>`:""),
       `<button class="btn pri" onclick="memUpdate({use:${u.id}})">用</button><button class="btn ghost" onclick="memUpdate({drop:${u.id}})">不要</button>`,u.old?`原来：${u.old}`:"")).join("")}</div>
     <div class="acts" style="margin-top:10px;justify-content:flex-end"><button class="btn pri" onclick="memUpdate({use:'all'})">全部用上</button></div></div>`;
 }
@@ -1170,8 +1190,6 @@ async function boostTest(){
   render();
 }
 /* 规矩：适用在哪、照着做通过/被退回几次 */
-function ruleMeta(r){ const tags=[r.trigger?`<span class="rule-tag">做「${esc(r.trigger)}」时读</span>`:"",r.scope?`<span class="rule-tag">${esc(r.scope_name)}</span>`:"",(r.wins||r.losses)?`<span class="rule-tag ${r.losses>r.wins?"bad":""}">通过 ${r.wins||0} · 退回 ${r.losses||0}</span>`:""].filter(Boolean).join("");
-  return tags+esc(r.why||""); }
 function verdictLine(){ const v=(D.memory||{}).verdicts||{}, n=(v["通过"]||0)+(v["退回"]||0)+(v["要改"]||0);
   return n?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">近 30 天评审：通过 ${v["通过"]||0} · 退回 ${v["退回"]||0} · 要改 ${v["要改"]||0}</span>`:""; }
 /* 效果：AI 交付一次就通过的比例，按周看有没有进步（后端 stats.py，约 10 分钟算一次） */
@@ -1224,7 +1242,6 @@ function laterList(){
   return `<p class="hint">现在不用处理、以后要确认的事。条件到了，或者话题再被提起时，会在「今天」里提醒你。</p><div class="list">${rows||'<div class="empty">现在没有以后要确认的事。</div>'}</div>`;
 }
 async function ruleOp(body){ try{ await api("/api/rules",body); toast("已保存"); }catch(e){ toast("没保存成功"); } load(); }
-function addRule(){ const v=$("#newrule").value.trim(); if(!v) return $("#newrule").focus(); drafts.delete("newrule"); ruleOp({add:v}); }
 /* ---------- 手动新建一件事 ---------- */
 function addOpen(){ S.adding={who:"我"}; render(); setTimeout(()=>$("#add-title")?.focus(),30); }
 function addClose(){ ["add-title","add-note","add-due"].forEach(k=>drafts.delete(k)); S.adding=null; render(); }
@@ -2213,7 +2230,7 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["today","今天",todayCount(),"hot"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).rules||[]).filter(r=>r.fresh).length+((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
+  const nav=[["today","今天",todayCount(),"hot"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;

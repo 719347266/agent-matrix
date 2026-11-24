@@ -246,14 +246,13 @@ def credit(root, rule_id, won):
 # ---- 评审结果: every verdict on a deliverable is kept, so the AI learns what passes -----------------------------
 
 def record_outcome(root, record_id, verdict, reason=""):
-    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind, its project and the rules the AI
-    said it followed; a pass counts for each of those rules right away (a send-back is left to the learn round to weigh:
-    it may have come back for something else)."""
+    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind, its project and the memories
+    (经验库) the AI said it read and followed, so a later round can see which ones helped and which were missed."""
     work = Path(root) / "state" / "work" / record_id
     try:
         result = json.loads((work / "结果.json").read_text(encoding="utf-8"))
         template = result.get("template") or ""
-        used = sorted({i for i in result.get("rules") or [] if type(i) is int})
+        used = [str(x)[:80] for x in result.get("memory") or [] if isinstance(x, str)][:20]
     except (OSError, ValueError, AttributeError, TypeError):
         template, used = "", []
     db = _db(root)
@@ -263,8 +262,6 @@ def record_outcome(root, record_id, verdict, reason=""):
         with db:
             db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id, rules) VALUES (?,?,?,?,?,?,?,?)",
                        (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project, json.dumps(used)))
-            if verdict == "通过":
-                db.executemany("UPDATE preferences SET wins=wins+1 WHERE active=1 AND id=?", [(i,) for i in used])
     finally:
         db.close()
 
@@ -274,7 +271,7 @@ def outcomes(root, since=""):
     try:
         names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
         return [{"id": oid, "record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
-                 "template": t or "", "project": names.get(p, ""), "rules": json.loads(used) if used else None}
+                 "template": t or "", "project": names.get(p, ""), "memory": json.loads(used) if used else None}
                 for oid, r, a, v, why, ver, t, p, used in db.execute(
                     "SELECT id, record_id, at, verdict, reason, version, template, project_id, rules FROM outcomes WHERE at>? ORDER BY id",
                     (since,))]
@@ -298,52 +295,6 @@ def remove_rule(root, rule_id):
             db.execute("UPDATE preferences SET active=0 WHERE id=?", (int(rule_id),))
     finally:
         db.close()
-
-
-# ponytail: up to this many action rules are shown in full, grouped by action; past it only the index goes in the
-# instructions and the text goes to 规矩.md (a long wall of rules gets skimmed; recall by action is what scales)
-INLINE_MAX = 20
-
-RECALL = """### 按动作取的规矩（这里只是目录，正文在 `{path}`；读过目录不算读过规矩）
-
-规矩是按「做什么动作时要守」存的，不是按话题：一件讲鉴权的事，管「发消息」的那条里一个鉴权字都没有，按话题找不到它。
-1. 开工前先列出这一轮要做的动作，用动词写：发 PR、查线上数据、写 SQL、回复同事、改代码、出方案……
-2. 拿每个动作对下面的目录，对上的就去读 `规矩.md` 里同名那一节，整节照做。一个动作可能对上好几节，都读。
-3. 做到一半才决定要做的动作（查完才知道要回同事、看完才知道要连库），在决定的那一刻回到第 2 步再对一次。
-4. 还拿不准，用业务词在 `规矩.md` 里搜一下兜底。一条都没对上就是这一轮真用不上，不要硬凑。
-
-目录（动作 · 几条）：
-"""
-
-
-def rules_text(root, project_id=None, folder=None):
-    """The block every AI gets on top of its instructions. Rules for every job are given in full; rules tied to an
-    action ("发 PR") are given in full grouped by action while there are few, and as an index to `folder`/规矩.md once
-    there are many. Rules for another project, and rules the owner has not confirmed yet, are left out."""
-    always, by_action = [], {}
-    for r in rules(root):
-        scope = r.get("scope") or ""
-        if r["fresh"]:   # learned by the AI and not confirmed yet: it waits for the owner's 「对」 before any AI follows it
-            continue
-        if scope.startswith("project:") and scope != f"project:{project_id}":
-            continue
-        tag = f"（{r['scope_name']}）" if scope else ""
-        line = f"- [{r['id']}] {r['rule']}{tag}"
-        (by_action.setdefault(r["trigger"], []) if r["trigger"] else always).append(line)
-    if not always and not by_action:
-        return ""
-    out = ["## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准。照着做了哪几条，把编号写进结果的 rules）", *always]
-    actions = sorted(by_action.items())
-    if actions and (not folder or not Path(folder).is_dir() or sum(len(v) for v in by_action.values()) <= INLINE_MAX):
-        out += ["", "做下面这些动作时还要守（按动作分好了，做到才用）："]
-        for action, lines in actions:
-            out += [f"#### {action}", *lines]
-    elif actions:
-        path = Path(folder) / "规矩.md"
-        path.write_text("# 按动作取的规矩\n\n" + "\n\n".join(f"## {a}\n" + "\n".join(lines) for a, lines in actions) + "\n",
-                        encoding="utf-8")
-        out += ["", RECALL.format(path=path) + "\n".join(f"- {a} · {len(lines)}" for a, lines in actions)]
-    return "\n".join(out) + "\n\n"
 
 
 # ---- 关于你: who the owner is, what they do, how they like work done -----------------------------------------

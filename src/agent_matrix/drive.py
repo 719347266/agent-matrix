@@ -546,7 +546,8 @@ def _prepare_learn(root, config, driver):
     folder = scratch(root, "learn", stamp)
     (folder / "feedback.json").write_text(json.dumps(feedback[-60:], ensure_ascii=False, indent=1), encoding="utf-8")
     (folder / "outcomes.json").write_text(json.dumps(verdicts[-80:], ensure_ascii=False, indent=1), encoding="utf-8")
-    (folder / "rules.json").write_text(json.dumps(memory.rules(root), ensure_ascii=False, indent=1), encoding="utf-8")
+    from . import library
+    library.snapshot(root, folder)
     what = "、".join(x for x in (f"{len(verdicts)} 次评审" if verdicts else "", f"{len(feedback)} 条反馈" if feedback else "") if x)
     return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {what}里学规矩", "folder": str(folder),
             "ref": {"count": len(feedback), "checked_at": checked_at}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
@@ -554,48 +555,43 @@ def _prepare_learn(root, config, driver):
 
 
 def _submit_learn(root, job):
-    from . import activity, memory
+    """learned.json → drafts for the 经验库, waiting in 记忆更新 for the owner's 用 (nothing is written to the library here)."""
+    from . import activity
     folder = Path(job["folder"])
-    problem = "缺少学规矩的结果。请按说明返回 JSON，至少含 add 数组；没有新规矩可以留空。"
+    problem = '缺少学经验的结果。请返回 {"drafts": [...]}；没有值得学的写 {"drafts": []}。'
     for name in ("learned.json", ".last.txt"):
         try:
             raw = (folder / name).read_text(encoding="utf-8-sig").strip()
             fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", raw, re.S | re.I)
             learned = json.loads(fenced[1] if fenced else raw)
-            if (not isinstance(learned, dict) or not learned or learned.keys() - {"add", "wins", "losses", "retire"}
-                    or not all(isinstance(v, list) for v in learned.values())
-                    or not all(isinstance(r, dict) and isinstance(r.get("rule"), str) and r["rule"].strip()
-                               and isinstance(r.get("why"), str) and r["why"].strip() for r in learned.get("add", []))
-                    or not all(type(i) is int for key in ("wins", "losses") for i in learned.get(key, []))
-                    or not all(type(i) is int or isinstance(i, dict) and type(i.get("id")) is int for i in learned.get("retire", []))):
+            if not isinstance(learned, dict) or not isinstance(learned.get("drafts"), list):
                 raise ValueError
             break
         except FileNotFoundError:
             continue
         except (ValueError, UnicodeError):
-            problem = "结果格式有误。请返回含 add、wins、losses、retire 数组的 JSON。每条新规矩要有 rule 和 why，后三项只填规矩编号。"
+            problem = '结果格式有误。请返回 {"drafts": [...]}，每份草稿的格式见说明。'
     else:
         if job["rounds"] >= MAX_FIX_ROUNDS:
             return fail(root, job, problem)
         job["rounds"] += 1
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem}
-    added = []
-    by_id = {r["id"]: r for r in memory.rules(root)}
-    known = set(by_id)
-    # Retiring a rule is the owner's call too: it becomes a 退休规矩 proposal in 记忆更新, applied only on 「用」.
-    retire = []
-    for x in learned.get("retire", []):
-        r = by_id.get(x["id"] if isinstance(x, dict) else x)
-        if r and r["source"] == "AI 学的":
-            why = str(x.get("why") or "") if isinstance(x, dict) else ""
-            retire.append(("retire_rule", f"「{r['rule']}」（通过 {r['wins']} · 退回 {r['losses']}）不再用",
-                           (why or "学规矩时发现本人新的反馈推翻了它")[:200], {"id": r["id"]}))
+    from . import library
+    bad = []
+    for i, d in enumerate(learned["drafts"][:3], 1):
+        try:
+            library.check_draft(root, d)
+        except ValueError as exc:
+            bad.append(f"第 {i} 份：{exc}")
+    if bad and job["rounds"] < MAX_FIX_ROUNDS:
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "；".join(bad)[:600] + " 改好再交；拿不准的那份直接删掉。"}
     checked_at = job["ref"].get("checked_at") or job.get("created") or now().isoformat(timespec="seconds")
     db = _db(root)
     try:
         with db:
-            # The receipt, the rules and their scores must survive a restart together.
             db.execute("BEGIN IMMEDIATE")
             closed = db.execute("UPDATE jobs SET status='done',updated=?,lease_until=NULL WHERE id=? AND status='open'",
                                 (now().isoformat(timespec="seconds"), job["id"]))
@@ -603,31 +599,14 @@ def _submit_learn(root, job):
                 return _closed(get(root, job["id"]))
             last = db.execute("SELECT value FROM settings WHERE key='learned_at'").fetchone()
             if last and checked_at <= json.loads(last[0]):
-                return {"ok": True, "status": "done", "added": []}
-            projects = {str(p[0]) for p in db.execute("SELECT id FROM projects")}
-            for r in learned.get("add", [])[:3]:
-                scope = str(r.get("scope") or "")
-                if not (scope.startswith("project:") and scope[8:] in projects or scope.startswith("type:") and 1 < len(scope) <= 15):
-                    scope = ""
-                rule = memory.insert_rule(db, r["rule"], r["why"], "AI 学的", scope, str(r.get("trigger") or ""))
-                if rule:
-                    added.append(rule)
-            for field in ("wins", "losses"):
-                db.executemany(f"UPDATE preferences SET {field}={field}+1 WHERE active=1 AND id=?",
-                               [(rid,) for rid in known.intersection(learned.get(field, []))])
+                return {"ok": True, "status": "done", "proposed": 0}
             db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('learned_at',?)", (json.dumps(checked_at),))
     finally:
         db.close()
-    if added:
-        activity.log(root, "detect", "从你的反馈里学到新规矩，等你确认：" + "；".join(added)[:200])
-    proposed = 0
-    if retire:
-        from . import tidy
-        proposed = tidy.save(root, retire, job["id"])
-        if proposed:
-            activity.log(root, "detect", f"学规矩时建议退休 {proposed} 条规矩，等你在「记忆更新」里点「用」")
-    return {"ok": True, "status": "done", "added": added, **({"retire_proposed": proposed} if proposed else {})}
-
+    proposed = save_drafts(root, learned["drafts"][:3], job["id"])
+    if proposed:
+        activity.log(root, "detect", f"从你的反馈里学到 {proposed} 条经验草稿，等你在「记忆更新」里点「用」")
+    return {"ok": True, "status": "done", "proposed": proposed}
 
 def _try_existing_review(root, source_dir, validate, publish, label):
     """Extracted earlier but the publish failed: publish without a new model run."""
@@ -1014,7 +993,8 @@ def _open(root, job, driver):
     finally:
         db.close()
     try:  # 记忆层: every AI reads the owner's standing rules before any work
-        from .memory import profile_text, rules_text
+        from .memory import profile_text
+        from .library import memory_text
         project_id, version = None, ""
         if job["kind"] == "item" and (job.get("ref") or {}).get("record_id"):
             from . import projects, versions
@@ -1022,7 +1002,7 @@ def _open(root, job, driver):
             project_id = projects.chosen(root).get(rid)
             from .snapshot import _snapshot
             version = versions.context_text(root, rid, {r.get("record_id"): r for r in _snapshot(root).get("rows") or []})
-        head = rules_text(root, project_id, job.get("folder")) + profile_text(root) + common_text(root) + version
+        head = memory_text(root, job.get("folder")) + profile_text(root) + common_text(root) + version
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]
@@ -1232,7 +1212,7 @@ def submit(root, config, job_id, driver=None):
 def _submit_item(root, config, job):
     from .itemwork import _remember, check_result
     item = _item(root, config, job)
-    result, problem = check_result(item.workdir, None)
+    result, problem = check_result(item.workdir, None, root)
     if closed := _closed(get(root, job["id"])):
         return closed
     if problem:
@@ -1244,6 +1224,9 @@ def _submit_item(root, config, job):
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem}
     _remember(item.workdir, _row_of(root, item.rid))
+    if save_drafts(root, result.get("memory_drafts") or [], job["id"]):
+        from . import activity
+        activity.log(root, "detect", f"#{item.n} 做事时提了经验草稿，等你在「记忆更新」里点「用」")
     if result["outcome"] == "blocked":
         item.block(str(result["question"]), result, 0)
         _close(root, job, "blocked")
@@ -1253,6 +1236,19 @@ def _submit_item(root, config, job):
     published = item.publish(result, 0)
     _close(root, job, "done")
     return {"ok": True, "status": "done", "url": published.get("url")}
+
+
+def save_drafts(root, drafts, job_id):
+    """AI drafts for the 经验库 become 记忆更新 waiting for the owner's 用. Returns how many are new."""
+    from . import library, tidy
+    proposals = []
+    for d in drafts:
+        try:
+            _, summary, data = library.check_draft(root, d)
+        except ValueError:
+            continue
+        proposals.append(("memory", summary, data["why"], data))
+    return tidy.save(root, proposals, job_id) if proposals else 0
 
 
 def _reply_command(root, command):

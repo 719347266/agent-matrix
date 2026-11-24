@@ -67,59 +67,54 @@ class MemoryTests(unittest.TestCase):
         memory.record_meeting(self.root, second, {"meeting_id": "m2", "topic": "周会"})
         self.assertEqual(len([m for m in inbox.messages(self.root) if m["kind"] == "recall"]), 1)
 
-    def test_rules_come_seeded_can_change_and_head_every_job(self):
-        from agent_matrix import drive, memory
-        self.assertTrue(any("不是本人负责" in r["rule"] for r in memory.rules(self.root)))
-        memory.add_rule(self.root, "对外文案先给两版让我挑")
-        rid = next(r["id"] for r in memory.rules(self.root) if r["rule"].startswith("对外文案"))
+    def test_the_library_starts_from_the_seeded_rules_and_every_job_gets_only_its_index(self):
+        from agent_matrix import drive, library
+        first = library.get(self.root, library.GENERAL)
+        self.assertIn("不是本人负责的事不用管", first["body"])
+        library.save(self.root, "对外文案经验", "name：对外文案经验\ndescription：要写对外文案、给客户发东西时打开。\n\n"
+                     "## 先给两版让我挑\n对外文案先给两版。\n**Why:** 本人说过", None)
         job = drive._open(self.root, {"id": "x-1", "kind": "chat", "instructions": "做事。", "folder": "f"}, "Claude Code")
-        self.assertTrue(job["instructions"].startswith("## 本人的规矩"))
-        self.assertIn("对外文案先给两版让我挑", job["instructions"])
-        memory.remove_rule(self.root, rid)
-        self.assertFalse(any(r["rule"].startswith("对外文案") for r in memory.rules(self.root)))
+        self.assertTrue(job["instructions"].startswith("## 经验库"))
+        self.assertIn("- 对外文案经验 — 要写对外文案、给客户发东西时打开。", job["instructions"])
+        self.assertNotIn("对外文案先给两版", job["instructions"])        # the body stays out of the instructions
+        library.delete(self.root, "对外文案经验")
+        self.assertIsNone(library.get(self.root, "对外文案经验"))
 
-    def test_learning_adds_at_most_three_rules_and_cannot_remove_the_owners(self):
-        from agent_matrix import drive, memory
+    def test_rules_the_owner_had_not_confirmed_become_drafts_not_memory(self):
+        from agent_matrix import library, memory, tidy
+        memory.rules(self.root)
+        memory.add_rule(self.root, "需求文档先补异常场景", "两次被退回", source="AI 学的")
+        memory.add_rule(self.root, "统计商家排除开发店", trigger="查线上数据")
+        memory.add_rule(self.root, "统计订单排除测试单", trigger="查线上数据")
+        self.assertNotIn("需求文档先补异常场景", library.get(self.root, library.GENERAL)["body"])
+        self.assertEqual([t for t, _ in library.get(self.root, "查线上数据经验")["sections"]], ["统计商家排除开发店", "统计订单排除测试单"])
+        waiting = tidy.updates(self.root)
+        self.assertEqual((len(waiting), waiting[0]["type"]), (1, "memory"))
+        tidy.use(self.root, [waiting[0]["id"]])
+        self.assertIn("需求文档先补异常场景", library.get(self.root, library.GENERAL)["body"])
+
+    def test_learning_only_proposes_at_most_three_drafts(self):
+        from agent_matrix import drive, library, tidy
+        before = library.get(self.root, library.GENERAL)["raw"]
         folder = self.root / "learn"
         folder.mkdir()
-        mine = memory.rules(self.root)[0]["id"]
-        (folder / "learned.json").write_text(json.dumps({"add": [{"rule": f"规矩{k}", "why": "本人说过"} for k in range(5)],
-                                                         "retire": [mine]}, ensure_ascii=False))
-        job = drive._open(self.root, {"id": "learn-1", "kind": "learn", "instructions": "", "folder": str(folder)}, "本机 GPT")
-        out = drive.submit(self.root, None, job["id"])
-        self.assertEqual(out["added"], ["规矩0", "规矩1", "规矩2"])
-        self.assertTrue(any(r["id"] == mine for r in memory.rules(self.root)))
+        drafts = [{"mode": "append", "name": library.GENERAL, "body": f"## 经验{k}\n做法{k}", "why": "本人说过"} for k in range(5)]
+        (folder / "learned.json").write_text(json.dumps({"drafts": drafts}, ensure_ascii=False))
+        job = drive._open(self.root, {"id": "learn-1", "kind": "learn", "instructions": "", "folder": str(folder), "ref": {}}, "本机 GPT")
+        self.assertEqual(drive.submit(self.root, None, job["id"])["proposed"], 3)
+        self.assertEqual(library.get(self.root, library.GENERAL)["raw"], before)     # nothing changes until 用
+        self.assertEqual(len(tidy.updates(self.root)), 3)
 
-    def test_retiring_a_learned_rule_waits_for_the_owners_use(self):
-        from agent_matrix import drive, memory, tidy
-        memory.add_rule(self.root, "周报先写过程", "本人说过", source="AI 学的")
-        learned = next(r["id"] for r in memory.rules(self.root) if r["rule"] == "周报先写过程")
-        folder = self.root / "learn2"
+    def test_a_bad_draft_is_sent_back_with_what_to_fix(self):
+        from agent_matrix import drive, library
+        folder = self.root / "learn"
         folder.mkdir()
-        (folder / "learned.json").write_text(json.dumps({"add": [], "retire": [{"id": learned, "why": "本人说只要结论"}]},
-                                                        ensure_ascii=False))
-        job = drive._open(self.root, {"id": "learn-2", "kind": "learn", "instructions": "", "folder": str(folder)}, "本机 GPT")
-        self.assertEqual(drive.submit(self.root, None, job["id"])["retire_proposed"], 1)
-        self.assertTrue(any(r["id"] == learned for r in memory.rules(self.root)))      # still there: only proposed
-        waiting = [u for u in tidy.updates(self.root) if u["type"] == "retire_rule"]
-        self.assertEqual((len(waiting), waiting[0]["why"]), (1, "本人说只要结论"))
-        tidy.use(self.root, [waiting[0]["id"]])
-        self.assertFalse(any(r["id"] == learned for r in memory.rules(self.root)))
-
-    def test_a_rule_the_ai_learned_waits_until_the_owner_says_it_is_right(self):
-        from agent_matrix import memory
-        memory.rules(self.root)                                        # the seeded rules come first
-        memory.add_rule(self.root, "需求文档先补异常场景", "两次被退回", source="AI 学的")
-        memory.add_rule(self.root, "对外文案先给两版")
-        by = {r["rule"]: r for r in memory.rules(self.root)}
-        self.assertTrue(by["需求文档先补异常场景"]["fresh"])
-        self.assertFalse(by["对外文案先给两版"]["fresh"])
-        self.assertFalse(memory.rules(self.root)[0]["fresh"])          # the owner's own (seeded) rules never wait
-        self.assertNotIn("需求文档先补异常场景", memory.rules_text(self.root))  # no AI follows it while it waits
-        self.assertIn("对外文案先给两版", memory.rules_text(self.root))
-        memory.confirm_rule(self.root, by["需求文档先补异常场景"]["id"])
-        self.assertIn(f"[{by['需求文档先补异常场景']['id']}] 需求文档先补异常场景", memory.rules_text(self.root))
-        self.assertFalse(next(r for r in memory.rules(self.root) if r["rule"] == "需求文档先补异常场景")["fresh"])
+        (folder / "learned.json").write_text(json.dumps({"drafts": [{"mode": "revise", "name": library.GENERAL, "old_text": "没有这句话",
+                                                                     "body": "## x\ny", "why": "w"}]}, ensure_ascii=False))
+        job = drive._open(self.root, {"id": "learn-2", "kind": "learn", "instructions": "", "folder": str(folder), "ref": {}}, "本机 GPT")
+        out = drive.submit(self.root, None, job["id"])
+        self.assertEqual(out["status"], "fix")
+        self.assertIn("找不到", out["problem"])
 
     def test_waiting_items_keep_the_evidence_rules(self):
         from agent_matrix.models import MatrixError

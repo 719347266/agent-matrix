@@ -95,20 +95,20 @@ class CheckResultTests(unittest.TestCase):
 
     def test_good_delivery_passes(self):
         from agent_matrix.worker import check_result
-        self.write(GOOD, {"outcome": "done", "template": "方案", "summary": "先投人群包A，日预算800", "sources": ["会议"], "rules": []})
+        self.write(GOOD, {"outcome": "done", "template": "方案", "summary": "先投人群包A，日预算800", "sources": ["会议"], "memory": []})
         self.assertIsNone(check_result(self.dir, row())[1])
 
     def test_missing_assumptions_section_is_sent_back(self):
         from agent_matrix.worker import check_result
-        self.write(GOOD.split("## 我做的假设")[0], {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "rules": []})
+        self.write(GOOD.split("## 我做的假设")[0], {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "memory": []})
         self.assertIn("我做的假设", check_result(self.dir, row())[1])
 
     def test_placeholders_and_missing_template_sections_are_sent_back(self):
         from agent_matrix.worker import check_result
         self.write(GOOD.replace("## 需要你拍板", "## 待定").replace("800 元/天", "XX 元/天"),
-                   {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "rules": []})
+                   {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "memory": []})
         self.assertIn("拍板", check_result(self.dir, row())[1])
-        self.write(GOOD.replace("800 元/天", "TODO"), {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "rules": []})
+        self.write(GOOD.replace("800 元/天", "TODO"), {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "memory": []})
         self.assertIn("TODO", check_result(self.dir, row())[1])
 
     def test_blocked_must_say_what_was_tried(self):
