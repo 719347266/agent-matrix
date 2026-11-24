@@ -566,7 +566,8 @@ def _submit_learn(root, job):
                     or not all(isinstance(v, list) for v in learned.values())
                     or not all(isinstance(r, dict) and isinstance(r.get("rule"), str) and r["rule"].strip()
                                and isinstance(r.get("why"), str) and r["why"].strip() for r in learned.get("add", []))
-                    or not all(type(i) is int for key in ("wins", "losses", "retire") for i in learned.get(key, []))):
+                    or not all(type(i) is int for key in ("wins", "losses") for i in learned.get(key, []))
+                    or not all(type(i) is int or isinstance(i, dict) and type(i.get("id")) is int for i in learned.get("retire", []))):
                 raise ValueError
             break
         except FileNotFoundError:
@@ -580,7 +581,16 @@ def _submit_learn(root, job):
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem}
     added = []
-    known = {r["id"] for r in memory.rules(root)}
+    by_id = {r["id"]: r for r in memory.rules(root)}
+    known = set(by_id)
+    # Retiring a rule is the owner's call too: it becomes a 退休规矩 proposal in 记忆更新, applied only on 「用」.
+    retire = []
+    for x in learned.get("retire", []):
+        r = by_id.get(x["id"] if isinstance(x, dict) else x)
+        if r and r["source"] == "AI 学的":
+            why = str(x.get("why") or "") if isinstance(x, dict) else ""
+            retire.append(("retire_rule", f"「{r['rule']}」（通过 {r['wins']} · 退回 {r['losses']}）不再用",
+                           (why or "学规矩时发现本人新的反馈推翻了它")[:200], {"id": r["id"]}))
     checked_at = job["ref"].get("checked_at") or job.get("created") or now().isoformat(timespec="seconds")
     db = _db(root)
     try:
@@ -605,14 +615,18 @@ def _submit_learn(root, job):
             for field in ("wins", "losses"):
                 db.executemany(f"UPDATE preferences SET {field}={field}+1 WHERE active=1 AND id=?",
                                [(rid,) for rid in known.intersection(learned.get(field, []))])
-            db.executemany("UPDATE preferences SET active=0 WHERE id=? AND source='AI 学的'",
-                           [(rid,) for rid in known.intersection(learned.get("retire", []))])
             db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('learned_at',?)", (json.dumps(checked_at),))
     finally:
         db.close()
     if added:
-        activity.log(root, "detect", "从你的反馈里学到新规矩：" + "；".join(added)[:200])
-    return {"ok": True, "status": "done", "added": added}
+        activity.log(root, "detect", "从你的反馈里学到新规矩，等你确认：" + "；".join(added)[:200])
+    proposed = 0
+    if retire:
+        from . import tidy
+        proposed = tidy.save(root, retire, job["id"])
+        if proposed:
+            activity.log(root, "detect", f"学规矩时建议退休 {proposed} 条规矩，等你在「记忆更新」里点「用」")
+    return {"ok": True, "status": "done", "added": added, **({"retire_proposed": proposed} if proposed else {})}
 
 
 def _try_existing_review(root, source_dir, validate, publish, label):

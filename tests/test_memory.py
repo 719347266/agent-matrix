@@ -90,6 +90,22 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(out["added"], ["规矩0", "规矩1", "规矩2"])
         self.assertTrue(any(r["id"] == mine for r in memory.rules(self.root)))
 
+    def test_retiring_a_learned_rule_waits_for_the_owners_use(self):
+        from agent_matrix import drive, memory, tidy
+        memory.add_rule(self.root, "周报先写过程", "本人说过", source="AI 学的")
+        learned = next(r["id"] for r in memory.rules(self.root) if r["rule"] == "周报先写过程")
+        folder = self.root / "learn2"
+        folder.mkdir()
+        (folder / "learned.json").write_text(json.dumps({"add": [], "retire": [{"id": learned, "why": "本人说只要结论"}]},
+                                                        ensure_ascii=False))
+        job = drive._open(self.root, {"id": "learn-2", "kind": "learn", "instructions": "", "folder": str(folder)}, "本机 GPT")
+        self.assertEqual(drive.submit(self.root, None, job["id"])["retire_proposed"], 1)
+        self.assertTrue(any(r["id"] == learned for r in memory.rules(self.root)))      # still there: only proposed
+        waiting = [u for u in tidy.updates(self.root) if u["type"] == "retire_rule"]
+        self.assertEqual((len(waiting), waiting[0]["why"]), (1, "本人说只要结论"))
+        tidy.use(self.root, [waiting[0]["id"]])
+        self.assertFalse(any(r["id"] == learned for r in memory.rules(self.root)))
+
     def test_a_rule_the_ai_learned_waits_until_the_owner_says_it_is_right(self):
         from agent_matrix import memory
         memory.rules(self.root)                                        # the seeded rules come first
