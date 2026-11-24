@@ -204,7 +204,7 @@ class ConversationTests(unittest.TestCase):
             fake.chmod(0o755)
             work = Path(tmp) / "work"; work.mkdir()
             (work / ".thread").write_text("gpt-thread")          # GPT's conversation is left alone
-            config = Config(worker_claude=str(fake), worker_claude_model="sonnet")
+            config = Config(worker_claude=str(fake), worker_claude_model="sonnet", worker_mcp_tools=[])
             from unittest.mock import patch
             original_argv = ClaudeRun.argv
             with patch.object(ClaudeRun, "argv", lambda run: [sys.executable, str(fake), *original_argv(run)[1:]]):

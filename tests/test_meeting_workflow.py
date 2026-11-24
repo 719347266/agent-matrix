@@ -120,6 +120,8 @@ class MeetingWorkflowTests(unittest.TestCase):
         _,review=self.make_review()
         action=review.actions[0]
         self.assertEqual(task_fields(action,self.config,self.meta)["状态"],["未开始"])
+        # What the AI would do from a meeting waits for the owner's 「AI做」, even with an owner and a date.
+        self.assertEqual(task_fields(action.model_copy(update={"executor":"AI"}),self.config,self.meta)["状态"],["待确认"])
         for changes in ({"owner_name":None},{"due_date":None}):
             fields=task_fields(action.model_copy(update=changes),self.config,self.meta)
             self.assertEqual(fields["状态"],["待确认"])

@@ -49,8 +49,12 @@ def check_result(workdir, row):
         result = json.loads((Path(workdir) / "结果.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None, "没有找到有效的 结果.json。按说明写好再结束。"
-    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked"}:
-        return result, "结果.json 的 outcome 只能是 done 或 blocked。"
+    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked", "handled"}:
+        return result, "结果.json 的 outcome 只能是 done、blocked 或 handled。"
+    if result["outcome"] == "handled":
+        if not str(result.get("evidence") or "").strip() or not str(result.get("reason") or "").strip():
+            return result, "handled 必须写 evidence（原样抄出说明已经办完或不用做的那一句）和 reason；抄不出那一句就不是 handled，接着做。"
+        return result, None
     if result["outcome"] == "blocked":
         if not str(result.get("question") or "").strip() or not str(result.get("tried") or "").strip():
             return result, "卡住时必须写 question（问本人的一个具体问题）和 tried（已经试过哪些办法）。"

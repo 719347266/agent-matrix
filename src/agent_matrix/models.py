@@ -106,7 +106,7 @@ class Config(BaseModel):
     worker_gemini_sandbox: bool = True  # macOS: run it in the system sandbox, so it only writes inside the job's folder
     # MCP tools the local Claude may use while working, e.g. ["mcp__claude_ai_Notion__notion-fetch"]. Empty = none
     # (safe mode). Non-empty: the owner's own hooks/plugins stay off, only these MCP tools are allowed.
-    worker_mcp_tools: list[str] = Field(default_factory=list)
+    worker_mcp_tools: list[str] = Field(default_factory=lambda: ["*"])  # the owner's MCP, read-only (MCP_DENY)
     worker_claudeai_mcp: bool = False  # also the claude.ai connectors (they shadow same-server plugins until signed in)
     # exact MCP tool names let through the send/create ban (e.g. Slack's send, for pr-notify); asked in 开发模式
     worker_mcp_send: list[str] = Field(default_factory=list)

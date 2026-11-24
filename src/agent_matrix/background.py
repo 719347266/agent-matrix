@@ -12,6 +12,7 @@ The whole pack is kept under BUDGET characters (fit). The model reads this first
 (commands listed at the end) until it has enough.
 """
 from datetime import datetime, timedelta
+import json
 from pathlib import Path
 import re
 
@@ -73,7 +74,7 @@ def _meeting_id(row):
     return key.split(":")[1] if key.startswith("meeting:") and key.count(":") >= 2 else None
 
 
-def transcript_excerpt(root, row):
+def transcript_excerpt(root, row, before=TRANSCRIPT_BEFORE, after=TRANSCRIPT_AFTER, cap=TRANSCRIPT_CAP):
     """Lines around the promise in the meeting transcript, plus the full transcript path."""
     mid = _meeting_id(row)
     if not mid or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", mid):
@@ -94,12 +95,12 @@ def transcript_excerpt(root, row):
             words = re.sub(r"\s+", "", stamp.group(2))[:12]
             anchor = next((i for i, line in enumerate(lines) if words and words in re.sub(r"\s+", "", line)), None)
     if anchor is None:
-        return "\n".join(lines[:TRANSCRIPT_BEFORE + TRANSCRIPT_AFTER])[:TRANSCRIPT_CAP], path
-    start, end = max(0, anchor - TRANSCRIPT_BEFORE), min(len(lines), anchor + TRANSCRIPT_AFTER)
+        return "\n".join(lines[:before + after])[:cap], path
+    start, end = max(0, anchor - before), min(len(lines), anchor + after)
     text = "\n".join(lines[start:end])
-    if len(text) > TRANSCRIPT_CAP:  # keep the promise in the middle when trimming
+    if len(text) > cap:  # keep the promise in the middle when trimming
         mid_at = len("\n".join(lines[start:anchor]))
-        text = text[max(0, mid_at - TRANSCRIPT_CAP // 2): mid_at + TRANSCRIPT_CAP // 2]
+        text = text[max(0, mid_at - cap // 2): mid_at + cap // 2]
     return text, path
 
 
@@ -121,10 +122,12 @@ def _slack(client, link, start, end=None):
             for ts, who, text in lines]
 
 
-def chat_excerpt(client, row, now):
-    if (slack_lines := _slack(client, _one(row.get("来源链接")), _sent_at(row, now) - timedelta(hours=CHAT_WINDOW_HOURS),
-                              _sent_at(row, now) + timedelta(hours=CHAT_WINDOW_HOURS))) is not None:
-        return "\n".join(line for _, line in slack_lines)[-CHAT_CAP:] or None
+def chat_excerpt(client, row, now, hours=CHAT_WINDOW_HOURS, cap=CHAT_CAP, latest=False):
+    """The source chat from `hours` before the message to `hours` after it, or (latest) up to now."""
+    sent = _sent_at(row, now)
+    until = now if latest else sent + timedelta(hours=hours)
+    if (slack_lines := _slack(client, _one(row.get("来源链接")), sent - timedelta(hours=hours), until)) is not None:
+        return "\n".join(line for _, line in slack_lines)[-cap:] or None
     cid = _chat_id(row)
     if not cid or client is None:
         return None
@@ -137,7 +140,7 @@ def chat_excerpt(client, row, now):
         at = now
     if at.tzinfo is None:
         at = at.replace(tzinfo=now.tzinfo)
-    start, end = at - timedelta(hours=CHAT_WINDOW_HOURS), min(now, at + timedelta(hours=CHAT_WINDOW_HOURS))
+    start, end = at - timedelta(hours=hours), now if latest else min(now, at + timedelta(hours=hours))
     try:
         got = client._exec(["im", "+chat-messages-list", "--chat-id", cid, "--start", start.isoformat(), "--end", end.isoformat(),
                             "--order", "asc", "--no-reactions", "--as", "user", "--format", "json"])
@@ -153,7 +156,7 @@ def chat_excerpt(client, row, now):
         when = str(m.get("create_time") or m.get("sent_at") or "")[11:16]
         out.append(f"[{when} {who}] {text[:400]}")
     text = "\n".join(out)
-    return text[-CHAT_CAP:] if text else None
+    return text[-cap:] if text else None
 
 
 # ---- documents and similar items --------------------------------------------------------------------
@@ -252,7 +255,8 @@ DIG_MORE = """## 不够就自己继续扒（只读，扒到够为止）
 
 
 HEAD = "# 背景（程序替你找好的，先读完再动手）\n"
-BUDGET = 24000   # characters for the whole 背景.md; past it the least needed sections are cut first
+# ponytail: halved from 24000 once the AI could fetch the source itself (context); the pack is now only the fallback
+BUDGET = 12000   # characters for the whole 背景.md; past it the least needed sections are cut first
 # What survives when it is too long: the owner's own pointers and the line of work > examples > documents > old talk.
 MUST, EXAMPLES, DOCS, PAST = 0, 1, 2, 3
 
@@ -300,6 +304,8 @@ def fit(sections, budget=BUDGET, fixed=0):
 def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=(), copy_to=None, budget=BUDGET):
     """Return the 背景.md text for one item. Every section is optional; missing ones are simply left out."""
     sections = []   # (priority, heading, lines)
+    if copy_to is not None:   # a pointer first: the AI fetches the source itself, as wide and as late as it turns out to need
+        sections.append((MUST, "## 来源会话：自己去取（动手前取一次，交付或起草回复前再取一次）", source_pointer(root, row, copy_to)))
     links = [(k, u) for k, u in given_links(row, notes) if not any(x and x in u for x in skip_urls)]
     if links:
         sections.append((MUST, "## 本人给过的链接（先读这些；里面有上一版就在它基础上改）",
@@ -376,6 +382,46 @@ def build(root, client, rows, row, now, *, notes="", previous=None, skip_urls=()
     if not sections:  # nothing found at all
         return HEAD + "\n程序没找到现成的背景。按下面的办法自己去扒，至少查一次文档和一次聊天再下结论。\n\n" + DIG_MORE
     return fit(sections, budget, fixed=len(DIG_MORE) + 1) + "\n" + DIG_MORE
+
+
+# ---- the source conversation, fetched by the AI itself (xinxiang context) ---------------------------------
+
+CONTEXT_MAX_HOURS = 168
+
+
+def source_pointer(root, row, folder):
+    """Save the item's source fields in its folder; return the lines telling the AI how to fetch the conversation."""
+    source = Path(folder) / "来源.json"
+    source.write_text(json.dumps(row, ensure_ascii=False, default=str), encoding="utf-8")
+    from .workenv import shim_path   # installed by 心响 at start (drive.install_shim)
+    cmd = shim_path()
+    return [f"`\"{cmd}\" context --source \"{source}\" --hours 3`",
+            "取回从原话前 3 小时到**现在**的来源会话：会议原话、来源聊天、之后的相关聊天。下面几节是程序按标题猜着摘的，"
+            "可能过时、可能不全，以这条命令取回的为准；不够就按返回末尾的提示把 --hours 翻倍再取，取到够为止。"]
+
+
+def context(root, client, row, now, hours=CHAT_WINDOW_HOURS):
+    """The item's source conversation from `hours` before the promise up to now (not just around it): what the AI
+    reads when the pack is not enough, and again before it acts, since someone may have done or answered it meanwhile."""
+    hours = max(1, min(int(hours), CONTEXT_MAX_HOURS))
+    scale = min(8, max(1, hours // CHAT_WINDOW_HOURS))
+    out = [f"# 来源会话（原话前 {hours} 小时 → 现在 {now:%m-%d %H:%M}）", ""]
+    excerpt, path = transcript_excerpt(root, row, before=TRANSCRIPT_BEFORE * scale, after=TRANSCRIPT_BEFORE * scale,
+                                       cap=TRANSCRIPT_CAP * scale)
+    if excerpt:
+        out += [f"## 会议原话前后文（完整逐字稿：`{path}`）", "```", excerpt, "```", ""]
+    chat = chat_excerpt(client, row, now, hours=hours, cap=CHAT_CAP * scale, latest=True)
+    if chat:
+        out += ["## 来源聊天（一直到现在）", "```", chat, "```", ""]
+    else:   # a meeting, a task, a ticket: what was said about it in chats since
+        later = after_context(client, row, now, limit=15 * scale)
+        if later:
+            out += ["## 之后的相关聊天（按标题搜到的，不一定都相关）", *later, ""]
+    if len(out) == 2:
+        out += ["这件事取不回来源会话（来源不是会议或聊天，或者读不到）。按 背景.md 末尾的命令用关键词搜。", ""]
+    out.append(f"不够：把 --hours 改成 {min(hours * 2, CONTEXT_MAX_HOURS)} 再取一次。" if hours < CONTEXT_MAX_HOURS
+               else "已经取到上限（7 天），再往前用关键词搜。")
+    return "\n".join(out)
 
 
 # ---- what happened after the item was picked up (for judging new items) ---------------------------------
