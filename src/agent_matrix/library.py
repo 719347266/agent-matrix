@@ -236,7 +236,7 @@ def check_draft(root, d):
         if not body:
             raise ValueError("revise 要写 body：改好后的那一段；整段删掉用 remove。")
         parse(render(name, have["description"], have["body"].replace(old, body)), name)
-        return mode, f"「{name}」里改一段", {**data, "old_text": old, "body": body}
+        return mode, f"「{name}」里改一段：{old.strip().splitlines()[0][:40]}", {**data, "old_text": old, "body": body}
     if mode == "remove":
         left = have["body"].replace(old, "").strip()
         if left:
@@ -249,7 +249,8 @@ def check_draft(root, d):
     if to == name or (not target and not d.get("description")):
         raise ValueError("to 写挪去的那一份；还没有这一份就同时写 description，会新建。")
     _path(root, to)
-    return mode, f"「{name}」里的一节挪到「{to}」", {**data, "old_text": old, "to": to,
+    title = old.lstrip()[3:].split("\n", 1)[0].strip()
+    return mode, f"「{title}」从「{name}」挪到「{to}」", {**data, "old_text": old, "to": to,
                                                     **({} if target else {"description": " ".join(str(d["description"]).split())})}
 
 
