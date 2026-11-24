@@ -30,6 +30,10 @@ chat_review_times: ['11:30', '14:30', '17:30', '20:30']
 feishu_tasks_enabled: true
 # Slack 作为第二个聊天来源：填用户 token（xoxp-），或设环境变量 SLACK_USER_TOKEN；都不填就不读 Slack
 slack_token: ''
+# 开发模式要你批准时推到手机：飞书卡片 + Slack 按钮（Slack 需建一个 Socket Mode 的 App，见 slack-app-manifest.yaml）
+slack_bot_token: ''   # xoxb-，Bot User OAuth Token
+slack_app_token: ''   # xapp-，App-Level Token（connections:write）
+approval_notify: [feishu, slack]   # [] = 只在心响里提示
 # Jira Cloud：指派给你、没完成的单子同步成事项。地址 + 邮箱 + API Token（id.atlassian.com/manage-profile/security/api-tokens），也可以在心响「工具」页连接
 jira_site: ''
 jira_email: ''

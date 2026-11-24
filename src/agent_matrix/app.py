@@ -1032,6 +1032,11 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/slack/disconnect":
                         slack.disconnect(root)
                         return self._send(200, {"ok": True})
+                    if path == "/api/slack/approvals/connect":
+                        return self._send(200, {"ok": True, **slack.connect_approvals(root, body.get("bot"), body.get("app"))})
+                    if path == "/api/slack/approvals/disconnect":
+                        slack.disconnect_approvals(root)
+                        return self._send(200, {"ok": True})
                     if path == "/api/slack/try":
                         hours = min(max(float(body.get("hours") or 24), 1), 168)
                         return self._send(200, {"ok": True, **slack.dry_run(load(root / "config.yaml"), hours=hours)})

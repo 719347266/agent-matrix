@@ -17,7 +17,7 @@ LAYERS = [
     ("存储", ["state", "activity", "inbox", "thread", "prework_store", "itemstore", "memory", "jobstore", "snapshot", "itemlinks", "projects", "bugs", "approvals", "setupasks", "versions", "stats", "tidy"]),
     ("外部连接", ["hymem", "feishu", "bitable", "records", "notion", "storemode", "workenv", "sources.chats", "sources.slack", "sources.wechat", "sources"]),
     ("业务规则", ["workflow", "merge", "automation", "linked_sync", "sources.feishu_tasks", "sources.jira", "manual", "replies", "deliverables", "automation_demo", "brief_migration", "brief_v1", "prework",
-                  "reply", "meeting_watch", "meeting_review", "chat_review", "background", "eventbrief", "pastwork", "proactive",
+                  "reply", "approval_push", "meeting_watch", "meeting_review", "chat_review", "background", "eventbrief", "pastwork", "proactive",
                   "agents", "agents.daily_brief", "agents.meeting_followup", "agents.meeting_prep",
                   "agents.pre_worker", "agents.recurring", "agents.weekly_review"]),
     ("AI执行", ["engines", "itemwork", "drive", "worker", "sessions", "local_sessions", "cindy_pickup", "aidrivers", "wakeup"]),

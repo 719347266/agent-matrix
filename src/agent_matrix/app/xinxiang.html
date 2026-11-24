@@ -1705,7 +1705,26 @@ function slackRow(s){
   const st=D.settings||{};
   const x=setupState("slack");
   if(!me&&!x.ask&&!x.doing&&!S.slackPaste) return connectRow("slack","Slack","团队用 Slack 沟通的话接上，会从里面找出别人找你的事。")+`<p class="hint" style="margin:8px 14px">已经有 Token？<a href="#" onclick="S.slackPaste=true;render();return false">直接粘贴</a></p>`;
-  return (me?"":connectRow("slack","Slack",""))+setRow(me?"Slack":"粘贴 Token",slackDesc,slackCtl,slackHelp+tried);
+  return (me?"":connectRow("slack","Slack",""))+setRow(me?"Slack":"粘贴 Token",slackDesc,slackCtl,slackHelp+tried)+(me?slackApprovalRow(me):"");
+}
+function slackApprovalRow(me){
+  const on=me.approvals;
+  if(on) return setRow("手机批准",`开发模式要你批准、新事项要你定、AI 做完等你验收时，Slack 机器人 @${esc(on.bot||"")} 私信你，点按钮就行；也可以直接在私信里打字回复，和在心响里回复一样。`,
+    `<button class="btn ghost" onclick="slackApprovalsOff()">关掉</button>`,"");
+  const ctl=`<input id="slackbot" type="password" autocomplete="off" placeholder="xoxb-…" style="width:130px;height:28px;padding:3px 8px"><input id="slackapp" type="password" autocomplete="off" placeholder="xapp-…" style="width:130px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')slackApprovalsOn()"><button class="btn pri" onclick="slackApprovalsOn()">开启</button>`;
+  const help=`<details><summary>怎么拿到这两个 Token</summary><div class="d" style="margin-top:6px">在 <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> 打开同一个 App（或按仓库里 slack-app-manifest.yaml 新建）：Socket Mode 打开；Interactivity &amp; Shortcuts 打开；OAuth &amp; Permissions → Bot Token Scopes 加 <code>chat:write im:write im:history</code>；Event Subscriptions 打开，Subscribe to bot events 加 <code>message.im</code>；App Home 里勾上「Allow users to send messages」→ 重新 Install → 复制 Bot User OAuth Token（xoxb-）；Basic Information → App-Level Tokens 新建一个，权限选 <code>connections:write</code>（xapp-）。</div></details>`;
+  return setRow("手机批准",`不在电脑前时，开发模式要你批准的步骤由 Slack 机器人私信你，带「批准」「拒绝」按钮。两个 Token 请你自己粘贴，不要发到对话里。`,ctl,help);
+}
+async function slackApprovalsOn(){
+  const bot=$("#slackbot"), app=$("#slackapp"), b=bot&&bot.value.trim(), a=app&&app.value.trim();
+  if(!b) return bot&&bot.focus(); if(!a) return app&&app.focus();
+  if(!LIVE) return toast("原型里不能连接");
+  try{ const r=await api("/api/slack/approvals/connect",{bot:b,app:a},30000); bot.value=""; app.value=""; toast(`已开启，机器人 @${r.bot||""}`); load(); }
+  catch(e){ toast(e.name==="AbortError"?"连 Slack 超时了，再试一次":e.message); }
+}
+async function slackApprovalsOff(){
+  if(!confirm("关掉 Slack 手机批准？开发模式照常在心响和飞书里问你。")) return;
+  try{ await api("/api/slack/approvals/disconnect",{}); toast("已关掉"); load(); }catch(e){ toast(e.message); }
 }
 function jiraRow(s){
   const me=s.jira;

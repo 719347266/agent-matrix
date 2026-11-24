@@ -284,12 +284,56 @@ def connect(root, tok, *, api=call):
     return who
 
 
+def connect_approvals(root, bot, app, *, api=call, opener=post):
+    """开发模式 on the phone: check the bot token (xoxb-) and that Socket Mode answers the app token (xapp-), then save
+    both. The listener (approval_push.slack_loop) picks them up within a minute."""
+    from ..config import load, save
+    from ..state import State
+    bot, app = (bot or "").strip(), (app or "").strip()
+    if not bot.startswith("xoxb-"):
+        raise MatrixError("机器人 Token 要 xoxb- 开头：OAuth & Permissions 页的 Bot User OAuth Token。")
+    if not app.startswith("xapp-"):
+        raise MatrixError("App-Level Token 要 xapp- 开头：Basic Information → App-Level Tokens，权限选 connections:write。")
+    me = api(bot, "auth.test")
+    try:
+        opener(app, "apps.connections.open")
+    except MatrixError as exc:
+        raise MatrixError(f"{exc}。确认 App 里 Socket Mode 已打开、App-Level Token 有 connections:write。") from exc
+    path = root / "config.yaml"
+    config = load(path)
+    config.slack_bot_token, config.slack_app_token = bot, app
+    save(path, config)
+    state = State(root / "state/state.db")
+    try:
+        state.set("slack:identity", {**(state.get("slack:identity") or {}), "approvals": {"bot": me.get("user"), "tail": bot[-4:]}})
+    finally:
+        state.close()
+    return {"bot": me.get("user")}
+
+
+def disconnect_approvals(root):
+    from ..config import load, save
+    from ..state import State
+    path = root / "config.yaml"
+    config = load(path)
+    config.slack_bot_token = config.slack_app_token = ""
+    save(path, config)
+    state = State(root / "state/state.db")
+    try:
+        who = state.get("slack:identity")
+        if who:
+            who.pop("approvals", None)
+            state.set("slack:identity", who)
+    finally:
+        state.close()
+
+
 def disconnect(root):
     from ..config import load, save
     from ..state import State
     path = root / "config.yaml"
     config = load(path)
-    config.slack_token = ""
+    config.slack_token = config.slack_bot_token = config.slack_app_token = ""
     save(path, config)
     state = State(root / "state/state.db")
     try:
