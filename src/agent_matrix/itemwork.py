@@ -42,15 +42,22 @@ def _section_names(markdown):
     return [re.sub(r"\s+", "", m.group(1)) for m in re.finditer(r"^#{1,6}\s*(.+?)\s*$", markdown, re.M)]
 
 
-def check_result(workdir, row):
+def check_result(workdir, row, root=None):
     """(result, problem). problem is a short sentence the model can act on, or None when it passes."""
     from .prework import PLACEHOLDERS, TEMPLATES
     try:
         result = json.loads((Path(workdir) / "结果.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None, "没有找到有效的 结果.json。按说明写好再结束。"
-    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked"}:
-        return result, "结果.json 的 outcome 只能是 done 或 blocked。"
+    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked", "handled"}:
+        return result, "结果.json 的 outcome 只能是 done、blocked 或 handled。"
+    problem = draft_problem(result, root) if root else None
+    if problem:
+        return result, problem
+    if result["outcome"] == "handled":
+        if not str(result.get("evidence") or "").strip() or not str(result.get("reason") or "").strip():
+            return result, "handled 必须写 evidence（原样抄出说明已经办完或不用做的那一句）和 reason；抄不出那一句就不是 handled，接着做。"
+        return result, None
     if result["outcome"] == "blocked":
         if not str(result.get("question") or "").strip() or not str(result.get("tried") or "").strip():
             return result, "卡住时必须写 question（问本人的一个具体问题）和 tried（已经试过哪些办法）。"
@@ -71,6 +78,8 @@ def check_result(workdir, row):
         return result, "confirmation 不超过 30 字。"
     if not result.get("sources"):
         return result, "sources 要列出实际用到的资料。"
+    if not (isinstance(result.get("memory"), list) and all(isinstance(x, str) for x in result["memory"])):
+        return result, "memory 要写这一轮读了并照着做的经验（如 [\"发 PR 经验#先跑测试\"]）；一份都没用上就写 []。"
     try:
         doc = (Path(workdir) / "交付.md").read_text(encoding="utf-8")
     except OSError:
@@ -93,6 +102,23 @@ def check_result(workdir, row):
     if length < 80:
         return result, "交付.md 正文太短，像没做完。"
     return result, None
+
+
+def draft_problem(result, root):
+    """memory_drafts (optional): each must be a valid draft for the library; the first problem, or None."""
+    from . import library
+    drafts = result.get("memory_drafts")
+    if drafts is None:
+        return None
+    if not isinstance(drafts, list) or len(drafts) > 3:
+        return "memory_drafts 是草稿数组，一轮最多 3 份；没有就不写这一项。"
+    for i, d in enumerate(drafts, 1):
+        try:
+            library.check_draft(root, d)
+        except ValueError as exc:
+            return f"memory_drafts 第 {i} 份：{exc}"
+    return None
+
 
 
 def workdir_for(root, record_id):

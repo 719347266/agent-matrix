@@ -267,7 +267,8 @@ def task_fields(action, config, meta):
         executor="别人"
     hidden=executor=="别人" and action.direction!="others_to_me"
     ready=bool(action.due_date) and (own or executor=="别人")
-    status="未开始" if ready else "待确认"
+    # A meeting is talk, not a handoff: what the AI would do from it waits for the owner's 「AI做」 (triage only suggests).
+    status="未开始" if ready and executor!="AI" else "待确认"
     progress={"未开始":"0/1 等对方" if executor=="别人" else "0/1 未开始","待确认":"0/1 待确认"}[status]
     fields={"标题":action.title,"类型":["会议待办"],"状态":[status],"执行方":[executor],"进度":progress,
             "下一步动作":action.text,"来源":["会议"],"来源链接":meta.get("source_url") or None,

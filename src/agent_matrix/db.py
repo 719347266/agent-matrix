@@ -143,6 +143,12 @@ SCHEMAS = {
         # 记忆增强: what waits to be written into Hy Memory, written in the background by the listener (hymem.py)
         """CREATE TABLE IF NOT EXISTS hymem_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL,
             text TEXT NOT NULL, workspace TEXT, ref TEXT, tries INTEGER NOT NULL DEFAULT 0, error TEXT, done TEXT, UNIQUE(kind, ref))""",
+    ], [
+        # which of the owner's rules the AI said it followed in the deliverable this verdict is on (memory.record_outcome)
+        _add_columns("outcomes", "rules TEXT"),
+    ], [
+        # the action a rule is for ("发 PR"): AI reads it when it is about to do that, not on every job (memory.rules_text)
+        _add_columns("preferences", "trigger TEXT NOT NULL DEFAULT ''"),
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

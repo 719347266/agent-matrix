@@ -11,7 +11,7 @@ JOBS = ("meeting_extract.md", "chat_extract.md", "triage.md", "worker.md", "lear
 
 
 class PromptSystem(unittest.TestCase):
-    def test_every_job_reads_rules_then_the_owner_then_the_shared_rules_then_its_own_description(self):
+    def test_every_job_reads_the_memory_index_then_the_owner_then_the_shared_rules_then_its_own_description(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "state").mkdir()
@@ -20,8 +20,11 @@ class PromptSystem(unittest.TestCase):
             job = drive._open(root, {"id": "learn-9", "kind": "learn", "title": "t", "folder": d, "ref": {}, "output": [],
                                      "instructions": "# 这类活的说明"}, "本机 GPT")
             text = job["instructions"]
-            order = [text.index(x) for x in ("## 本人的规矩", "## 本人是谁", "## 共同规矩", "# 这类活的说明")]
+            order = [text.index(x) for x in ("## 经验库", "## 本人是谁", "## 共同规矩", "# 这类活的说明")]
             self.assertEqual(order, sorted(order))
+            self.assertIn("- 做事通用规矩 — ", text)          # the seeded rules became the first memory: index only
+            self.assertNotIn("不是本人负责的事不用管", text)      # its body is not in the instructions
+            self.assertIn("不是本人负责的事不用管", (Path(d) / "记忆" / "做事通用规矩.md").read_text(encoding="utf-8"))
             self.assertIn("本人（王小明）的 AI 员工", text)
 
     def test_each_job_description_has_the_same_skeleton_and_leaves_the_shared_rules_to_the_shared_part(self):

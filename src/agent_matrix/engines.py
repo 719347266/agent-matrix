@@ -275,7 +275,8 @@ class ClaudeRun(CodexRun):
         # --safe-mode turns every MCP server off. With MCP wanted: load the owner's user settings (that is where the
         # MCP servers live) but switch all hooks off, and allow only MCP tools (dontAsk denies everything unlisted).
         settings = {**json.loads(self.SANDBOX), **({"disableAllHooks": True} if mcp else {})}
-        allowed = ["--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch", *mcp])]
+        # Skill: the owner's skills (loaded with the user settings) are how it checks things the owner's way
+        allowed = ["--allowedTools", " ".join(["Bash Read Write Edit Glob Grep WebFetch WebSearch Skill", *mcp])]
         send = [t for t in self.config.worker_mcp_send if t.startswith("mcp__")] if mcp else []
         if self.guard:
             # 开发模式: whatever would prompt comes to us over stdin/stdout (control_request can_use_tool) and waits

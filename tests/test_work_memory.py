@@ -20,7 +20,7 @@ class WorkMemory(unittest.TestCase):
         (self.root / "state").mkdir()
         aidrivers.hello(self.root, "Antigravity")
 
-    def test_verdicts_are_kept_and_rules_hold_where_they_belong(self):
+    def test_verdicts_are_kept_with_their_kind_and_project(self):
         pid = projects.create(self.root, "示例 App")
         projects.assign(self.root, ["r1"], pid)
         (self.root / "state/work/r1").mkdir(parents=True)
@@ -29,34 +29,26 @@ class WorkMemory(unittest.TestCase):
         memory.record_outcome(self.root, "r1", "通过")
         got = memory.outcomes(self.root)
         self.assertEqual([(o["verdict"], o["template"], o["project"]) for o in got], [("退回", "方案", "示例 App"), ("通过", "方案", "示例 App")])
-        memory.add_rule(self.root, "给客户的方案不写内部代号", source="AI 学的", scope=f"project:{pid}")
-        memory.add_rule(self.root, "周报先给结论", source="AI 学的", scope="type:周报")
-        other = projects.create(self.root, "心响")
-        self.assertIn("不写内部代号（项目「示例 App」）", memory.rules_text(self.root, pid))
-        self.assertNotIn("不写内部代号", memory.rules_text(self.root, other), "another project's rule stays out")
-        self.assertIn("周报先给结论（做「周报」时）", memory.rules_text(self.root, None))
-        rule = next(r for r in memory.rules(self.root) if r["rule"] == "周报先给结论")
-        memory.credit(self.root, rule["id"], True); memory.credit(self.root, rule["id"], False); memory.credit(self.root, rule["id"], True)
-        rule = next(r for r in memory.rules(self.root) if r["rule"] == "周报先给结论")
-        self.assertEqual((rule["wins"], rule["losses"], rule["scope_name"]), (2, 1, "做「周报」时"))
 
-    def test_the_learning_job_reads_verdicts_and_keeps_score(self):
+    def test_the_learning_job_reads_verdicts_and_only_drafts(self):
         memory.record_outcome(self.root, "r1", "退回", "太长了")
         with patch("agent_matrix.snapshot._snapshot", return_value={"rows": ROWS}):
             job = drive._prepare_learn(self.root, None, "Antigravity")
         self.assertIn("1 次评审", job["title"])
         verdicts = json.loads((Path(job["folder"]) / "outcomes.json").read_text(encoding="utf-8"))
         self.assertEqual((verdicts[0]["n"], verdicts[0]["item"], verdicts[0]["reason"]), (1, "定会员积分规则", "太长了"))
-        seed = memory.rules(self.root)[0]["id"]
-        (Path(job["folder"]) / "learned.json").write_text(json.dumps(
-            {"add": [{"rule": "方案控制在一屏", "why": "#1 退回：太长了", "scope": "type:方案"},
-                     {"rule": "乱填的范围", "why": "x", "scope": "project:999"}], "wins": [seed], "losses": [12345]}), encoding="utf-8")
+        from agent_matrix import library, tidy
+        self.assertTrue((Path(job["folder"]) / "记忆" / f"{library.GENERAL}.md").is_file())   # it sees the library as it is
+        (Path(job["folder"]) / "learned.json").write_text(json.dumps({"drafts": [
+            {"mode": "create", "name": "写方案经验", "description": "要写方案、出选项对比时打开。",
+             "body": "## 方案控制在一屏\n结论和对比表放一屏。\n**Why:** #1 退回：太长了", "why": "#1 退回：太长了"}]}, ensure_ascii=False),
+            encoding="utf-8")
         drive._open(self.root, job, "Antigravity")
-        self.assertEqual(drive.submit(self.root, None, job["id"])["status"], "done")
-        rules = {r["rule"]: r for r in memory.rules(self.root)}
-        self.assertEqual(rules["方案控制在一屏"]["scope"], "type:方案")
-        self.assertEqual(rules["乱填的范围"]["scope"], "", "a scope naming nothing known holds everywhere")
-        self.assertEqual(next(r for r in memory.rules(self.root) if r["id"] == seed)["wins"], 1)
+        out = drive.submit(self.root, None, job["id"])
+        self.assertEqual((out["status"], out["proposed"]), ("done", 1))
+        self.assertIsNone(library.get(self.root, "写方案经验"))          # only a draft until the owner says 用
+        tidy.use(self.root, [tidy.updates(self.root)[0]["id"]])
+        self.assertEqual(library.get(self.root, "写方案经验")["description"], "要写方案、出选项对比时打开。")
 
     def test_failed_learning_is_quiet_and_spaces_retries_across_restarts(self):
         from agent_matrix import inbox
@@ -76,16 +68,15 @@ class WorkMemory(unittest.TestCase):
                            ((drive.now()-timedelta(minutes=minutes + 1)).isoformat(),))
             db.close()
         job = drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True)
-        (Path(job["folder"]) / "learned.json").write_text('{"add":[]}')
+        (Path(job["folder"]) / "learned.json").write_text('{"drafts":[]}')
         self.assertEqual(drive.submit(self.root, None, job["id"])["status"], "done")
         self.assertEqual(inbox.unread(self.root), 0)
 
-    def test_ai_repairs_bad_output_in_its_reply_and_credit_applies_once(self):
+    def test_ai_repairs_bad_output_in_its_reply(self):
         from types import SimpleNamespace
         from agent_matrix import worker, inbox
         from agent_matrix.models import Config
         memory.record_outcome(self.root, "r1", "通过")
-        rule = memory.rules(self.root)[0]["id"]
         job = drive.next_job(self.root, None, "Antigravity", kinds=["learn"], builtin=True)
         folder = Path(job["folder"])
         prompts = []
@@ -96,9 +87,9 @@ class WorkMemory(unittest.TestCase):
             def run(self, prompt):
                 prompts.append(prompt)
                 if len(prompts) == 1:
-                    (folder / "learned.json").write_text('{"add":{}}')
+                    (folder / "learned.json").write_text('{"drafts":{}}')
                 else:
-                    (folder / ".last.txt").write_text(json.dumps({"wins": [rule]}))
+                    (folder / ".last.txt").write_text(json.dumps({"drafts": []}))
                 return SimpleNamespace(thread=None, returncode=0, timed_out=False)
         with patch("agent_matrix.worker.engine", return_value=Run):
             result = worker.run_job(self.root, Config(), job)
@@ -106,7 +97,6 @@ class WorkMemory(unittest.TestCase):
         self.assertEqual(len(prompts), 2)
         self.assertIn("结果格式有误", prompts[1])
         self.assertEqual(drive.submit(self.root, None, job["id"])["status"], "done")
-        self.assertEqual(next(r["wins"] for r in memory.rules(self.root) if r["id"] == rule), 1)
         self.assertEqual(inbox.unread(self.root), 0)
 
     def test_model_outage_waits_instead_of_requesting_immediate_repair(self):

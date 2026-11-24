@@ -546,7 +546,8 @@ def _prepare_learn(root, config, driver):
     folder = scratch(root, "learn", stamp)
     (folder / "feedback.json").write_text(json.dumps(feedback[-60:], ensure_ascii=False, indent=1), encoding="utf-8")
     (folder / "outcomes.json").write_text(json.dumps(verdicts[-80:], ensure_ascii=False, indent=1), encoding="utf-8")
-    (folder / "rules.json").write_text(json.dumps(memory.rules(root), ensure_ascii=False, indent=1), encoding="utf-8")
+    from . import library
+    library.snapshot(root, folder)
     what = "、".join(x for x in (f"{len(verdicts)} 次评审" if verdicts else "", f"{len(feedback)} 条反馈" if feedback else "") if x)
     return {"id": f"learn-{stamp}", "kind": "learn", "title": f"从你最近 {what}里学规矩", "folder": str(folder),
             "ref": {"count": len(feedback), "checked_at": checked_at}, "output": ["learned.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
@@ -554,38 +555,43 @@ def _prepare_learn(root, config, driver):
 
 
 def _submit_learn(root, job):
-    from . import activity, memory
+    """learned.json → drafts for the 经验库, waiting in 记忆更新 for the owner's 用 (nothing is written to the library here)."""
+    from . import activity
     folder = Path(job["folder"])
-    problem = "缺少学规矩的结果。请按说明返回 JSON，至少含 add 数组；没有新规矩可以留空。"
+    problem = '缺少学经验的结果。请返回 {"drafts": [...]}；没有值得学的写 {"drafts": []}。'
     for name in ("learned.json", ".last.txt"):
         try:
             raw = (folder / name).read_text(encoding="utf-8-sig").strip()
             fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", raw, re.S | re.I)
             learned = json.loads(fenced[1] if fenced else raw)
-            if (not isinstance(learned, dict) or not learned or learned.keys() - {"add", "wins", "losses", "retire"}
-                    or not all(isinstance(v, list) for v in learned.values())
-                    or not all(isinstance(r, dict) and isinstance(r.get("rule"), str) and r["rule"].strip()
-                               and isinstance(r.get("why"), str) and r["why"].strip() for r in learned.get("add", []))
-                    or not all(type(i) is int for key in ("wins", "losses", "retire") for i in learned.get(key, []))):
+            if not isinstance(learned, dict) or not isinstance(learned.get("drafts"), list):
                 raise ValueError
             break
         except FileNotFoundError:
             continue
         except (ValueError, UnicodeError):
-            problem = "结果格式有误。请返回含 add、wins、losses、retire 数组的 JSON。每条新规矩要有 rule 和 why，后三项只填规矩编号。"
+            problem = '结果格式有误。请返回 {"drafts": [...]}，每份草稿的格式见说明。'
     else:
         if job["rounds"] >= MAX_FIX_ROUNDS:
             return fail(root, job, problem)
         job["rounds"] += 1
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem}
-    added = []
-    known = {r["id"] for r in memory.rules(root)}
+    from . import library
+    bad = []
+    for i, d in enumerate(learned["drafts"][:3], 1):
+        try:
+            library.check_draft(root, d)
+        except ValueError as exc:
+            bad.append(f"第 {i} 份：{exc}")
+    if bad and job["rounds"] < MAX_FIX_ROUNDS:
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "；".join(bad)[:600] + " 改好再交；拿不准的那份直接删掉。"}
     checked_at = job["ref"].get("checked_at") or job.get("created") or now().isoformat(timespec="seconds")
     db = _db(root)
     try:
         with db:
-            # The receipt, the rules and their scores must survive a restart together.
             db.execute("BEGIN IMMEDIATE")
             closed = db.execute("UPDATE jobs SET status='done',updated=?,lease_until=NULL WHERE id=? AND status='open'",
                                 (now().isoformat(timespec="seconds"), job["id"]))
@@ -593,27 +599,14 @@ def _submit_learn(root, job):
                 return _closed(get(root, job["id"]))
             last = db.execute("SELECT value FROM settings WHERE key='learned_at'").fetchone()
             if last and checked_at <= json.loads(last[0]):
-                return {"ok": True, "status": "done", "added": []}
-            projects = {str(p[0]) for p in db.execute("SELECT id FROM projects")}
-            for r in learned.get("add", [])[:3]:
-                scope = str(r.get("scope") or "")
-                if not (scope.startswith("project:") and scope[8:] in projects or scope.startswith("type:") and 1 < len(scope) <= 15):
-                    scope = ""
-                rule = memory.insert_rule(db, r["rule"], r["why"], "AI 学的", scope)
-                if rule:
-                    added.append(rule)
-            for field in ("wins", "losses"):
-                db.executemany(f"UPDATE preferences SET {field}={field}+1 WHERE active=1 AND id=?",
-                               [(rid,) for rid in known.intersection(learned.get(field, []))])
-            db.executemany("UPDATE preferences SET active=0 WHERE id=? AND source='AI 学的'",
-                           [(rid,) for rid in known.intersection(learned.get("retire", []))])
+                return {"ok": True, "status": "done", "proposed": 0}
             db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('learned_at',?)", (json.dumps(checked_at),))
     finally:
         db.close()
-    if added:
-        activity.log(root, "detect", "从你的反馈里学到新规矩：" + "；".join(added)[:200])
-    return {"ok": True, "status": "done", "added": added}
-
+    proposed = save_drafts(root, learned["drafts"][:3], job["id"])
+    if proposed:
+        activity.log(root, "detect", f"从你的反馈里学到 {proposed} 条经验草稿，等你在「记忆更新」里点「用」")
+    return {"ok": True, "status": "done", "proposed": proposed}
 
 def _try_existing_review(root, source_dir, validate, publish, label):
     """Extracted earlier but the publish failed: publish without a new model run."""
@@ -1000,7 +993,8 @@ def _open(root, job, driver):
     finally:
         db.close()
     try:  # 记忆层: every AI reads the owner's standing rules before any work
-        from .memory import profile_text, rules_text
+        from .memory import profile_text
+        from .library import memory_text
         project_id, version = None, ""
         if job["kind"] == "item" and (job.get("ref") or {}).get("record_id"):
             from . import projects, versions
@@ -1008,7 +1002,7 @@ def _open(root, job, driver):
             project_id = projects.chosen(root).get(rid)
             from .snapshot import _snapshot
             version = versions.context_text(root, rid, {r.get("record_id"): r for r in _snapshot(root).get("rows") or []})
-        head = rules_text(root, project_id) + profile_text(root) + common_text(root) + version
+        head = memory_text(root, job.get("folder")) + profile_text(root) + common_text(root) + version
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]
@@ -1218,7 +1212,7 @@ def submit(root, config, job_id, driver=None):
 def _submit_item(root, config, job):
     from .itemwork import _remember, check_result
     item = _item(root, config, job)
-    result, problem = check_result(item.workdir, None)
+    result, problem = check_result(item.workdir, None, root)
     if closed := _closed(get(root, job["id"])):
         return closed
     if problem:
@@ -1230,13 +1224,58 @@ def _submit_item(root, config, job):
         _save(root, job)
         return {"ok": False, "status": "fix", "problem": problem}
     _remember(item.workdir, _row_of(root, item.rid))
+    if save_drafts(root, result.get("memory_drafts") or [], job["id"]):
+        from . import activity
+        activity.log(root, "detect", f"#{item.n} 做事时提了经验草稿，等你在「记忆更新」里点「用」")
     if result["outcome"] == "blocked":
         item.block(str(result["question"]), result, 0)
         _close(root, job, "blocked")
         return {"ok": True, "status": "blocked"}
+    if result["outcome"] == "handled":
+        return _handled(root, item, job, result)
     published = item.publish(result, 0)
     _close(root, job, "done")
     return {"ok": True, "status": "done", "url": published.get("url")}
+
+
+def save_drafts(root, drafts, job_id):
+    """AI drafts for the 经验库 become 记忆更新 waiting for the owner's 用. Returns how many are new."""
+    from . import library, tidy
+    proposals = []
+    for d in drafts:
+        try:
+            _, summary, data = library.check_draft(root, d)
+        except ValueError:
+            continue
+        proposals.append(("memory", summary, data["why"], data))
+    return tidy.save(root, proposals, job_id) if proposals else 0
+
+
+def _reply_command(root, command):
+    """Apply one owner command ("12 完成") as the AI would type it; True when it went through."""
+    run = subprocess.run([sys.executable, "-m", "agent_matrix.reply", "--text", command, "--source", "ai"], cwd=root, capture_output=True,
+                         text=True, encoding="utf-8", timeout=180)
+    return "✓" in (run.stdout or "")
+
+
+def _handled(root, item, job, result):
+    """Before doing it, the AI found it already done (or called off) in the source conversation: close it the way the
+    owner would, keeping the line that shows it. Not closed (the command failed): it waits for the owner instead."""
+    from . import thread as conversation
+    _close(root, job, "done")   # first: the 完成 below would otherwise stop this very run
+    item.release()
+    url = str(result.get("url") or "")
+    url = url if url.startswith("http") else ""
+    skip = result.get("close_as") == "skip"
+    commands = [f"{item.n} 不做"] if skip else [f"{item.n} 完成", f"{item.n} + {url}"] if url else [f"{item.n} 无交付"]
+    ok = bool(item.n) and all([_reply_command(root, c) for c in commands])
+    reason, evidence = str(result["reason"])[:60], str(result["evidence"])[:300]
+    if ok:
+        conversation.judge(root, item.rid, "skip" if skip else "done", reason)
+    conversation.add(root, item.rid, "ai", "say", f"动手前核对：{reason}\n依据：{evidence}" +
+                     ("" if ok else "\n（没能自动关掉，你看一眼：确实办完了就点完成）"), driver=job.get("driver"))
+    item.done_status("已有人办完" if ok else "待你确认", reason, 0)
+    return {"ok": True, "status": "handled", "closed": ok}
 
 
 def _record_of(root, n):
@@ -1297,13 +1336,11 @@ def _submit_triage(root, job):
             continue  # closing something needs a reason (and, for done, the words that prove it)
         url = str(v.get("url") or "") if str(v.get("url") or "").startswith("http") else ""
         n = item["n"]
-        commands = {"ai": [f"{n} AI做"], "prep": [f"{n} AI备"], "skip": [f"{n} 不做"],
-                    "done": [f"{n} 完成", f"{n} + {url}"] if url else [f"{n} 无交付"]}.get(decision, [])
-        ok = True
-        for command in commands:
-            run = subprocess.run([sys.executable, "-m", "agent_matrix.reply", "--text", command, "--source", "ai"], cwd=root, capture_output=True,
-                                 text=True, encoding="utf-8", timeout=180)
-            ok = ok and "✓" in (run.stdout or "")
+        # from a meeting: talk, not a handoff. The AI only suggests; the item stays 待确认 until the owner says 「AI做」.
+        held = decision in {"ai", "prep"} and item.get("source") == "会议"
+        commands = [] if held else {"ai": [f"{n} AI做"], "prep": [f"{n} AI备"], "skip": [f"{n} 不做"],
+                                    "done": [f"{n} 完成", f"{n} + {url}"] if url else [f"{n} 无交付"]}.get(decision, [])
+        ok = all([_reply_command(root, c) for c in commands])
         if not ok:
             continue  # not applied: judged again next time
         conversation.judge(root, item["record_id"], decision, reason)
@@ -1314,11 +1351,13 @@ def _submit_triage(root, job):
             except Exception as exc:
                 activity.swallowed(root, "drive._submit_triage", exc)
         extra = "、".join(x for x in (f"串上了 {links} 件前后的事" if links else "", f"记下 {expected} 件这个版本预计会遇到的事" if expected else "") if x)
-        conversation.add(root, item["record_id"], "ai", "say", f"判断：{TRIAGE_LABEL[decision]}。{reason}" +
+        label = ("建议 AI 做，会议里提的事等你点「AI做」才开工" if decision == "ai" else
+                 "建议你来做、AI 先备材料，等你点「AI备」才开工") if held else TRIAGE_LABEL[decision]
+        conversation.add(root, item["record_id"], "ai", "say", f"判断：{label}。{reason}" +
                          (f"\n依据：{evidence}" if evidence else "") + (f"\n{extra}。" if extra else ""), driver=job.get("driver"))
-        applied.append({"n": item["n"], "decision": decision, **({"links": links} if links else {}), **({"expected": expected} if expected else {})})
+        applied.append({"n": item["n"], "decision": decision, **({"held": True} if held else {}), **({"links": links} if links else {}), **({"expected": expected} if expected else {})})
     if applied:
-        activity.log(root, "detect", "AI 判断新进来的事：" + "、".join(f"#{a['n']} {TRIAGE_LABEL[a['decision']][:6]}" for a in applied))
+        activity.log(root, "detect", "AI 判断新进来的事：" + "、".join(f"#{a['n']} {'等你点：建议' + a['decision'] if a.get('held') else TRIAGE_LABEL[a['decision']][:6]}" for a in applied))
     _close(root, job, "done")
     return {"ok": True, "status": "done", "applied": applied}
 
@@ -1468,7 +1507,7 @@ def main(argv=None):
     from .config import load
     p = argparse.ArgumentParser(prog="xinxiang", description="心响驱动协议：任何 AI 都能领活、交活")
     p.add_argument("command", choices=["hello", "next", "step", "say", "submit", "ask", "release", "handoff", "guide", "status", "gate",
-                                        "wake-hook"])
+                                        "wake-hook", "context"])
     p.add_argument("--url", help="wake-hook：心响有活时请求这个地址来叫醒你（Standard Webhooks 签名）；空 = 取消")
     p.add_argument("--secret", help="wake-hook：签名密钥（不给就用心响生成的那串）")
     p.add_argument("--name", help="hello：你是谁（Antigravity、Gemini、Claude Code、Cursor …）")
@@ -1481,6 +1520,8 @@ def main(argv=None):
     p.add_argument("--to", help="handoff：交给哪个 AI"); p.add_argument("--why", default="", help="handoff：为什么")
     p.add_argument("--kinds", help="只领这几类活，逗号分隔：item,triage,meeting,chat,learn,tidy")
     p.add_argument("--driver", default=os.environ.get("XINXIANG_DRIVER") or "外部 AI")
+    p.add_argument("--source", type=Path, help="context：事项文件夹里的 来源.json")
+    p.add_argument("--hours", type=int, default=3, help="context：从原话前多少小时取到现在（最多 168）")
     p.add_argument("--job"); p.add_argument("--text"); p.add_argument("--question"); p.add_argument("--tried")
     p.add_argument("--session", default=os.environ.get("XINXIANG_SESSION"), help="你这段对话的编号或能打开它的链接")
     p.add_argument("--config", type=Path, default=Path("config.yaml"))
@@ -1492,6 +1533,16 @@ def main(argv=None):
     try:
         if args.command == "guide":
             print(guide_text(_cmd()))
+            return 0
+        if args.command == "context":   # read-only and lock-free: it runs inside the AI's sandbox
+            from .background import context
+            from .feishu import Feishu
+            from .workenv import now
+            row = json.loads(args.source.read_text(encoding="utf-8")) if args.source and args.source.is_file() else None
+            if not isinstance(row, dict):
+                print("要 --source：事项文件夹里的 来源.json（背景.md 第一节给了完整命令）。", file=sys.stderr)
+                return 2
+            print(context(root, Feishu(load(path), root), row, now(), args.hours))
             return 0
         if args.command == "status":
             print(json.dumps({"open": [{k: j[k] for k in ("id", "kind", "title", "driver", "step")} for j in open_jobs(root)],

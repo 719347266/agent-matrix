@@ -95,20 +95,20 @@ class CheckResultTests(unittest.TestCase):
 
     def test_good_delivery_passes(self):
         from agent_matrix.worker import check_result
-        self.write(GOOD, {"outcome": "done", "template": "方案", "summary": "先投人群包A，日预算800", "sources": ["会议"]})
+        self.write(GOOD, {"outcome": "done", "template": "方案", "summary": "先投人群包A，日预算800", "sources": ["会议"], "memory": []})
         self.assertIsNone(check_result(self.dir, row())[1])
 
     def test_missing_assumptions_section_is_sent_back(self):
         from agent_matrix.worker import check_result
-        self.write(GOOD.split("## 我做的假设")[0], {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"]})
+        self.write(GOOD.split("## 我做的假设")[0], {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "memory": []})
         self.assertIn("我做的假设", check_result(self.dir, row())[1])
 
     def test_placeholders_and_missing_template_sections_are_sent_back(self):
         from agent_matrix.worker import check_result
         self.write(GOOD.replace("## 需要你拍板", "## 待定").replace("800 元/天", "XX 元/天"),
-                   {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"]})
+                   {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "memory": []})
         self.assertIn("拍板", check_result(self.dir, row())[1])
-        self.write(GOOD.replace("800 元/天", "TODO"), {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"]})
+        self.write(GOOD.replace("800 元/天", "TODO"), {"outcome": "done", "template": "方案", "summary": "x", "sources": ["a"], "memory": []})
         self.assertIn("TODO", check_result(self.dir, row())[1])
 
     def test_blocked_must_say_what_was_tried(self):
@@ -204,7 +204,7 @@ class ConversationTests(unittest.TestCase):
             fake.chmod(0o755)
             work = Path(tmp) / "work"; work.mkdir()
             (work / ".thread").write_text("gpt-thread")          # GPT's conversation is left alone
-            config = Config(worker_claude=str(fake), worker_claude_model="sonnet")
+            config = Config(worker_claude=str(fake), worker_claude_model="sonnet", worker_mcp_tools=[])
             from unittest.mock import patch
             original_argv = ClaudeRun.argv
             with patch.object(ClaudeRun, "argv", lambda run: [sys.executable, str(fake), *original_argv(run)[1:]]):

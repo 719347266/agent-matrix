@@ -54,7 +54,7 @@ class Tidy(unittest.TestCase):
         with snap():
             self.assertEqual(tidy.due(self.root), {"verdicts": 1, "moments": 0, "items": 3})
             job = take(self.root)
-            for name in ("rules.json", "moments.json", "versions.json", "profile.md", "outcomes.json", "unplaced.json"):
+            for name in ("记忆/目录.md", "moments.json", "versions.json", "profile.md", "outcomes.json", "unplaced.json"):
                 self.assertTrue((Path(job["folder"]) / name).is_file(), name)
             self.assertIn("第几步/共几步", job["instructions"])
             self.assertIn("tidy.json", job["instructions"])
@@ -84,26 +84,26 @@ class Tidy(unittest.TestCase):
         self.assertEqual(len(tidy.check(self.root, plan, profile_evidence=["outcome:2"])[0]), 1)
 
     def test_submit_checks_the_plan_and_keeps_it_waiting_without_changing_the_memory(self):
+        from agent_matrix import library
         memory.record_outcome(self.root, "r1", "退回", "太长了")
-        before = {r["id"] for r in memory.rules(self.root)}
-        job, out = self.job({"changes": [{"type": "retire_rule", "id": min(before), "why": "seed 不能退休"},
-                                          {"type": "merge_rules", "ids": sorted(before)[:2], "rule": "少问多找"}]})
+        before = library.get(self.root, library.GENERAL)["raw"]
+        job, out = self.job({"changes": [{"type": "memory", "mode": "revise", "name": library.GENERAL, "old_text": "没有这句", "body": "x", "why": "w"},
+                                          {"type": "memory", "mode": "append", "name": "没有这份", "body": "## a\nb", "why": "w"}]})
         self.assertEqual(out["status"], "fix")
         self.assertIn("第 1 条", out["problem"]); self.assertIn("第 2 条", out["problem"])
         (Path(job["folder"]) / "tidy.json").write_text("not json", encoding="utf-8")
         with snap():
             self.assertEqual(drive.submit(self.root, None, job["id"])["status"], "fix")
-        a, b = sorted(before)[:2]
         (Path(job["folder"]) / "tidy.json").write_text(json.dumps({"changes": [
-            {"type": "merge_rules", "ids": [a, b], "rule": "只管自己的事，交付先给结论", "why": "两条常一起用"},
+            {"type": "memory", "mode": "append", "name": library.GENERAL, "body": "## 少问多找\n先自己查。", "why": "两条常一起用"},
             {"type": "bogus", "why": "x"}]}, ensure_ascii=False), encoding="utf-8")
         with snap():
             out = drive.submit(self.root, None, job["id"])   # out of fix rounds: the good ones are kept
         self.assertEqual((out["status"], out["proposed"]), ("done", 1))
-        self.assertEqual({r["id"] for r in memory.rules(self.root)}, before, "nothing changes before the owner says 用")
+        self.assertEqual(library.get(self.root, library.GENERAL)["raw"], before, "nothing changes before the owner says 用")
         [u] = tidy.updates(self.root)
-        self.assertEqual((u["label"], u["state"], u["why"]), ("合并规矩", "待定", "两条常一起用"))
-        self.assertIn("合并成「只管自己的事，交付先给结论」", u["content"])
+        self.assertEqual((u["label"], u["state"], u["why"]), ("经验库", "待定", "两条常一起用"))
+        self.assertIn("加上：少问多找", u["content"])
         self.assertEqual(tidy.save(self.root, [(u["type"], u["content"], u["why"], u["data"])]), 0, "the same one is not added twice")
 
     def test_use_applies_each_kind_and_drop_changes_nothing(self):
@@ -112,15 +112,13 @@ class Tidy(unittest.TestCase):
         versions.upsert(self.root, "示例 App", "2.3", "下一版")
         versions.place(self.root, "r1", v22)
         memory.set_profile(self.root, "## 岗位\n产品经理\n\n## 在做的事\n会员体系")
-        memory.add_rule(self.root, "先给两版文案", "x", source="AI 学的")
-        memory.add_rule(self.root, "文案给两个版本挑", "y", source="AI 学的")
-        memory.add_rule(self.root, "方案写满三页", "z", source="AI 学的")
-        rules = {r["rule"]: r["id"] for r in memory.rules(self.root)}
+        from agent_matrix import library
+        seeded = library.get(self.root, library.GENERAL)["sections"][2][1]   # 没有人明确承接的话不算待办
         old = self.moment("年卡先不做", at=datetime.now(TZ).isoformat(timespec="seconds"))
         new = self.moment("年卡这周做", at=datetime.now(TZ).isoformat(timespec="seconds"))
         _, out = self.job({"changes": [
-            {"type": "merge_rules", "ids": [rules["先给两版文案"], rules["文案给两个版本挑"]], "rule": "对外文案先给两版让我挑", "why": "重复"},
-            {"type": "retire_rule", "id": rules["方案写满三页"], "why": "退回 3 次"},
+            {"type": "memory", "mode": "append", "name": library.GENERAL, "body": "## 对外文案先给两版让我挑\n先给两版。", "why": "重复退回"},
+            {"type": "memory", "mode": "remove", "name": library.GENERAL, "old_text": seeded, "why": "本人改主意了"},
             {"type": "stale_moment", "id": old, "by": new, "why": "改主意了"},
             {"type": "place_item", "n": 2, "project": "示例 App", "version": "2.3", "why": "会员页在 2.3"},
             {"type": "place_item", "n": 3, "project": "心响", "why": "上线通知"},
@@ -135,11 +133,9 @@ class Tidy(unittest.TestCase):
         self.assertIsNone(projects.chosen(self.root).get("r3"), "不要: nothing changes")
         used, failed = tidy.use(self.root, [u["id"] for u in tidy.updates(self.root)])
         self.assertEqual((len(used), failed), (7, {}))
-        texts = {r["rule"]: r for r in memory.rules(self.root)}
-        self.assertIn("对外文案先给两版让我挑", texts)
-        self.assertFalse(texts["对外文案先给两版让我挑"]["fresh"], "the owner said yes to it")
-        for gone in ("先给两版文案", "文案给两个版本挑", "方案写满三页"):
-            self.assertNotIn(gone, texts)
+        titles = [t for t, _ in library.get(self.root, library.GENERAL)["sections"]]
+        self.assertIn("对外文案先给两版让我挑", titles)
+        self.assertNotIn("没有人明确承接的话不算待办，不要硬凑", titles)
         self.assertEqual(next(m for m in memory.moments(self.root) if m["id"] == old)["status"], "stale")
         self.assertNotIn("年卡先不做", [m["text"] for m in memory.recall(self.root, "年卡先不做")])
         self.assertEqual(versions.of(self.root, "r2")["name"], "2.3")
@@ -162,13 +158,15 @@ class Tidy(unittest.TestCase):
 
     def test_the_page_lists_them_and_the_owner_decides(self):
         from agent_matrix import app
-        tidy.save(self.root, [("retire_rule", "「x」不再用", "退回多", {"id": 999})])
+        from agent_matrix import library
+        draft = lambda title: ("memory",) + (lambda m, c, d: (c, d["why"], d))(*library.check_draft(
+            self.root, {"mode": "append", "name": library.GENERAL, "body": f"## {title}\n做法", "why": "退回多"}))
+        tidy.save(self.root, [draft("写满三页")])
         with snap():
             view = app.memory_view(self.root, [])["memory"]
-        self.assertEqual([(u["label"], u["content"], u["why"]) for u in view["updates"]], [("退休规矩", "「x」不再用", "退回多")])
-        memory.add_rule(self.root, "方案写满三页", "z", source="AI 学的")
-        rid = next(r["id"] for r in memory.rules(self.root) if r["rule"] == "方案写满三页")
-        tidy.save(self.root, [("retire_rule", "「方案写满三页」不再用", "退回多", {"id": rid})])
+        self.assertEqual([(u["label"], u["content"], u["why"]) for u in view["updates"]], [("经验库", f"「{library.GENERAL}」加上：写满三页", "退回多")])
+        self.assertIn("加上：\n## 写满三页", view["updates"][0]["detail"])      # the owner reads the text itself before 用
+        tidy.save(self.root, [draft("方案先给结论")])
         import http.client, threading
         server = app.make_server(self.root, 0)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -182,7 +180,8 @@ class Tidy(unittest.TestCase):
         self.assertEqual(post({"drop": first})["left"], 1)
         out = post({"use": "all"})
         self.assertEqual((out["ok"], out["used"], out["left"]), (True, 1, 0))
-        self.assertNotIn("方案写满三页", [r["rule"] for r in memory.rules(self.root)])
+        titles = [t for t, _ in library.get(self.root, library.GENERAL)["sections"]]
+        self.assertIn("方案先给结论", titles); self.assertNotIn("写满三页", titles)
 
 
 if __name__ == "__main__":

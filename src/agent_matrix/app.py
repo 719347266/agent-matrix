@@ -381,17 +381,33 @@ def memory_view(root, items):
         organizing = next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "organize"), None)
         since = (datetime.now(TZ) - timedelta(days=30)).isoformat(timespec="seconds")
         verdicts = memory.outcomes(root, since=since)
-        return {"memory": {"rules": memory.rules(root), "waiting": waiting, "recent": recent,
+        from . import library
+        lib = [{"name": e["name"], "description": e["description"], "sections": [t for t, _ in e["sections"]], "raw": e["raw"]}
+               for e in library.entries(root)]
+        return {"memory": {"library": lib, "library_problems": library.problems(root), "waiting": waiting, "recent": recent,
                            "profile": {**memory.profile(root), "draft": memory.draft(root), "asked": memory.scan_asked(root), "scanning": scanning},
                            "versions": archive, "organize": {"asked": versions.organize_asked(root), "doing": organizing},
                            "verdicts": {k: sum(1 for o in verdicts if o["verdict"] == k) for k in ("通过", "退回", "要改")},
                            "effect": _effect(root),
                            "updates": [{k: u[k] for k in ("id", "type", "label", "content", "why", "created")} | {"old": u["data"].get("old") or ""}
+                                       | {"detail": _draft_detail(u["data"]) if u["type"] == "memory" else ""}
                                        for u in tidy.updates(root)],
                            "tidying": next(({"by": j.get("driver"), "step": j.get("step") or ""} for j in jobs if j["kind"] == "tidy"), None)},
                 "history": history}
     except Exception as exc:
-        return {"memory": {"rules": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
+        return {"memory": {"library": [], "waiting": [], "recent": [], "error": str(exc)[:120]}, "history": {}}
+
+
+def _draft_detail(d):
+    """What a 经验库 draft would actually change, for the owner to read before 用."""
+    parts = []
+    if d.get("old_text"):
+        parts.append(("挪走这一节：" if d.get("mode") == "move" else "原文：") + "\n" + d["old_text"].strip())
+    if d.get("description"):
+        parts.append("目录描述：" + d["description"])
+    if d.get("body"):
+        parts.append(("改成：" if d.get("mode") == "revise" else "加上：") + "\n" + d["body"].strip())
+    return "\n\n".join(parts)
 
 
 def _effect(root):
@@ -684,17 +700,22 @@ class Handler(BaseHTTPRequestHandler):
                         return self._send(400, {"ok": False, "reply": "找不到这件事。"})
                     versions.place(root, rid, int(body["version"] or 0) or None, by=versions.OWNER)
                 return self._send(200, {"ok": True})
-            if path == "/api/rules":
+            if path == "/api/rules":   # what was left waiting on a condition is settled
                 from . import memory
-                if body.get("add"):
-                    memory.add_rule(root, body["add"], "本人在心响里加的", source="本人")
-                if body.get("remove"):
-                    memory.remove_rule(root, body["remove"])
-                if body.get("confirm"):
-                    memory.confirm_rule(root, body["confirm"])
                 if body.get("waiting_done"):
                     memory.set_status(root, body["waiting_done"], "done")
-                return self._send(200, {"ok": True, "rules": memory.rules(root)})
+                return self._send(200, {"ok": True})
+            if path == "/api/memory/library":   # the owner edits the 经验库 directly: no review for their own hand
+                from . import library
+                try:
+                    if body.get("delete"):
+                        library.delete(root, str(body["delete"]))
+                    else:
+                        text = str(body.get("text") or "")
+                        library.save(root, library.parse(text)["name"], text, body.get("old_name"))
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True})
             if path == "/api/memory/updates":  # 记忆更新: 用 applies what the daily tidy proposed, 不要 leaves the memory alone
                 from . import tidy
                 pick = lambda v: [u["id"] for u in tidy.updates(root)] if v == "all" else [int(x) for x in (v if isinstance(v, list) else [v])]

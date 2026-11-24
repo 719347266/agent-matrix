@@ -28,7 +28,10 @@ RISKY = [f"Bash({c}:*)" for c in (
 # MCP tools with these words are banned for the worker (engines.MCP_DENY); one the owner let through
 # (worker_mcp_send) is asked in 开发模式
 MCP_DENY_WORDS = ("send", "publish", "deploy", "merge", "delete", "schedule_message", "post_", "reply",
-                  "create", "update", "move", "restore", "resolve", "comment", "duplicate", "spawn", "cancel", "upload")
+                  "create", "update", "move", "restore", "resolve", "comment", "duplicate", "spawn", "cancel", "upload",
+                  # MCP is on by default now: CI/CD and mail servers act through these verbs too (run a pipeline, release…)
+                  "execute", "retry", "rerun", "resume", "stop_", "skip_", "pass_", "refuse", "close", "review_",
+                  "transition", "manage", "modify", "add_", "edit", "set_", "replace", "import", "bulk", "switch")
 # a sub-command (after optional VAR=x prefixes) that starts with one of the RISKY commands as whole words
 _RISKY_START = re.compile(r"\s*(\w+=\S*\s+)*(%s)(\s|$)" % "|".join(re.escape(r[5:-3]) for r in RISKY))
 

@@ -12,6 +12,7 @@ this is the context around them. Matching is cheap code (character-pair similari
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 
 from . import db as database
 from .textmatch import similarity
@@ -179,9 +180,9 @@ def rules(root):
         names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
         return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " "),
                  "fresh": s not in OWNER_SOURCES and not ok,   # learned by the AI, the owner has not said it is right yet
-                 "scope": sc or "", "scope_name": scope_name(sc, names), "wins": wn or 0, "losses": ls or 0}
-                for i, r, w, s, c, ok, sc, wn, ls in db.execute(
-                    "SELECT id, rule, why, source, created, confirmed, scope, wins, losses FROM preferences WHERE active=1 ORDER BY id")]
+                 "scope": sc or "", "scope_name": scope_name(sc, names), "wins": wn or 0, "losses": ls or 0, "trigger": tg or ""}
+                for i, r, w, s, c, ok, sc, wn, ls, tg in db.execute(
+                    "SELECT id, rule, why, source, created, confirmed, scope, wins, losses, trigger FROM preferences WHERE active=1 ORDER BY id")]
     finally:
         db.close()
 
@@ -197,22 +198,37 @@ def scope_name(scope, names=None):
     return "全部"
 
 
-def insert_rule(db, rule, why, source, scope):
+def clean_trigger(text):
+    """"发 PR 时" → "发 PR": the action alone, short, so the same action from different rounds groups together."""
+    text = " ".join(str(text or "").split())
+    return re.sub(r"(的)?(时候|时|前|后)$", "", text).strip()[:20]
+
+
+def insert_rule(db, rule, why, source, scope, trigger=""):
     rule = " ".join(str(rule or "").split())[:120]
     if not rule:
         return None
     conflict = ("DO NOTHING" if source == "AI 学的" else
-                "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope")
-    added = db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
-                       "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
+                "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope, trigger=excluded.trigger")
+    added = db.execute("INSERT INTO preferences (rule, why, source, created, scope, trigger) VALUES (?,?,?,?,?,?) "
+                       "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80], clean_trigger(trigger)))
     return rule if added.rowcount else None
 
 
-def add_rule(root, rule, why="", source="本人", scope=""):
+def add_rule(root, rule, why="", source="本人", scope="", trigger=""):
     db = _db(root)
     try:
         with db:
-            return insert_rule(db, rule, why, source, scope)
+            return insert_rule(db, rule, why, source, scope, trigger)
+    finally:
+        db.close()
+
+
+def set_trigger(root, rule_id, trigger):
+    db = _db(root)
+    try:
+        with db:
+            db.execute("UPDATE preferences SET trigger=? WHERE id=?", (clean_trigger(trigger), int(rule_id)))
     finally:
         db.close()
 
@@ -230,19 +246,22 @@ def credit(root, rule_id, won):
 # ---- 评审结果: every verdict on a deliverable is kept, so the AI learns what passes -----------------------------
 
 def record_outcome(root, record_id, verdict, reason=""):
-    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind and its project."""
+    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind, its project and the memories
+    (经验库) the AI said it read and followed, so a later round can see which ones helped and which were missed."""
     work = Path(root) / "state" / "work" / record_id
     try:
-        template = json.loads((work / "结果.json").read_text(encoding="utf-8")).get("template") or ""
-    except (OSError, ValueError, AttributeError):
-        template = ""
+        result = json.loads((work / "结果.json").read_text(encoding="utf-8"))
+        template = result.get("template") or ""
+        used = [str(x)[:80] for x in result.get("memory") or [] if isinstance(x, str)][:20]
+    except (OSError, ValueError, AttributeError, TypeError):
+        template, used = "", []
     db = _db(root)
     try:
         version = (db.execute("SELECT max(version) FROM deliverables WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
         project = (db.execute("SELECT project_id FROM item_projects WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
         with db:
-            db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id) VALUES (?,?,?,?,?,?,?)",
-                       (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project))
+            db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id, rules) VALUES (?,?,?,?,?,?,?,?)",
+                       (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project, json.dumps(used)))
     finally:
         db.close()
 
@@ -252,9 +271,10 @@ def outcomes(root, since=""):
     try:
         names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
         return [{"id": oid, "record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
-                 "template": t or "", "project": names.get(p, "")}
-                for oid, r, a, v, why, ver, t, p in db.execute(
-                    "SELECT id, record_id, at, verdict, reason, version, template, project_id FROM outcomes WHERE at>? ORDER BY id", (since,))]
+                 "template": t or "", "project": names.get(p, ""), "memory": json.loads(used) if used else None}
+                for oid, r, a, v, why, ver, t, p, used in db.execute(
+                    "SELECT id, record_id, at, verdict, reason, version, template, project_id, rules FROM outcomes WHERE at>? ORDER BY id",
+                    (since,))]
     finally:
         db.close()
 
@@ -275,19 +295,6 @@ def remove_rule(root, rule_id):
             db.execute("UPDATE preferences SET active=0 WHERE id=?", (int(rule_id),))
     finally:
         db.close()
-
-
-def rules_text(root, project_id=None):
-    """The block every AI gets on top of its instructions: the rules for everything, the ones for this item's project,
-    and the ones for a kind of deliverable (marked, so the AI applies them only when it makes that kind)."""
-    lines = []
-    for r in rules(root):
-        scope = r.get("scope") or ""
-        if scope.startswith("project:") and scope != f"project:{project_id}":
-            continue
-        tag = f"（{r['scope_name']}）" if scope else ""
-        lines.append(f"- {r['rule']}{tag}")
-    return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准）\n" + "\n".join(lines) + "\n\n") if lines else ""
 
 
 # ---- 关于你: who the owner is, what they do, how they like work done -----------------------------------------

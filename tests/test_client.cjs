@@ -207,8 +207,8 @@ function reset(item) {
   assert.doesNotMatch(ai,/codex 命令行/, "only the engines in use (Gemini also stands in for Cindy)");
   assert.deepEqual(plain("setupChecks().filter(x=>['engine','sort'].includes(x.key)).map(x=>[x.key,x.state])"),[["engine","todo"],["sort","ok"]]);
   evaluate('D.system.engines.gemini=false'); assert.match(evaluate("checkList()"),/还没有装 本机 Gemini/);
-  // rules the AI learned wait on top for the owner's yes or no
-  evaluate('D.memory={rules:[{id:1,rule:"先给结论",why:"你说的",source:"本人",fresh:false},{id:2,rule:"先补异常场景",why:"两次被退回",source:"AI 学的",fresh:true}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
+  // 经验库: a topic per memory, its index line and its text; the owner edits it, the AI only drafts
+  evaluate('D.memory={library:[{name:"做事通用规矩",description:"每件事动手前都读",sections:["先给结论"],raw:"name：做事通用规矩\\ndescription：每件事动手前都读\\n\\n## 先给结论\\n第一屏给结论"}],waiting:[{id:7,text:"年卡要不要打折",wait_for:"付费数据",source:"周会",at:"11-19"}],recent:[]}; S.memTab="rules"');
   let mem = evaluate("memPage()");
   assert.match(mem,/关于你/); assert.match(mem,/<textarea id="prof"/, "nothing written yet: a box to write it, with an example");
   evaluate('D.memory.profile={text:"岗位：产品经理",at:"11-21 10:00"}'); let mem2 = evaluate("memPage()");
@@ -226,14 +226,14 @@ function reset(item) {
   evaluate('D.memory.profile=null');
   // 项目与版本 and scoped rules
   assert.match(evaluate("memPage()"),/让 AI 整理项目和版本/, "nothing sorted yet: one button");
-  evaluate("globalThis.keptRules=D.memory.rules");
-  evaluate(`D.memory.versions=[{id:1,project_id:1,project:"示例 App",name:"2.3",status:"current",status_label:"当前",period:"11 月",note:"会员改版",items:[{n:45,title:"定积分规则",status:"完成",by:"AI"}],expected:[{id:7,title:"上线前验收",why:"每个版本都要",status:"open",due:"2026-11-28"}]},{id:2,project_id:1,project:"示例 App",name:"2.2",status:"done",status_label:"已完成",items:[],expected:[]}]; D.memory.verdicts={"通过":3,"退回":1,"要改":0}; D.memory.rules=[{id:9,rule:"方案控制在一屏",why:"#1 退回",source:"AI 学的",scope:"type:方案",scope_name:"做「方案」时",wins:2,losses:1,fresh:false}]`);
+  evaluate("globalThis.keptLib=D.memory.library");
+  evaluate(`D.memory.versions=[{id:1,project_id:1,project:"示例 App",name:"2.3",status:"current",status_label:"当前",period:"11 月",note:"会员改版",items:[{n:45,title:"定积分规则",status:"完成",by:"AI"}],expected:[{id:7,title:"上线前验收",why:"每个版本都要",status:"open",due:"2026-11-28"}]},{id:2,project_id:1,project:"示例 App",name:"2.2",status:"done",status_label:"已完成",items:[],expected:[]}]; D.memory.verdicts={"通过":3,"退回":1,"要改":0}`);
   let ver = evaluate("memPage()");
-  for (const label of ["项目与版本","示例 App","2.3","当前","会员改版","#45","AI 归的","1/1 件做完","预计会遇到","上线前验收",">11-28<","organize({expected:7,status:'done'})","<details class=\"ver\">","重新整理","做「方案」时","通过 2 · 退回 1","近 30 天评审：通过 3 · 退回 1 · 要改 0"]) assert.ok(ver.includes(label), label);
-  evaluate('D.memory.versions=[]; D.memory.verdicts={}; D.memory.rules=globalThis.keptRules');
+  for (const label of ["项目与版本","示例 App","2.3","当前","会员改版","#45","AI 归的","1/1 件做完","预计会遇到","上线前验收",">11-28<","organize({expected:7,status:'done'})","<details class=\"ver\">","重新整理","近 30 天评审：通过 3 · 退回 1 · 要改 0"]) assert.ok(ver.includes(label), label);
+  evaluate('D.memory.versions=[]; D.memory.verdicts={}; D.memory.library=globalThis.keptLib');
   // 效果: below the rules; nothing reviewed yet → one plain line, no chart
   let eff0 = evaluate("memPage()");
-  assert.match(eff0,/在用的规矩[\s\S]*效果[\s\S]*等你验收几件交付后，这里会显示 AI 做得怎么样/); assert.doesNotMatch(eff0,/一次通过率|<svg/);
+  assert.match(eff0,/经验库[\s\S]*效果[\s\S]*等你验收几件交付后，这里会显示 AI 做得怎么样/); assert.doesNotMatch(eff0,/一次通过率|<svg/);
   evaluate(`D.memory.effect={has:true,recent:{total:5,first:4,rate:80},before:{total:4,first:2,rate:50},rounds:0.6,blocked:2,failed:1,
     weeks:[{start:"09-28",total:0,first:0,rate:null},{start:"10-05",total:1,first:0,rate:0},{start:"10-12",total:2,first:1,rate:50},{start:"10-19",total:1,first:1,rate:100},
            {start:"10-26",total:1,first:1,rate:100},{start:"11-02",total:2,first:1,rate:50},{start:"11-09",total:1,first:1,rate:100},{start:"11-16",total:1,first:1,rate:100}],
@@ -249,15 +249,16 @@ function reset(item) {
   evaluate('delete D.memory.effect');
   // 记忆更新: what the daily tidy proposed waits on top, above 关于你; nothing when there is none
   assert.doesNotMatch(evaluate("memPage()"),/记忆更新/);
-  evaluate(`D.memory.updates=[{id:4,type:"merge_rules",label:"合并规矩",content:"「先给两版」「两版挑」合并成「对外文案先给两版」",why:"说的是一件事"},{id:5,type:"profile",label:"关于你",content:"## 在做的事\\n年卡",why:"最近都在谈",old:"## 在做的事\\n会员"}]`);
+  evaluate(`D.memory.updates=[{id:4,type:"memory",label:"经验库",content:"「做事通用规矩」加上：对外文案先给两版",why:"说的是一件事",detail:"加上：\\n## 对外文案先给两版"},{id:5,type:"profile",label:"关于你",content:"## 在做的事\\n年卡",why:"最近都在谈",old:"## 在做的事\\n会员"}]`);
   let upd = evaluate("memPage()");
-  for (const label of ["记忆更新 · 2 条","合并规矩","合并成「对外文案先给两版」","说的是一件事","memUpdate({use:4})","memUpdate({drop:4})","原来：## 在做的事","memUpdate({use:'all'})","全部用上"]) assert.ok(upd.includes(label), label);
+  for (const label of ["记忆更新 · 2 条","经验库","加上：对外文案先给两版","看要改的原文","## 对外文案先给两版","说的是一件事","memUpdate({use:4})","memUpdate({drop:4})","原来：## 在做的事","memUpdate({use:'all'})","全部用上"]) assert.ok(upd.includes(label), label);
   assert.ok(upd.indexOf("记忆更新") < upd.indexOf("关于你"), "above 关于你");
-  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">3</);
+  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">2</);
   await evaluate("memUpdate({drop:4})"); assert.match(evaluate("memPage()"),/记忆更新 · 1 条/);
   await evaluate("memUpdate({use:'all'})"); assert.doesNotMatch(evaluate("memPage()"),/记忆更新/);
-  assert.match(mem,/AI 新学到的，等你确认/); assert.match(mem,/ruleOp\(\{confirm:2\}\)/); assert.doesNotMatch(mem,/confirm:1/);
-  assert.match(evaluate("sideHTML()"),/记忆<span class="c need">1</);
+  for (const label of ["经验库","做事通用规矩","每件事动手前都读","1 节","第一屏给结论","S.libEdit=0","libDelete(0)","新建一份"]) assert.ok(mem.includes(label), label);
+  evaluate("S.libEdit=-1"); assert.match(evaluate("memPage()"),/<textarea id="libtext"[\s\S]*description：要……/); evaluate("S.libEdit=undefined");
+  assert.doesNotMatch(evaluate("sideHTML()"),/记忆<span class="c need">/);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
   assert.doesNotMatch(mem,/年卡要不要打折|在等的|会上的结论/);
   evaluate('D.memory.recent=[{label:"还没定",text:"投流方案怎么定",source:"周会",at:"11-19"},{label:"定了",text:"先做周视图",source:"周会",at:"11-19"}]; S.all="以后要确认的"');
