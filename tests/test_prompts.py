@@ -44,8 +44,12 @@ class PromptSystem(unittest.TestCase):
 
     def test_doing_work_keeps_the_do_it_all_and_check_it_rules(self):
         worker = promptfile.read(".", "worker.md")
-        for line in ("## 改全与核实", "动手前列全、一起改", "交付前照本人会用的方式用一遍", "把同类全部复查", "已有的违规记成欠账"):
+        for line in ("## 工作方式", "## 改全与核实", "## 改代码时", "## 网页与联网调研", "动手前列全、一起改",
+                     "交付前照本人会用的方式用一遍", "把同类全部复查", "已有的违规记成欠账"):
             self.assertIn(line, worker)
+        shared = promptfile.read(".", "_common.md")
+        for line in ("### 角色", "### 先问清单", "### 怎么跟他讲", "你推荐哪个、各选项的后果", "不用技术缩写和黑话"):
+            self.assertIn(line, shared)
         self.assertIn("纠正一次，拦住一类", promptfile.read(".", "learn.md"))
 
     def test_no_prompt_is_left_unused(self):

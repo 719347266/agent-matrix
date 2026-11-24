@@ -167,7 +167,7 @@ def resume_prompt(changes, timed_out):
     if changes:
         lines = "\n".join("- " + c for c in changes)
         return ("本人有新的要求，事件.md 和任务单.md 已更新：\n" + lines +
-                "\n\n在上一版（上一版.md）基础上改，逐条改到。规则不变：先补背景，写 step.txt，"
+                "\n\n在上一版（上一版.md）基础上改，逐条改到；每一条都用同样的办法把同类全部复查，一次补齐。规则不变：先补背景，写 step.txt，"
                 "最后重写 交付.md 和 结果.json 再结束。")
     if timed_out:
         return "上一轮时间到了，没做完。接着做，不要从头来；最后写好 交付.md 和 结果.json 再结束。"
