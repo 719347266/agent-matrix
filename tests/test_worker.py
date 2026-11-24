@@ -264,7 +264,7 @@ class ConversationTests(unittest.TestCase):
                 prompt = json.loads(sys.stdin.readline())["message"]["content"]
                 print(json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}), flush=True)
                 seen = []
-                for rid, cmd in (("r1", "git push"), ("r0", "cd ~/x && ls | head -3"), ("r2", "git reset --hard")):
+                for rid, cmd in (("r1", "git push"), ("r0", "cd ~/x && ls | head -3"), ("r2", "npm publish")):
                     print(json.dumps({"type": "control_request", "request_id": rid, "request": {"subtype": "can_use_tool",
                           "tool_name": "Bash", "input": {"command": cmd}, "description": "收尾"}}), flush=True)
                     seen.append(json.loads(sys.stdin.readline())["response"])
@@ -312,35 +312,20 @@ class ConversationTests(unittest.TestCase):
             self.assertTrue(approvals.needs_owner(root, "Bash", {"command": "ls && FOO=1 git push -f"}))
             self.assertFalse(approvals.needs_owner(root, "Bash", {"command": "git status; echo rmdir-ish"}))
             self.assertFalse(approvals.needs_owner(root, "Edit", {"file_path": "a.py"}))
-            # rm: only what the AI did not make asks
-            other = Path(tmp) / "repo"
-            other.mkdir()
-            (other / "old.go").write_text("x")
-            since = time.time() + 1                          # old.go existed before the turn began
-            ask = lambda cmd, t=since: approvals.needs_owner(root, "Bash", {"command": cmd}, work, t)
-            patch.object(approvals, "_TEMP", []).start()      # tmp itself lives under a temp folder
-            self.addCleanup(patch.stopall)
-            (work / "scratch").write_text("x")
-            self.assertFalse(ask(f"cat > {other}/zz_test.go <<'EOF'\nx\nEOF\ngo test ./...; rm {other}/zz_test.go"))
-            self.assertFalse(ask("rm -rf scratch"))                         # inside the item's own folder
-            self.assertTrue(ask(f"rm {other}/old.go"))                       # the owner's file
-            self.assertTrue(ask(f"cd {other} && rm -f old.go"))
-            self.assertFalse(ask(f"cd {other} && rm -f old.go", time.time() - 60))   # born during this turn
-            self.assertTrue(ask(f"cd {other} && rm -rf *"))                  # the glob hits the owner's old.go
-            (work / "a.js").write_text("x")
-            self.assertFalse(ask("rm -f *.js; rm -f *.none"))                 # only the item's own files / nothing
-            self.assertTrue(ask(f"cd $SOMEWHERE && rm -f x.txt"))             # after a cd we cannot follow
+            ask = lambda cmd: approvals.needs_owner(root, "Bash", {"command": cmd})
+            # only what reaches beyond this computer asks; local work (even rm -rf, git reset) runs
+            for cmd in ("d=$TMPDIR/tk; rm -rf $d; mkdir -p $d && cd $d && npm pack x@1 | tail -2", "rm -rf .",
+                        "git reset --hard; git clean -fd; git branch -D old", "chmod +x a.sh; kill 123"):
+                self.assertFalse(ask(cmd), cmd)
             # hidden in loops, $(…), `…`, bash -c, xargs: still seen
-            for cmd in (f"for f in a b; do rm {other}/old.go; done", "x=$(aws s3 rm s3://b/k)", f"echo $(rm -rf {other})",
-                        f"echo `git push`", "bash -c 'git reset --hard'", "if true; then kubectl delete pod x; fi",
-                        f"ls | xargs rm", "nohup git push &"):
+            for cmd in ("for f in a b; do git push origin $f; done", "x=$(aws s3 rm s3://b/k)", "echo $(gh pr merge 3)",
+                        "echo `git push`", "bash -c 'npm publish'", "if true; then kubectl delete pod x; fi",
+                        "ls | xargs gh pr merge", "nohup git push &"):
                 self.assertTrue(ask(cmd), cmd)
             self.assertFalse(ask("for i in 1 2; do aws codebuild batch-get-builds --ids a; sleep 30; done"))   # polling
             self.assertFalse(ask("ids=$(aws codebuild list-builds-for-project --project-name p --query ids --output text)"))
             self.assertFalse(ask("aws configure list 2>&1"))
             self.assertTrue(ask("aws configure get aws_secret_access_key"))
-            self.assertTrue(ask('rm -rf "$SOMEWHERE"'))
-            self.assertTrue(ask("rm -rf ."))                                 # the item's folder itself
             self.assertTrue(ask("git push origin dev"))
             # aws: reading is fine, changing or reading secrets asks
             self.assertFalse(ask("cat out.txt; aws codebuild batch-get-builds --ids x:1 --query 'builds[0].{s:buildStatus}' --output json"))

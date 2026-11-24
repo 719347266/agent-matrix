@@ -369,7 +369,7 @@ class Applier:
                 "标题": ("备材料：" + str(row.get("标题")))[:60], "执行方": ["AI"], "状态": ["未开始"],
                 "进度": "0/1 未开始", "负责人": owner, "父事项": [{"id": row["record_id"]}],
                 "截止日": (row.get("截止日") and self._before(row["截止日"])) or (self.now.date() + timedelta(days=1)).strftime("%Y-%m-%d 00:00"),
-                "完成标准": ("能直接用于：" + str(row.get("标题")))[:60], "来源": ["手动"], "类型": ["临时"],
+                "完成标准": ("能直接用于：" + str(row.get("标题")))[:60], "来源": row.get("来源") or ["手动"], "类型": ["临时"],  # 备材料 comes from where its parent came from
             }, "prep:" + row["record_id"], f"reply:{self.source}:{self.ref}")
             child_id = child["record_id_list"][0]
             child_row = next(r for r in self.rows() if r["record_id"] == child_id)

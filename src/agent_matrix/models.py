@@ -37,12 +37,17 @@ class Config(BaseModel):
     # Chat todos: @you or urgent lines are extracted at once; the rest whenever there are new lines and this many
     # minutes passed since the last round (0 = only at chat_review_times). Outside from/until only urgent ones run.
     chat_review_every_minutes: int = Field(default=5, ge=0, le=240)
+    chat_poll_minutes: int = Field(default=30, ge=1, le=240)  # how often Slack / Feishu chats are read
     chat_review_times: list[str] = Field(default_factory=lambda: ["11:30", "14:30", "17:30", "20:30"])
     chat_extract_from: str = "08:30"
     chat_extract_until: str = "22:00"
     feishu_tasks_enabled: bool = True
     # Slack as a second chat source: a user token (xoxp-); empty = env SLACK_USER_TOKEN; neither = off.
     slack_token: str = ""
+    # Jira Cloud: open issues assigned to the owner become items (sources/jira.py). Empty token = off.
+    jira_site: str = ""      # https://xxx.atlassian.net
+    jira_email: str = ""
+    jira_token: str = ""     # API token from id.atlassian.com/manage-profile/security/api-tokens
     # WeChat as a chat source, read on this computer through the wechat-cli command (the owner's own local messages).
     wechat_enabled: bool = False
     wechat_binary: str = ""          # path to wechat-cli; empty = find it on PATH

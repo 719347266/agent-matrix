@@ -25,10 +25,15 @@ prework_lead_days: 2
 # 实时来源：聊天用你的身份读取、本地过滤；到下面这些时间点才批量交给模型提取
 chat_watch_enabled: true
 chat_review_every_minutes: 5   # 有新候选、且离上一轮满 5 分钟就整理；0 = 只在下面的固定时间整理
+chat_poll_minutes: 30          # 多久读一次 Slack / 飞书聊天（分钟）：1、5、10、15、30、60，设置页里能改
 chat_review_times: ['11:30', '14:30', '17:30', '20:30']
 feishu_tasks_enabled: true
 # Slack 作为第二个聊天来源：填用户 token（xoxp-），或设环境变量 SLACK_USER_TOKEN；都不填就不读 Slack
 slack_token: ''
+# Jira Cloud：指派给你、没完成的单子同步成事项。地址 + 邮箱 + API Token（id.atlassian.com/manage-profile/security/api-tokens），也可以在心响「工具」页连接
+jira_site: ''
+jira_email: ''
+jira_token: ''
 # 会议标题里太常见、不能用来关联事项的词，例如公司名
 topic_stopwords: []
 

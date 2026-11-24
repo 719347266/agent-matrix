@@ -2,12 +2,10 @@
 
 One JSON file per request under state/approvals/, so the worker (asks, polls) and the app server (lists,
 decides) share it without a lock: each side only ever replaces a whole file."""
-import glob
 import json
 import os
 import re
 import shlex
-import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -15,12 +13,12 @@ from pathlib import Path
 from .timeutil import TZ
 
 MODES = ("off", "risky", "every")
-# Asked about in "risky" mode (Claude permission rules, prefix match per sub-command). Everything else runs as before.
-# ponytail: prefix list, add a pattern here when a new dangerous command shows up.
+# Asked about in "risky" mode (Claude permission rules, prefix match per sub-command): only what reaches beyond this
+# computer — pushing and merging, publishing, cloud, servers and databases. Local work (rm, git reset, kill…) runs
+# without asking: the owner chose speed there.
+# ponytail: prefix list, add a pattern here when a new outward command shows up.
 RISKY = [f"Bash({c}:*)" for c in (
-    "rm", "rmdir", "sudo", "chmod", "chown", "dd", "mkfs", "kill", "pkill", "killall", "launchctl", "crontab",
-    "git push", "git reset", "git clean", "git rebase", "git branch -D", "git checkout --", "git restore", "git stash drop",
-    "npm publish", "pnpm publish", "yarn publish",
+    "git push", "npm publish", "pnpm publish", "yarn publish",
     # gh: only what writes outside (PRs, issues, repos, releases, secrets, CI); gh auth / pr view / pr checks read
     "gh api", "gh pr create", "gh pr merge", "gh pr close", "gh pr edit", "gh pr comment", "gh pr review", "gh pr ready",
     "gh issue create", "gh issue close", "gh issue edit", "gh issue comment", "gh issue delete",
@@ -35,10 +33,9 @@ MCP_DENY_WORDS = ("send", "publish", "deploy", "merge", "delete", "schedule_mess
 _RISKY_START = re.compile(r"\s*(\w+=\S*\s+)*(%s)(\s|$)" % "|".join(re.escape(r[5:-3]) for r in RISKY))
 
 
-def needs_owner(root, tool, tool_input, workdir=None, since=None):
+def needs_owner(root, tool, tool_input):
     """Asked again when a request arrives, against the mode as it is NOW: a claude started under "every" keeps
-    prompting for its whole turn, so switching to "risky"/"off" mid-item has to be honoured here.
-    In "risky", rm/rmdir only ask when they would remove something the AI did not make (see _ai_made)."""
+    prompting for its whole turn, so switching to "risky"/"off" mid-item has to be honoured here."""
     current = mode(root)
     if current == "every":
         return True
@@ -49,19 +46,8 @@ def needs_owner(root, tool, tool_input, workdir=None, since=None):
     if tool != "Bash":
         return False
     # ponytail: naive split on shell separators, quotes are not parsed; a risky word inside a quoted string asks once too many
-    cwd = Path(workdir or ".").resolve()
-    for part in _parts(str((tool_input or {}).get("command") or "")):
-        cd = re.match(r"\s*cd\s+(\S+)\s*$", part)
-        if cd:
-            target = _expand(cd.group(1).strip("'\""))
-            # a folder we cannot work out ($VAR, `…`): relative paths after it are unknown, so rm there asks
-            cwd = None if cwd is None or re.search(r"[$`*?]", target) else cwd / target
-            continue
-        hit = _RISKY_START.match(part)
-        if not hit or (hit.group(2) in ("rm", "rmdir") and _ai_made(part, cwd, workdir, since)) or _read_only(hit.group(2), part):
-            continue
-        return True
-    return False
+    return any((hit := _RISKY_START.match(part)) and not _read_only(hit.group(2), part)
+               for part in _parts(str((tool_input or {}).get("command") or "")))
 
 
 # Words that start a command without being it: `for …; do rm x; done`, `if …; then kubectl delete …`, `xargs rm`.
@@ -165,73 +151,6 @@ def _read_only(name, part):
         verbs, groups = _READ[name]
         return words[0] in verbs or (len(words) > 1 and words[1] in groups.get(words[0], ()))
     return False
-
-
-_TEMP = [Path(p) for p in ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders", tempfile.gettempdir())]
-
-
-def _expand(text):
-    text = re.sub(r"\$\{?TMPDIR\}?", os.environ.get("TMPDIR", tempfile.gettempdir()).rstrip("/"), text)
-    return os.path.expanduser(re.sub(r"\$\{?HOME\}?", str(Path.home()), text))
-
-
-def _ai_made(part, cwd, workdir, since):
-    """Every target of this rm is gone already, inside the item's own folder or a temp folder, or born after the
-    turn started (with everything inside it): nothing the owner wrote is lost. Anything unclear (globs, other $vars,
-    unparsable quoting, too many files) counts as not."""
-    try:
-        words = shlex.split(part)
-    except ValueError:
-        return False
-    while words and re.match(r"\w+=", words[0]):
-        words = words[1:]
-    targets, options = [], True
-    for w in words[1:]:
-        if options and w == "--":
-            options = False
-        elif not (options and w.startswith("-")):
-            targets.append(w)
-    if not targets:
-        return False
-    own = [Path(workdir).resolve()] if workdir else []
-    paths = []
-    for target in targets:
-        target = _expand(target)
-        if re.search(r"[$`]", target) or (cwd is None and not os.path.isabs(target)):
-            return False   # a variable we cannot read, or a relative path after a `cd` we could not follow
-        full = os.path.normpath(os.path.join(cwd or "/", target))
-        if re.search(r"[*?\[]", target):
-            found = glob.glob(full)   # a glob: every file it would hit, judged one by one
-            if len(found) > 200:
-                return False
-            paths += [Path(p) for p in found]
-        else:
-            paths.append(Path(full))
-    for path in paths:
-        if path in (Path("/"), Path.home()) or (own and path == own[0]):
-            return False
-        if not os.path.lexists(path):
-            continue
-        resolved = path.resolve()
-        if any(resolved.is_relative_to(base.resolve()) for base in own + _TEMP):
-            continue
-        if since is None or not _born_after(path, since):
-            return False
-    return True
-
-
-def _born_after(path, since, limit=5000):
-    # ponytail: birth time where the OS keeps it (macOS, Windows), else ctime; directories capped at `limit` entries
-    def born(p):
-        st = os.lstat(p)
-        return getattr(st, "st_birthtime", st.st_ctime) >= since
-    if not born(path):
-        return False
-    if path.is_dir() and not path.is_symlink():
-        for n, p in enumerate(path.rglob("*")):
-            if n >= limit or not born(p):
-                return False
-    return True
 
 
 def mode(root):

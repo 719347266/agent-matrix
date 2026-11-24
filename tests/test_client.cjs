@@ -53,6 +53,11 @@ function reset(item) {
   const menu = evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0];
   for (const label of ["驱动心响的 AI","接入","数据与通知","问题反馈","版本与更新","更多","都没接","Cindy","只存本机"]) assert.ok(menu.includes(label), label);
   assert.equal((menu.match(/class="cell /g)||[]).length, 6, "six places in the settings, no more");
+  // 聊天判断: every line read says what became of it, and why it was not taken
+  evaluate('S.chatlog=[{who:"Carl",chat:"Slack · Carl",p2p:true,at:"2026-11-23 18:40",text:"好的",verdict:"drop",why:"只是客套话或表情"},{who:"Carl",chat:"Slack · Carl",p2p:true,at:"2026-11-23 14:24",text:"部署后通知我",verdict:"item",why:31}]');
+  const log = evaluate('S.setTab="chatlog"; S.clQ="carl"; sysPage()');
+  for (const label of ["没交给 AI","只是客套话或表情","建了事项","#31","‹ 接入"]) assert.ok(log.includes(label), label);
+  evaluate('S.chatlog=null; S.clQ=""');
   assert.doesNotMatch(pane("store"),/飞书多维表格/, "no Feishu sheet without Feishu");
   // 记忆增强: off by default; on → the owner's own endpoint and key, a few suggested providers, a test button
   evaluate('D.settings.memory_boost={enabled:false,installed:true,presets:{siliconflow:{name:"硅基流动",base_url:"https://api.siliconflow.cn/v1",llm:"deepseek-ai/DeepSeek-V3",embed:"BAAI/bge-m3",dims:1024,key_url:"https://cloud.siliconflow.cn/account/ak"},deepseek:{name:"DeepSeek（向量另配）",base_url:"https://api.deepseek.com",llm:"deepseek-chat",embed:"",dims:1024}},status:{}}');

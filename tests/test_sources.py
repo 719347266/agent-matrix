@@ -268,6 +268,29 @@ class SameThingTests(unittest.TestCase):
 
 
 class SlackSourceTests(unittest.TestCase):
+    def test_a_reply_xinxiang_sent_is_not_read_back_as_a_new_promise(self):
+        from agent_matrix import replies as sent
+        from agent_matrix.sources import slack
+        from agent_matrix.sources.chats import pending
+        from agent_matrix.state import State
+        root = Path(tempfile.mkdtemp())
+        state = State(root / "state.db")
+        sent._write(root, "rec27", {"status": "sent", "text": "…我再去库里跑一下补给你。", "ref": "1795400010.000100"})
+        history = {"D1": [{"ts": "1795400010.000100", "user": "UME", "text": "要精确的数我再去库里跑一下补给你。"},
+                          {"ts": "1795400011.000100", "user": "UME", "text": "明天我把报价单发你"}]}
+        replies = {"auth.test": {"user_id": "UME", "url": "https://acme.slack.com/"},
+                   "users.conversations": {"channels": [{"id": "D1", "is_im": True, "user": "UCHEN", "updated": 1}]},
+                   "users.info": {"user": {"profile": {"display_name": "陈一凡"}}}}
+        def api(tok, method, **p):
+            if method == "search.messages":
+                raise MatrixError("Slack search.messages 失败：missing_scope")
+            return {"messages": history[p["channel"]]} if method == "conversations.history" else replies[method]
+        slack.poll(CONFIG.model_copy(update={"slack_token": "xoxp-test"}), root, state,
+                   datetime(2026, 11, 17, 10, 0, tzinfo=TZ), api=api)
+        self.assertEqual([m["text"] for m in pending(state)], ["明天我把报价单发你"])
+        why = dict(state.db.execute("SELECT text, status FROM chat_candidates WHERE status LIKE 'drop:%'"))
+        self.assertEqual(why, {"要精确的数我再去库里跑一下补给你。": "drop:心响替你发出去的回复，算在原来那件事里"})
+
     def test_slack_lines_land_in_chat_candidates_with_permalink(self):
         from agent_matrix.sources import slack
         from agent_matrix.sources.chats import pending
@@ -301,6 +324,15 @@ class SlackSourceTests(unittest.TestCase):
         a = ChatAction(message_id=rows["Slack · ops"]["message_id"], title="定投放预算", quote="周五前帮忙把投放预算定一下",
                        commitment_phrase="帮忙把投放预算定一下", owner_name="王小明", executor="我", confidence=0.9)
         self.assertEqual(chat_fields(CONFIG, a, rows["Slack · ops"])["来源链接"], rows["Slack · ops"]["message_id"])
+
+    def test_the_next_read_follows_the_interval_set_on_the_settings_page(self):
+        from agent_matrix.sources import chats
+        from agent_matrix.state import State
+        state = State(Path(tempfile.mkdtemp()) / "state.db")
+        client = SimpleNamespace(root=None, _exec=lambda argv: {"messages": []})
+        now = datetime(2026, 11, 23, 10, 0, tzinfo=TZ)
+        chats.poll(CONFIG.model_copy(update={"chat_poll_minutes": 10, "lark_brand": "lark"}), client, state, now)
+        self.assertEqual(state.get("chats:next-poll"), "2026-11-23T10:10:00+08:00")
 
     def test_lark_reads_every_chat_with_one_search_call_and_never_repeats_a_line(self):
         # Lark's API quota is per company (10000 a month): one call per poll, not one per chat.
@@ -442,7 +474,7 @@ class SlackSourceTests(unittest.TestCase):
         try:
             out = slack.poll(Config(slack_token="xoxp-1", owner_name="Alex Wang"), root, state,
                              datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
-            kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))
+            kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates WHERE status = 'pending'"))
             self.assertEqual(kinds, {"@Alex Wang 业务是否有偏移": "@你", "业务是否有偏移，大家看看": "群聊"})
         finally:
             state.close()
@@ -468,7 +500,7 @@ class SlackSourceTests(unittest.TestCase):
             config = Config(slack_token="xoxp-1", owner_name="Alex Wang", chat_skip_chats=["CORE"], chat_skip_words=["issue created"])
             out = slack.poll(config, root, state, datetime.fromtimestamp(1795000100, ZoneInfo("Asia/Shanghai")), api=api)
             # bot channels are never read; a muted channel keeps only real @-mentions; muted words skip, case-insensitive
-            texts = sorted(t for t, in state.db.execute("SELECT text FROM chat_candidates"))
+            texts = sorted(t for t, in state.db.execute("SELECT text FROM chat_candidates WHERE status = 'pending'"))
             self.assertEqual(out["candidates"], 2)
             self.assertEqual(texts, ["@Alex Wang 优化一下这个", "@Alex Wang 帮忙看下这个需求"])
         finally:
@@ -493,7 +525,7 @@ class SlackSourceTests(unittest.TestCase):
             config = Config(slack_token="xoxp-1", owner_name="Alex Wang")
             slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
             slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
-            rows = {t: json.loads(c) for t, c in state.db.execute("SELECT text, context FROM chat_candidates")}
+            rows = {t: json.loads(c) for t, c in state.db.execute("SELECT text, context FROM chat_candidates WHERE status = 'pending'")}
             # a bug report in a DM has no ask words but is kept; the picture's caption is read
             self.assertIn("网页比例100%时，这个会员弹窗只能展示一点出来", rows)
             self.assertEqual(rows["网页比例100%时，这个会员弹窗只能展示一点出来"], ["cara：截图在这"])
@@ -530,7 +562,7 @@ class SlackSourceTests(unittest.TestCase):
             config = Config(slack_token="xoxp-1", owner_name="Alex Wang", chat_skip_chats=["noise"])
             slack.poll(config, root, state, datetime.fromtimestamp(1795000030, TZ), api=api)
             slack.poll(config, root, state, datetime.fromtimestamp(1795000090, TZ), api=api)
-            kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates"))
+            kinds = dict(state.db.execute("SELECT text, kind FROM chat_candidates WHERE status = 'pending'"))
             # dev: everything goes to the model, labelled; the muted channel keeps nothing (no one @-ed the owner there)
             self.assertEqual(kinds, {"导出功能今天上 dev 了": "我说的", "试了一下，还是超时": "回你的",
                                      "@here 今晚 10 点封版": "全员", "午饭吃啥": "群聊"})

@@ -10,12 +10,13 @@ Code drops only pure small talk ("好的" "哈哈" "👍"), and in a chat the ow
 from datetime import datetime, timedelta
 import json
 import re
+from pathlib import Path
 
 # Nothing but an acknowledgement, a laugh, emoji or punctuation: never a request.
 SMALL_TALK = re.compile(r"^(?:好的?|好嘞|好滴|行|收到|嗯+|哦+|噢+|ok(?:ay)?|谢谢|感谢|多谢|thx|thanks|哈+|呵+|嘿+|:[\w+-]+:|[\W_])*$", re.I)
 SKIP_CHAT = re.compile(r"助手|安全中心|服务台|通知|机器人|Bot|bot")
 MAX_CHATS = 25   # chats listed per poll (Feishu) / conversations read per poll (Slack)
-POLL_MINUTES = 30
+POLL_MINUTES = 30  # default; the owner picks it on the 设置 page (config.chat_poll_minutes)
 HISTORY_PAGES = 5
 SEARCH_GROUP = 10
 SEEN_KEEP = 2000  # Lark: message ids already seen by the cross-chat search
@@ -113,13 +114,14 @@ def poll(config, client, state, now, *, skip_chat_ids=()):
     if deadline and now < datetime.fromisoformat(deadline):
         return {"deferred_until": deadline}
     failures = state.get("chats:poll-failures", 0)
-    state.set("chats:next-poll", (now + timedelta(minutes=POLL_MINUTES)).isoformat())
+    every = getattr(config, "chat_poll_minutes", POLL_MINUTES)
+    state.set("chats:next-poll", (now + timedelta(minutes=every)).isoformat())
     try:
         # Lark's API quota is per company and small: one cross-chat search a round; Feishu reads each busy chat in full
         reader = _poll_search if getattr(config, "lark_brand", "feishu") == "lark" else _poll
         result = reader(config, client, state, now, skip_chat_ids)
     except Exception:
-        delay = min(360, POLL_MINUTES * 2 ** min(failures + 1, 4))
+        delay = min(360, every * 2 ** min(failures + 1, 4))
         state.set("chats:next-poll", (now + timedelta(minutes=delay)).isoformat())
         state.set("chats:poll-failures", failures + 1)
         raise
@@ -195,11 +197,12 @@ def _poll(config, client, state, now, skip_chat_ids):
         history_key = "chats:recent:" + cid
         history = recent_lines(state, history_key)
         mine = set(state.get("chats:mine", []))
+        ours = sent_refs(getattr(client, "root", None))
         for m in messages:
             sender = m.get("sender") or {}
             text = _text(m)
             if (sender.get("sender_type") != "user" or m.get("msg_type") not in {"text", "post"} or not text
-                    or skipped_text(config, text)):
+                    ):
                 continue
             scanned += 1
             from_owner = sender.get("id") == config.owner_open_id
@@ -210,12 +213,9 @@ def _poll(config, client, state, now, skip_chat_ids):
                             mentioned=not from_owner and mentions_owner(m, config.owner_open_id),
                             replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
                             broadcast=mentions_all(m))
-            if kind and (not muted or kind == "@你"):
-                inserted = state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
-                    m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
-                    "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],
-                    json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
-                kept += inserted.rowcount
+            kept += record(state, m.get("message_id"), cid, cname, chat.get("chat_mode"), sender.get("id"),
+                           "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text, history,
+                           kind, verdict(config, text, kind, muted, m.get("message_id") in ours))
             history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
         state.db.commit()
         state.set(history_key, history[-2:])
@@ -248,6 +248,7 @@ def _poll_search(config, client, state, now, skip_chat_ids):
     exclude = set(skip_chat_ids) | set(state.get("chats:exclude", []))
     seen = list(state.get("chats:seen", []))
     seen_set, mine = set(seen), set(state.get("chats:mine", []))
+    ours = sent_refs(getattr(client, "root", None))
     kept = scanned = 0
     chats = set()
     for m in sorted(messages, key=lambda m: str(m.get("create_time") or "")):
@@ -259,8 +260,7 @@ def _poll_search(config, client, state, now, skip_chat_ids):
         chats.add(cid)
         sender = m.get("sender") or {}
         text = _text(m)
-        if (sender.get("sender_type") not in (None, "user") or m.get("msg_type") not in {"text", "post"} or not text
-                or skipped_text(config, text)):
+        if sender.get("sender_type") not in (None, "user") or m.get("msg_type") not in {"text", "post"} or not text:
             continue
         scanned += 1
         chat_mode = m.get("chat_type") or m.get("chat_mode")
@@ -274,12 +274,9 @@ def _poll_search(config, client, state, now, skip_chat_ids):
                         mentioned=not from_owner and mentions_owner(m, config.owner_open_id),
                         replied=bool({m.get("root_id"), m.get("parent_id")} & mine - {None}),
                         broadcast=mentions_all(m))
-        if kind and (not muted_chat(config, cname) or kind == "@你"):
-            state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
-                mid, cid, cname, chat_mode, sender.get("id"),
-                "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text[:500],
-                json.dumps(history[-2:], ensure_ascii=False), kind, "pending"))
-            kept += 1
+        kept += record(state, mid, cid, cname, chat_mode, sender.get("id"),
+                       "我" if from_owner else (sender.get("name") or ""), m.get("create_time"), text, history,
+                       kind, verdict(config, text, kind, muted_chat(config, cname), mid in ours))
         history.append(f"{'我' if from_owner else sender.get('name') or '对方'}：{text[:120]}")
         state.set(history_key, history[-2:])
     state.db.commit()
@@ -291,6 +288,53 @@ def _poll_search(config, client, state, now, skip_chat_ids):
                 else f"其余到下一个整理时间（{'、'.join(config.chat_review_times)}）统一提取")
         activity.log(client.root, "detect", f"聊天里发现 {kept} 条可能跟你有关的话：@你或带时间、催办的马上提取，{pace}")
     return {"chats": len(chats), "messages_scanned": scanned, "candidates": kept, "via": "search"}
+
+
+def verdict(config, text, kind, muted, ours):
+    """Why code drops a line before the model sees it, or None when it goes on to extraction."""
+    if skipped_text(config, text):
+        return "命中你设的跳过词"
+    if ours:
+        return "心响替你发出去的回复，算在原来那件事里"
+    if not kind:
+        return "只是客套话或表情"
+    if muted and kind != "@你":
+        return "这个会话设成只看 @你"
+    return None
+
+
+DROPS_KEPT = 3000  # verdicts on lines that never went to the model; the oldest go first
+
+
+def record(state, message_id, chat_id, chat_name, mode, sender_id, sender, sent_at, text, history, kind, why):
+    """File one line read from a chat with its verdict: a candidate for the model (status pending), or dropped
+    in code with the reason (status "drop:<why>"), so the 聊天判断 page can say why a line never became an item.
+    Returns 1 when it went to the model."""
+    status = "drop:" + why if why else "pending"
+    got = state.db.execute("INSERT OR IGNORE INTO chat_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)", (
+        message_id, chat_id, chat_name, mode, sender_id, sender, sent_at, str(text)[:500],
+        json.dumps(list(history)[-2:], ensure_ascii=False), kind or "", status)).rowcount
+    if why and got:
+        state.db.execute("DELETE FROM chat_candidates WHERE status LIKE 'drop:%' AND rowid NOT IN "
+                         "(SELECT rowid FROM chat_candidates WHERE status LIKE 'drop:%' ORDER BY rowid DESC LIMIT ?)",
+                         (DROPS_KEPT,))
+    return 0 if why else got
+
+
+def sent_refs(root):
+    """Ids of the messages 心响 posted (replies.py writes state/replies/*.json; read here, not imported: sources sit below replies) for the owner (Slack ts / Lark message_id). Chat intake skips them: what
+    the reply says (even "我再去跑一下") belongs to the item it was sent from, not to a new one."""
+    refs = set()
+    if not root:
+        return refs
+    for path in (Path(root) / "state/replies").glob("*.json"):
+        try:
+            ref = json.loads(path.read_text(encoding="utf-8")).get("ref")
+        except (OSError, ValueError):
+            continue
+        if ref:
+            refs.add(str(ref))
+    return refs
 
 
 def pending(state):
