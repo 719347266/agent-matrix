@@ -146,6 +146,9 @@ SCHEMAS = {
     ], [
         # which of the owner's rules the AI said it followed in the deliverable this verdict is on (memory.record_outcome)
         _add_columns("outcomes", "rules TEXT"),
+    ], [
+        # the action a rule is for ("发 PR"): AI reads it when it is about to do that, not on every job (memory.rules_text)
+        _add_columns("preferences", "trigger TEXT NOT NULL DEFAULT ''"),
     ]],
     "inbox": [[
         """CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,

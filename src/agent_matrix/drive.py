@@ -599,7 +599,7 @@ def _submit_learn(root, job):
                 scope = str(r.get("scope") or "")
                 if not (scope.startswith("project:") and scope[8:] in projects or scope.startswith("type:") and 1 < len(scope) <= 15):
                     scope = ""
-                rule = memory.insert_rule(db, r["rule"], r["why"], "AI 学的", scope)
+                rule = memory.insert_rule(db, r["rule"], r["why"], "AI 学的", scope, str(r.get("trigger") or ""))
                 if rule:
                     added.append(rule)
             for field in ("wins", "losses"):
@@ -1008,7 +1008,7 @@ def _open(root, job, driver):
             project_id = projects.chosen(root).get(rid)
             from .snapshot import _snapshot
             version = versions.context_text(root, rid, {r.get("record_id"): r for r in _snapshot(root).get("rows") or []})
-        head = rules_text(root, project_id) + profile_text(root) + common_text(root) + version
+        head = rules_text(root, project_id, job.get("folder")) + profile_text(root) + common_text(root) + version
         job["instructions"] = head + job["instructions"]
         if job.get("builtin_prompt"):
             job["builtin_prompt"] = head + job["builtin_prompt"]

@@ -63,5 +63,48 @@ class RulesUsedTests(unittest.TestCase):
             self.assertEqual([o["rules"] for o in memory.outcomes(root)], [[rid, 999], [rid, 999]])
 
 
+
+class RecallByActionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "state").mkdir()
+        self.folder = self.root / "job"
+        self.folder.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_few_action_rules_are_shown_grouped_many_go_to_a_file_behind_an_index(self):
+        from agent_matrix import memory
+        memory.add_rule(self.root, "交付一律用中文")
+        memory.add_rule(self.root, "统计商家排除开发店", trigger="查线上数据时")
+        text = memory.rules_text(self.root, None, self.folder)
+        self.assertIn("#### 查线上数据", text)                      # "时" is dropped so the same action groups together
+        self.assertIn("统计商家排除开发店", text)
+        self.assertFalse((self.folder / "规矩.md").exists())
+        for k in range(memory.INLINE_MAX):
+            memory.add_rule(self.root, f"发 PR 规矩{k}", trigger="发 PR")
+        text = memory.rules_text(self.root, None, self.folder)
+        self.assertIn("交付一律用中文", text)                         # rules for every job stay in full
+        self.assertNotIn("统计商家排除开发店", text)                   # action rules: only the index
+        self.assertIn(f"- 发 PR · {memory.INLINE_MAX}", text)
+        self.assertIn("## 查线上数据\n- [", (self.folder / "规矩.md").read_text(encoding="utf-8"))
+        self.assertIn("统计商家排除开发店", memory.rules_text(self.root, None, self.root / "missing"))  # no folder: all in full
+
+    def test_tidy_puts_a_rule_under_an_action_only_when_the_owner_says_use(self):
+        from agent_matrix import memory, tidy
+        memory.add_rule(self.root, "统计商家排除开发店")
+        rid = next(r["id"] for r in memory.rules(self.root) if r["rule"] == "统计商家排除开发店")
+        plan = {"changes": [{"type": "rule_trigger", "id": rid, "trigger": "查线上数据", "why": "只在查数据时用得上"},
+                            {"type": "rule_trigger", "id": rid, "trigger": "", "why": "没变"}]}
+        proposals, problems = tidy.check(self.root, plan)
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(next(r for r in memory.rules(self.root) if r["id"] == rid)["trigger"], "")   # nothing until 用
+        self.assertEqual(tidy._apply(self.root, "rule_trigger", proposals[0][3]), "")
+        self.assertEqual(next(r for r in memory.rules(self.root) if r["id"] == rid)["trigger"], "查线上数据")
+
+
 if __name__ == "__main__":
     unittest.main()

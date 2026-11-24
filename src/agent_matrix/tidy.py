@@ -20,7 +20,7 @@ EVERY_HOURS = 24
 DAYS = 30
 MAX_CHANGES = 30
 MAX_PROFILE = 2
-LABEL = {"merge_rules": "合并规矩", "retire_rule": "退休规矩", "stale_moment": "经历过时", "place_item": "归类事项",
+LABEL = {"merge_rules": "合并规矩", "retire_rule": "退休规矩", "rule_trigger": "规矩归到动作", "stale_moment": "经历过时", "place_item": "归类事项",
          "version_status": "版本状态", "profile": "关于你"}
 STATE = {"pending": "待定", "used": "已用", "dropped": "不要", "superseded": "已有更新"}
 
@@ -175,7 +175,7 @@ def check(root, plan, rows=None, *, profile_evidence=None):
     kinds = {c["type"] for c in plan["changes"] if isinstance(c, dict) and isinstance(c.get("type"), str)}
     if rows is None:
         rows = _rows(root) if "place_item" in kinds else []
-    rules = {r["id"]: r for r in memory.rules(root)} if kinds & {"merge_rules", "retire_rule"} else {}
+    rules = {r["id"]: r for r in memory.rules(root)} if kinds & {"merge_rules", "retire_rule", "rule_trigger"} else {}
     moments = {m["id"]: m for m in memory.moments(root, limit=2000)} if "stale_moment" in kinds else {}
     rid_of = {str(r.get("编号")): r["record_id"] for r in rows}
     title_of = {str(r.get("编号")): str(r.get("标题") or "") for r in rows}
@@ -196,14 +196,21 @@ def check(root, plan, rows=None, *, profile_evidence=None):
             if len(set(ids)) < 2 or any(x not in rules for x in ids) or not rule:
                 bad("ids 要是 rules.json 里至少两条规矩的编号，rule 写合并后的一句"); continue
             ids = sorted(set(ids))
-            scopes = {rules[x]["scope"] for x in ids}
+            scopes, triggers = {rules[x]["scope"] for x in ids}, {rules[x]["trigger"] for x in ids}
             out.append((kind, "「" + "」「".join(rules[x]["rule"] for x in ids) + f"」合并成「{rule}」", why,
-                        {"ids": ids, "rule": rule, "scope": scopes.pop() if len(scopes) == 1 else ""}))
+                        {"ids": ids, "rule": rule, "scope": scopes.pop() if len(scopes) == 1 else "",
+                         "trigger": triggers.pop() if len(triggers) == 1 else ""}))
         elif kind == "retire_rule":
             r = rules.get(c.get("id"))
             if not r or r["source"] != "AI 学的":
                 bad("id 要是 rules.json 里来源为「AI 学的」的规矩"); continue
             out.append((kind, f"「{r['rule']}」（通过 {r['wins']} · 退回 {r['losses']}）不再用", why, {"id": r["id"]}))
+        elif kind == "rule_trigger":
+            r, trigger = rules.get(c.get("id")), memory.clean_trigger(c.get("trigger"))
+            if not r or trigger == r["trigger"]:
+                bad("id 要是 rules.json 里的规矩，trigger 写一个和现在不同的动作（每件事都要守就写空串）"); continue
+            out.append((kind, f"「{r['rule']}」→ " + (f"做「{trigger}」时才读" if trigger else "每件事都读"), why,
+                        {"id": r["id"], "trigger": trigger}))
         elif kind == "stale_moment":
             m, newer = moments.get(c.get("id")), moments.get(c.get("by"))
             if not m or m["status"] == "stale":
@@ -311,7 +318,8 @@ def _apply(root, kind, d):
         if len(olds) < 2:
             return "要合并的规矩已经不在了"
         mine = any(r["source"] in memory.OWNER_SOURCES for r in olds)
-        memory.add_rule(root, d["rule"], "合并自：" + "；".join(r["rule"] for r in olds), source="本人" if mine else "AI 学的", scope=d.get("scope", ""))
+        memory.add_rule(root, d["rule"], "合并自：" + "；".join(r["rule"] for r in olds), source="本人" if mine else "AI 学的",
+                        scope=d.get("scope", ""), trigger=d.get("trigger", ""))
         kept = next((r for r in memory.rules(root) if r["rule"] == d["rule"]), None)
         if kept:
             memory.confirm_rule(root, kept["id"])
@@ -320,6 +328,10 @@ def _apply(root, kind, d):
                 memory.remove_rule(root, r["id"])
     elif kind == "retire_rule":
         memory.remove_rule(root, d["id"])
+    elif kind == "rule_trigger":
+        if not any(r["id"] == d["id"] for r in memory.rules(root)):
+            return "这条规矩已经不在了"
+        memory.set_trigger(root, d["id"], d["trigger"])
     elif kind == "stale_moment":
         memory.set_status(root, d["id"], "stale")
     elif kind == "place_item":

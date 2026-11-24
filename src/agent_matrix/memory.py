@@ -12,6 +12,7 @@ this is the context around them. Matching is cheap code (character-pair similari
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 
 from . import db as database
 from .textmatch import similarity
@@ -179,9 +180,9 @@ def rules(root):
         names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
         return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " "),
                  "fresh": s not in OWNER_SOURCES and not ok,   # learned by the AI, the owner has not said it is right yet
-                 "scope": sc or "", "scope_name": scope_name(sc, names), "wins": wn or 0, "losses": ls or 0}
-                for i, r, w, s, c, ok, sc, wn, ls in db.execute(
-                    "SELECT id, rule, why, source, created, confirmed, scope, wins, losses FROM preferences WHERE active=1 ORDER BY id")]
+                 "scope": sc or "", "scope_name": scope_name(sc, names), "wins": wn or 0, "losses": ls or 0, "trigger": tg or ""}
+                for i, r, w, s, c, ok, sc, wn, ls, tg in db.execute(
+                    "SELECT id, rule, why, source, created, confirmed, scope, wins, losses, trigger FROM preferences WHERE active=1 ORDER BY id")]
     finally:
         db.close()
 
@@ -197,22 +198,37 @@ def scope_name(scope, names=None):
     return "全部"
 
 
-def insert_rule(db, rule, why, source, scope):
+def clean_trigger(text):
+    """"发 PR 时" → "发 PR": the action alone, short, so the same action from different rounds groups together."""
+    text = " ".join(str(text or "").split())
+    return re.sub(r"(的)?(时候|时|前|后)$", "", text).strip()[:20]
+
+
+def insert_rule(db, rule, why, source, scope, trigger=""):
     rule = " ".join(str(rule or "").split())[:120]
     if not rule:
         return None
     conflict = ("DO NOTHING" if source == "AI 学的" else
-                "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope")
-    added = db.execute("INSERT INTO preferences (rule, why, source, created, scope) VALUES (?,?,?,?,?) "
-                       "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80]))
+                "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope, trigger=excluded.trigger")
+    added = db.execute("INSERT INTO preferences (rule, why, source, created, scope, trigger) VALUES (?,?,?,?,?,?) "
+                       "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80], clean_trigger(trigger)))
     return rule if added.rowcount else None
 
 
-def add_rule(root, rule, why="", source="本人", scope=""):
+def add_rule(root, rule, why="", source="本人", scope="", trigger=""):
     db = _db(root)
     try:
         with db:
-            return insert_rule(db, rule, why, source, scope)
+            return insert_rule(db, rule, why, source, scope, trigger)
+    finally:
+        db.close()
+
+
+def set_trigger(root, rule_id, trigger):
+    db = _db(root)
+    try:
+        with db:
+            db.execute("UPDATE preferences SET trigger=? WHERE id=?", (clean_trigger(trigger), int(rule_id)))
     finally:
         db.close()
 
@@ -284,10 +300,27 @@ def remove_rule(root, rule_id):
         db.close()
 
 
-def rules_text(root, project_id=None):
-    """The block every AI gets on top of its instructions: the rules for everything, the ones for this item's project,
-    and the ones for a kind of deliverable (marked, so the AI applies them only when it makes that kind)."""
-    lines = []
+# ponytail: up to this many action rules are shown in full, grouped by action; past it only the index goes in the
+# instructions and the text goes to 规矩.md (a long wall of rules gets skimmed; recall by action is what scales)
+INLINE_MAX = 20
+
+RECALL = """### 按动作取的规矩（这里只是目录，正文在 `{path}`；读过目录不算读过规矩）
+
+规矩是按「做什么动作时要守」存的，不是按话题：一件讲鉴权的事，管「发消息」的那条里一个鉴权字都没有，按话题找不到它。
+1. 开工前先列出这一轮要做的动作，用动词写：发 PR、查线上数据、写 SQL、回复同事、改代码、出方案……
+2. 拿每个动作对下面的目录，对上的就去读 `规矩.md` 里同名那一节，整节照做。一个动作可能对上好几节，都读。
+3. 做到一半才决定要做的动作（查完才知道要回同事、看完才知道要连库），在决定的那一刻回到第 2 步再对一次。
+4. 还拿不准，用业务词在 `规矩.md` 里搜一下兜底。一条都没对上就是这一轮真用不上，不要硬凑。
+
+目录（动作 · 几条）：
+"""
+
+
+def rules_text(root, project_id=None, folder=None):
+    """The block every AI gets on top of its instructions. Rules for every job are given in full; rules tied to an
+    action ("发 PR") are given in full grouped by action while there are few, and as an index to `folder`/规矩.md once
+    there are many. Rules for another project, and rules the owner has not confirmed yet, are left out."""
+    always, by_action = [], {}
     for r in rules(root):
         scope = r.get("scope") or ""
         if r["fresh"]:   # learned by the AI and not confirmed yet: it waits for the owner's 「对」 before any AI follows it
@@ -295,9 +328,22 @@ def rules_text(root, project_id=None):
         if scope.startswith("project:") and scope != f"project:{project_id}":
             continue
         tag = f"（{r['scope_name']}）" if scope else ""
-        lines.append(f"- [{r['id']}] {r['rule']}{tag}")
-    return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准。照着做了哪几条，把编号写进结果的 rules）\n"
-            + "\n".join(lines) + "\n\n") if lines else ""
+        line = f"- [{r['id']}] {r['rule']}{tag}"
+        (by_action.setdefault(r["trigger"], []) if r["trigger"] else always).append(line)
+    if not always and not by_action:
+        return ""
+    out = ["## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准。照着做了哪几条，把编号写进结果的 rules）", *always]
+    actions = sorted(by_action.items())
+    if actions and (not folder or not Path(folder).is_dir() or sum(len(v) for v in by_action.values()) <= INLINE_MAX):
+        out += ["", "做下面这些动作时还要守（按动作分好了，做到才用）："]
+        for action, lines in actions:
+            out += [f"#### {action}", *lines]
+    elif actions:
+        path = Path(folder) / "规矩.md"
+        path.write_text("# 按动作取的规矩\n\n" + "\n\n".join(f"## {a}\n" + "\n".join(lines) for a, lines in actions) + "\n",
+                        encoding="utf-8")
+        out += ["", RECALL.format(path=path) + "\n".join(f"- {a} · {len(lines)}" for a, lines in actions)]
+    return "\n".join(out) + "\n\n"
 
 
 # ---- 关于你: who the owner is, what they do, how they like work done -----------------------------------------

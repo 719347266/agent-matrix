@@ -1170,7 +1170,7 @@ async function boostTest(){
   render();
 }
 /* 规矩：适用在哪、照着做通过/被退回几次 */
-function ruleMeta(r){ const tags=[r.scope?`<span class="rule-tag">${esc(r.scope_name)}</span>`:"",(r.wins||r.losses)?`<span class="rule-tag ${r.losses>r.wins?"bad":""}">通过 ${r.wins||0} · 退回 ${r.losses||0}</span>`:""].filter(Boolean).join("");
+function ruleMeta(r){ const tags=[r.trigger?`<span class="rule-tag">做「${esc(r.trigger)}」时读</span>`:"",r.scope?`<span class="rule-tag">${esc(r.scope_name)}</span>`:"",(r.wins||r.losses)?`<span class="rule-tag ${r.losses>r.wins?"bad":""}">通过 ${r.wins||0} · 退回 ${r.losses||0}</span>`:""].filter(Boolean).join("");
   return tags+esc(r.why||""); }
 function verdictLine(){ const v=(D.memory||{}).verdicts||{}, n=(v["通过"]||0)+(v["退回"]||0)+(v["要改"]||0);
   return n?`<span class="hint" style="margin:0 0 0 auto;font-weight:400">近 30 天评审：通过 ${v["通过"]||0} · 退回 ${v["退回"]||0} · 要改 ${v["要改"]||0}</span>`:""; }
