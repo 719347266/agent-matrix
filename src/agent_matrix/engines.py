@@ -145,7 +145,12 @@ class CodexRun:
 
     def _loop(self, proc, lines, deadline, on_event, on_tick, should_stop=None):
         finished = False
+        last = time.monotonic()
         while not finished:
+            # waiting for the owner (开发模式) does not count against the run's time: approvals has its own limit
+            if getattr(self, "waiting", None):
+                deadline += time.monotonic() - last
+            last = time.monotonic()
             try:
                 line = lines.get(timeout=0.5)
             except queue_mod.Empty:
@@ -346,13 +351,17 @@ class ClaudeRun(CodexRun):
         from . import approvals
         for approval_id, (request_id, tool_input) in list(getattr(self, "waiting", {}).items()):
             entry = approvals.get(self.guard["root"], approval_id)
+            if entry and entry["status"] == "pending" and \
+                    datetime.now(TZ) - datetime.fromisoformat(entry["at"]) > timedelta(hours=approvals.OWNER_WAIT_HOURS):
+                approvals.expire(self.guard["root"], approval_id)
+                entry = {**entry, "status": "expired"}
             if not entry or entry["status"] == "pending":
                 continue
             del self.waiting[approval_id]
             if entry["status"] == "allowed":
                 self._reply(request_id, {"behavior": "allow", "updatedInput": tool_input})
             else:
-                self._reply(request_id, {"behavior": "deny", "message": "本人没有批准这一步" + (f"：{entry['note']}" if entry.get("note") else "。")
+                self._reply(request_id, {"behavior": "deny", "message": (f"本人 {approvals.OWNER_WAIT_HOURS} 小时没回，这一步不做" if entry["status"] == "expired" else "本人没有批准这一步") + (f"：{entry['note']}" if entry.get("note") else "。")
                                          + "不要换个办法绕过去做同样的事；做不了就在结果里写明需要本人做什么。"})
 
     def _finish(self):

@@ -44,6 +44,12 @@ class Config(BaseModel):
     feishu_tasks_enabled: bool = True
     # Slack as a second chat source: a user token (xoxp-); empty = env SLACK_USER_TOKEN; neither = off.
     slack_token: str = ""
+    # 开发模式 asks on the phone too: a Slack App with Socket Mode (bot token xoxb- with chat:write, app-level token
+    # xapp- with connections:write; manifest in slack-app-manifest.yaml). Both empty = no Slack buttons.
+    slack_bot_token: str = ""
+    slack_app_token: str = ""
+    # Where a 开发模式 request is pushed while it waits (each only when that channel is set up); [] = only in 心响.
+    approval_notify: list[Literal["feishu", "slack"]] = Field(default_factory=lambda: ["feishu", "slack"])
     # Jira Cloud: open issues assigned to the owner become items (sources/jira.py). Empty token = off.
     jira_site: str = ""      # https://xxx.atlassian.net
     jira_email: str = ""

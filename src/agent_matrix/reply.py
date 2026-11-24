@@ -556,6 +556,10 @@ WAKE_WORKER = {"material", "reject", "revise", "ai", "first", "resume", "prep"}
 
 
 def handle(config, client, state, text, *, source, message_ref):
+    from . import approvals
+    answer = approvals.command(client.root, text)   # 开发模式「批准 / 拒绝 <id>」: not an item command
+    if answer:
+        return answer
     ops, problems = parse(text, _now(config).date())
     if not ops and not problems:
         return None

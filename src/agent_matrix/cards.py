@@ -83,7 +83,7 @@ def short_result(reply, now):
     """「#15 周报 → 完成 ✓」→「✓ 已完成 14:52」; anything else → the first line, shortened."""
     first = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
     if "✓" in first:
-        verb = "已完成" if "完成" in first else "收到，按钮可用" if "按钮可用" in first else "已处理"
+        verb = "已批准" if "已批准" in first else "已拒绝" if "已拒绝" in first else "已完成" if "完成" in first else "收到，按钮可用" if "按钮可用" in first else "已处理"
         return f"✓ {verb} {now:%H:%M}", True
     return (first.split("→")[-1].strip() or "没改成")[:20], False
 

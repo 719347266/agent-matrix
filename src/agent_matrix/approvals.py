@@ -214,6 +214,28 @@ def expire(root, approval_id):
         _write(root, entry)
 
 
+STATUS = {"pending": "等你批准", "allowed": "已批准", "denied": "已拒绝", "expired": "已过期"}
+# How long a run waits for the owner (the worker's own timeout is paused meanwhile): then the step is refused.
+# ponytail: one fixed limit; the waiting run holds a worker slot, so make it a setting only if 2 h proves wrong.
+OWNER_WAIT_HOURS = 2
+_COMMAND = re.compile(r"\s*(批准|拒绝)\s*([0-9a-f]{12})\s*(.*)", re.S)
+
+
+def command(root, text):
+    """「批准 <id>」/「拒绝 <id> 理由」— a Feishu card button, a typed Feishu reply or a Slack button.
+    None when the text is not one of these."""
+    m = _COMMAND.fullmatch(text or "")
+    if not m:
+        return None
+    entry = get(root, m[2])
+    if not entry:
+        return f"找不到这条待确认：{m[2]}"
+    allow = m[1] == "批准"
+    if not decide(root, m[2], allow, m[3].strip()):
+        return f"这条已经处理过了（{STATUS.get(entry['status'], entry['status'])}）"
+    return ("✓ 已批准：" if allow else "✓ 已拒绝：") + entry["what"][:80]
+
+
 def pending(root):
     out = []
     for path in sorted(_dir(root).glob("*.json")):

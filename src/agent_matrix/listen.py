@@ -10,6 +10,8 @@ Pushed events (one `lark-cli event consume` child each):
                                            (worker.py) is woken at once for extraction
   task.task.update_user_access_v2          Feishu task changed → synced into the task table
   card.action.trigger                      a tapped card button → applied, the card turns into "✓ 已完成"
+开发模式 waiting for the owner → a Feishu card + a Slack DM with 批准/拒绝 buttons (approval_push.py, every 5 s;
+Slack taps arrive over a Socket Mode websocket in their own thread).
 Timers: prep cards ~30 min before meetings, brief catch-up, Friday review (every minute);
 chat reading (every 30 min); Feishu task sync fallback (every 15 min); the AI employee is
 started every 2 minutes when it is not already working (it exits when nothing is left).
@@ -287,6 +289,16 @@ class Listener:
         state.set("card:seen:" + eid, True)
         return "updated" if in_place else "handled"
 
+    def on_slack_item(self, config, client, state, payload):
+        """A choice tapped on a Slack item message (我来 / 交给 AI / 不做 / 通过…): run like the 心响 button."""
+        from .approval_push import on_item_tap
+        return on_item_tap(config, client, state, payload)   # reply.handle wakes the AI itself for 交给 AI / 继续
+
+    def on_slack_text(self, config, client, state, event):
+        """The owner typed in the Slack bot's DM: a reply command, answered in the same DM."""
+        from .approval_push import on_text
+        return on_text(config, client, state, event)
+
     def on_meeting(self, config, client, state, event):
         if config.intake_mode == "manual":
             return "manual"
@@ -307,7 +319,7 @@ class Listener:
     def dispatch(self, key, event):
         handler = {"im.message.receive_v1": self.on_message, "vc.note.generated_v1": self.on_meeting,
                    "vc.meeting.participant_meeting_ended_v1": self.on_meeting,
-                   "task.task.update_user_access_v2": self.on_task, "card.action.trigger": self.on_card}[key]
+                   "task.task.update_user_access_v2": self.on_task, "card.action.trigger": self.on_card, "slack.item": self.on_slack_item, "slack.text": self.on_slack_text}[key]
         try:
             result = self.locked(lambda c, cl, s: handler(c, cl, s, event))
             log("event", key, "→", json.dumps(result, ensure_ascii=False, default=str)[:160])
@@ -319,6 +331,36 @@ class Listener:
             activity.log(self.root, "error", f"实时事件处理出错：{key}", detail=str(exc), status="failed")
 
     # ---- timers -----------------------------------------------------------------
+    def push_approvals(self, config, no_feishu):
+        """开发模式 waiting for the owner → a Feishu card and a Slack message with 批准 / 拒绝 buttons."""
+        from . import approval_push
+        if approval_push.slack_ready(config):
+            state = State(self.root / "state/state.db")
+            try:
+                if approval_push.push_slack(self.root, config, state):
+                    log("approvals", "slack updated")
+                from .snapshot import _snapshot
+                if approval_push.push_items(self.root, config, state, _snapshot(self.root).get("rows") or []):
+                    log("attention", "slack updated")
+            except Exception as exc:
+                self.trouble("approvals-slack", f"{type(exc).__name__} {str(exc)[:300]}")
+            finally:
+                state.close()
+        if no_feishu:
+            return
+        state = State(self.root / "state/state.db")
+        try:   # the Feishu login check costs a lark-cli call: only when a card is actually due
+            due = approval_push.unsent_feishu(self.root, config, state)
+        finally:
+            state.close()
+        if due:
+            try:
+                log("approvals", "feishu cards", self.locked(lambda c, cl, s: approval_push.push_feishu(c, cl, s)))
+            except MatrixBusy:
+                self.last["approvals"] = 0
+            except Exception as exc:
+                self.trouble("approvals-feishu", f"{type(exc).__name__} {str(exc)[:300]}")
+
     def every(self, name, seconds):
         now = time.time()
         if now - self.last.get(name, 0) >= seconds:
@@ -496,6 +538,8 @@ class Listener:
                 except Exception as exc:
                     log("wake failed", type(exc).__name__, str(exc)[:200])
             threading.Thread(target=wake, daemon=True, name="xinxiang-wake").start()
+        if self.every("approvals", 5):
+            self.push_approvals(cfg, no_feishu)   # card taps arrive only where the Feishu events run
         if self.every("expected", 600):
             try:  # 预计会遇到的事: told the day before and on the day (local only; once per day per thing)
                 from . import versions
@@ -524,6 +568,9 @@ class Listener:
         threading.Thread(target=backup_loop, args=(self.root, self.path), daemon=True, name="xinxiang-backup").start()
         threading.Thread(target=wechat_loop, args=(self.root, self.path, self.wake_worker), daemon=True, name="xinxiang-wechat").start()
         threading.Thread(target=hymem_loop, args=(self.root, self.path), daemon=True, name="xinxiang-hymem").start()
+        from .approval_push import slack_loop
+        threading.Thread(target=slack_loop, args=(self.root, self.path, log, lambda p: self.inbox.put(("slack.item", p)),
+                                                     lambda e: self.inbox.put(("slack.text", e))), daemon=True, name="xinxiang-slack-approval").start()
         log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:
