@@ -75,6 +75,8 @@ def check_result(workdir, row):
         return result, "confirmation 不超过 30 字。"
     if not result.get("sources"):
         return result, "sources 要列出实际用到的资料。"
+    if not (isinstance(result.get("rules"), list) and all(type(i) is int for i in result["rules"])):
+        return result, "rules 要写这一轮照着做了哪几条本人的规矩（编号数组，如 [8, 29]）；一条都没用上就写 []。"
     try:
         doc = (Path(workdir) / "交付.md").read_text(encoding="utf-8")
     except OSError:

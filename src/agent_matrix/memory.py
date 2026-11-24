@@ -230,19 +230,25 @@ def credit(root, rule_id, won):
 # ---- 评审结果: every verdict on a deliverable is kept, so the AI learns what passes -----------------------------
 
 def record_outcome(root, record_id, verdict, reason=""):
-    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind and its project."""
+    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind, its project and the rules the AI
+    said it followed; a pass counts for each of those rules right away (a send-back is left to the learn round to weigh:
+    it may have come back for something else)."""
     work = Path(root) / "state" / "work" / record_id
     try:
-        template = json.loads((work / "结果.json").read_text(encoding="utf-8")).get("template") or ""
-    except (OSError, ValueError, AttributeError):
-        template = ""
+        result = json.loads((work / "结果.json").read_text(encoding="utf-8"))
+        template = result.get("template") or ""
+        used = sorted({i for i in result.get("rules") or [] if type(i) is int})
+    except (OSError, ValueError, AttributeError, TypeError):
+        template, used = "", []
     db = _db(root)
     try:
         version = (db.execute("SELECT max(version) FROM deliverables WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
         project = (db.execute("SELECT project_id FROM item_projects WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
         with db:
-            db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id) VALUES (?,?,?,?,?,?,?)",
-                       (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project))
+            db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id, rules) VALUES (?,?,?,?,?,?,?,?)",
+                       (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project, json.dumps(used)))
+            if verdict == "通过":
+                db.executemany("UPDATE preferences SET wins=wins+1 WHERE active=1 AND id=?", [(i,) for i in used])
     finally:
         db.close()
 
@@ -252,9 +258,10 @@ def outcomes(root, since=""):
     try:
         names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
         return [{"id": oid, "record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
-                 "template": t or "", "project": names.get(p, "")}
-                for oid, r, a, v, why, ver, t, p in db.execute(
-                    "SELECT id, record_id, at, verdict, reason, version, template, project_id FROM outcomes WHERE at>? ORDER BY id", (since,))]
+                 "template": t or "", "project": names.get(p, ""), "rules": json.loads(used) if used else None}
+                for oid, r, a, v, why, ver, t, p, used in db.execute(
+                    "SELECT id, record_id, at, verdict, reason, version, template, project_id, rules FROM outcomes WHERE at>? ORDER BY id",
+                    (since,))]
     finally:
         db.close()
 
@@ -283,11 +290,14 @@ def rules_text(root, project_id=None):
     lines = []
     for r in rules(root):
         scope = r.get("scope") or ""
+        if r["fresh"]:   # learned by the AI and not confirmed yet: it waits for the owner's 「对」 before any AI follows it
+            continue
         if scope.startswith("project:") and scope != f"project:{project_id}":
             continue
         tag = f"（{r['scope_name']}）" if scope else ""
-        lines.append(f"- {r['rule']}{tag}")
-    return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准）\n" + "\n".join(lines) + "\n\n") if lines else ""
+        lines.append(f"- [{r['id']}] {r['rule']}{tag}")
+    return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准。照着做了哪几条，把编号写进结果的 rules）\n"
+            + "\n".join(lines) + "\n\n") if lines else ""
 
 
 # ---- 关于你: who the owner is, what they do, how they like work done -----------------------------------------

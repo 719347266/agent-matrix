@@ -87,7 +87,7 @@ class DriveTests(unittest.TestCase):
         job, folder = self.open_job("item", n=44, ref={"record_id": "rec44", "version": "a" * 64})
         (folder / "交付.md").write_text(GOOD)
         (folder / "结果.json").write_text(json.dumps({"outcome": "done", "template": "方案", "summary": "先投人群包A",
-                                                     "sources": ["会议"]}, ensure_ascii=False))
+                                                     "sources": ["会议"], "rules": []}, ensure_ascii=False))
         with patch("agent_matrix.drive._item") as item:
             item.return_value.workdir = folder
             item.return_value.publish.return_value = {"url": "https://x/docx/a"}

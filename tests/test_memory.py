@@ -99,8 +99,10 @@ class MemoryTests(unittest.TestCase):
         self.assertTrue(by["需求文档先补异常场景"]["fresh"])
         self.assertFalse(by["对外文案先给两版"]["fresh"])
         self.assertFalse(memory.rules(self.root)[0]["fresh"])          # the owner's own (seeded) rules never wait
-        self.assertIn("需求文档先补异常场景", memory.rules_text(self.root))  # it already applies while it waits
+        self.assertNotIn("需求文档先补异常场景", memory.rules_text(self.root))  # no AI follows it while it waits
+        self.assertIn("对外文案先给两版", memory.rules_text(self.root))
         memory.confirm_rule(self.root, by["需求文档先补异常场景"]["id"])
+        self.assertIn(f"[{by['需求文档先补异常场景']['id']}] 需求文档先补异常场景", memory.rules_text(self.root))
         self.assertFalse(next(r for r in memory.rules(self.root) if r["rule"] == "需求文档先补异常场景")["fresh"])
 
     def test_waiting_items_keep_the_evidence_rules(self):

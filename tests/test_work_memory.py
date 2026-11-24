@@ -31,6 +31,8 @@ class WorkMemory(unittest.TestCase):
         self.assertEqual([(o["verdict"], o["template"], o["project"]) for o in got], [("退回", "方案", "示例 App"), ("通过", "方案", "示例 App")])
         memory.add_rule(self.root, "给客户的方案不写内部代号", source="AI 学的", scope=f"project:{pid}")
         memory.add_rule(self.root, "周报先给结论", source="AI 学的", scope="type:周报")
+        for r in memory.rules(self.root):   # AI-learned rules apply only once the owner says 对
+            memory.confirm_rule(self.root, r["id"])
         other = projects.create(self.root, "心响")
         self.assertIn("不写内部代号（项目「示例 App」）", memory.rules_text(self.root, pid))
         self.assertNotIn("不写内部代号", memory.rules_text(self.root, other), "another project's rule stays out")

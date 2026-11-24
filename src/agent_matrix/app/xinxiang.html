@@ -1064,7 +1064,7 @@ function memPage(){
         <div class="acts" style="margin-top:8px;justify-content:flex-end">${P.text?`<button class="btn" onclick="S.profEdit=false;render()">取消</button>`:""}<button class="btn pri" onclick="saveProfile()">保存</button></div></div>`
       :`<div class="list" style="padding:12px 14px"><div class="prof-text">${esc(P.text)}</div><div class="acts" style="margin-top:8px;justify-content:flex-end"><button class="btn" onclick="S.profEdit=true;render()">改</button></div></div>`);
   return `<p class="hint">这里是 AI 做事前一定会读的东西：你是谁、你手上的项目和版本、你的规矩。</p>`+updatesView()+about+scanView(P)+(P.text&&P.draft?`<details style="margin-top:10px"><summary>查看旧版草稿</summary><div class="prof-text">${esc(P.draft.text)}</div></details>`:"")+versionsView()
-   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
+   +(fresh.length?`<div class="sec-h">AI 新学到的，等你确认<span class="n">${fresh.length}</span></div><p class="hint">点「对」之前，AI 做事不会照着它做。</p><div class="list">${fresh.map(r=>noteLine("AI 学的","brand",r.rule,esc(r.why||""),
       `<button class="btn pri" onclick="ruleOp({confirm:${r.id}})">对</button><button class="btn" style="color:var(--red)" onclick="ruleOp({remove:${r.id}})">不对</button>`)).join("")}</div>`:"")
    +`<div class="sec-h">在用的规矩<span class="n">${rest.length}</span>${verdictLine()}</div><div class="list">${rest.map(r=>noteLine(mine(r)?"你定的":"AI 学的",mine(r)?"green":"brand",r.rule,ruleMeta(r),
       `<button class="btn ghost" onclick="ruleOp({remove:${r.id}})">删掉</button>`)).join("")||'<div class="empty">还没有</div>'}

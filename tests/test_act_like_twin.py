@@ -46,5 +46,22 @@ class ContextTests(unittest.TestCase):
             self.assertIn("context --source", lines[0])
 
 
+
+class RulesUsedTests(unittest.TestCase):
+    def test_a_pass_counts_for_the_rules_the_ai_said_it_followed(self):
+        from agent_matrix import memory
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "state/work/r1").mkdir(parents=True)
+            memory.add_rule(root, "查线上数据先核表结构")
+            rid = next(r["id"] for r in memory.rules(root) if r["rule"] == "查线上数据先核表结构")
+            (root / "state/work/r1/结果.json").write_text(json.dumps({"template": "数据汇总", "rules": [rid, 999]}), encoding="utf-8")
+            memory.record_outcome(root, "r1", "要改", "少了测试店铺")   # a send-back may be about something else: not counted here
+            memory.record_outcome(root, "r1", "通过")
+            rule = next(r for r in memory.rules(root) if r["id"] == rid)
+            self.assertEqual((rule["wins"], rule["losses"]), (1, 0))
+            self.assertEqual([o["rules"] for o in memory.outcomes(root)], [[rid, 999], [rid, 999]])
+
+
 if __name__ == "__main__":
     unittest.main()
