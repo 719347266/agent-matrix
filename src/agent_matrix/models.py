@@ -61,6 +61,8 @@ class Config(BaseModel):
     # The field that says who took an issue, when it is not 经办人 (e.g. {"id": "customfield_11294", "name": "Issue Owner"}):
     # a person there makes the issue theirs; empty there (in the projects above) means nobody has taken it yet.
     jira_owner_field: dict[str, str] = Field(default_factory=dict)
+    # Fields shown in front of the title, e.g. App Plan → 「[Pro] LGS-83 …」: [{"id": "customfield_11423", "name": "App Plan"}].
+    jira_title_fields: list[dict[str, str]] = Field(default_factory=list)
     # WeChat as a chat source, read on this computer through the wechat-cli command (the owner's own local messages).
     wechat_enabled: bool = False
     wechat_binary: str = ""          # path to wechat-cli; empty = find it on PATH

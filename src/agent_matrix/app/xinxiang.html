@@ -1752,7 +1752,9 @@ function jiraRow(s){
       +(others.length?`<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${others.map(o=>`<span class="chip on">${esc(o.name)}<button class="btn ghost" style="padding:0 4px;margin-left:4px" title="不跟了" data-id="${esc(o.id)}" onclick="jiraOther({remove:this.dataset.id})">×</button></span>`).join("")}</div>`:""),
       `<input id="jiraother" data-draft="jiraother" placeholder="名字或邮箱" style="width:150px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraOther()"><button class="btn" onclick="jiraOther()">添加</button>`)
     +setRow("没人领的单子",`这些项目里还没人领、状态还在待办的单子也收进来，标成「待确认」等你决定接不接；在 Jira 里有人领了就跟着改或关掉。「谁领了」默认看经办人，有的项目经办人填的是提单的人、处理的人在别的字段（比如 Issue Owner），就把那个字段名填上。${(me.unassigned||[]).length?`现在看：${esc(me.unassigned.join("、"))}，按「${esc(me.owner_field||"经办人")}」算谁领了。`:""}`,
-      `<input id="jiraproj" placeholder="项目 key，如 LGS, LPB" value="${esc((me.unassigned||[]).join(", "))}" style="width:150px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraProjects()"><input id="jirafield" placeholder="谁领了：经办人" value="${esc(me.owner_field||"")}" style="width:120px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraProjects()"><button class="btn" onclick="jiraProjects()">保存</button>`); }
+      `<input id="jiraproj" placeholder="项目 key，如 LGS, LPB" value="${esc((me.unassigned||[]).join(", "))}" style="width:150px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraProjects()"><input id="jirafield" placeholder="谁领了：经办人" value="${esc(me.owner_field||"")}" style="width:120px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraProjects()"><button class="btn" onclick="jiraProjects()">保存</button>`)
+    +setRow("标题上带的字段",`把这些字段的值放到事项标题前面，比如填 App Plan，标题就是「[Pro] LGS-83 …」。空的、N/A、TBD 不带。多个用逗号隔开。`,
+      `<input id="jiratitle" placeholder="比如 App Plan" value="${esc((me.title_fields||[]).join(", "))}" style="width:150px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraTitle()"><button class="btn" onclick="jiraTitle()">保存</button>`); }
   const field=(id,ph,w,extra="")=>`<input id="${id}" data-draft="${id}" placeholder="${ph}" style="width:${w}px;height:28px;padding:3px 8px" ${extra}>`;
   return setRow("连接 Jira","指派给你、没完成的 Jira 单子自动收进来。只读，不会改 Jira。",
     field("jirasite","xxx.atlassian.net",150)+field("jiraemail","登录邮箱",150)
@@ -1773,6 +1775,11 @@ async function jiraSync(btn){
     toast(said.length?`同步好了：${said.join("，")}`:"同步好了，没有变化"); load(); }
   catch(e){ toast(e.message); }
   finally{ btn.disabled=false; btn.textContent="立即同步"; }
+}
+async function jiraTitle(){
+  const fields=(($("#jiratitle")||{}).value||"").split(/[,，]+/).map(x=>x.trim()).filter(Boolean);
+  try{ const r=await api("/api/jira/title",{fields},30000); toast(r.fields.length?`好了，标题前带上 ${r.fields.join("、")}，点「立即同步」马上更新`:"标题不带字段了"); load(); }
+  catch(e){ toast(e.message); }
 }
 async function jiraProjects(){
   const projects=(($("#jiraproj")||{}).value||"").split(/[,，\s]+/).filter(Boolean);

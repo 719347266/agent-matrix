@@ -58,7 +58,8 @@ class FakeJira:
             return {"isLast": True, "issues": [{"key": k, "fields": self.fields(k, v) | {"summary": v["summary"], "duedate": v["duedate"]}}
                                                for k, v in self.issues.items() if wanted(k, v)]}
         if path == "/rest/api/3/field":
-            return [{"id": "summary", "name": "Summary"}, {"id": "customfield_9", "name": "Issue Owner"}]
+            return [{"id": "summary", "name": "Summary"}, {"id": "customfield_9", "name": "Issue Owner"},
+                    {"id": "customfield_7", "name": "App Plan"}, {"id": "customfield_8", "name": "App Plan"}]
         if path.startswith("/rest/api/3/project/"):
             if path.endswith("/LGS"):
                 return {"key": "LGS"}
@@ -74,7 +75,8 @@ class FakeJira:
     def fields(self, key, v):
         user = lambda a: a and {"accountId": a, "displayName": a}
         return {"status": {"statusCategory": {"key": "done" if v["done"] else "indeterminate"}},
-                "project": {"key": key.split("-")[0]}, "assignee": user(v["assignee"]), "customfield_9": user(v.get("owner"))}
+                "project": {"key": key.split("-")[0]}, "assignee": user(v["assignee"]), "customfield_9": user(v.get("owner")),
+                "customfield_7": v.get("plan"), "customfield_8": v.get("plan_option") and {"value": v["plan_option"]}}
 
 
 class JiraSyncTests(unittest.TestCase):
@@ -201,6 +203,22 @@ class JiraSyncTests(unittest.TestCase):
         self.assertEqual(self.made("LPB-268")["标题"], "LPB-268 积分邮件")
         self.jira.issues["LPB-270"]["owner"] = "carl"          # handed to someone not followed: closed
         self.assertEqual(self.sync()["closed"], 1)
+
+    def test_title_fields_go_in_front_of_the_title(self):
+        from agent_matrix.config import save
+        root = Path(self.tmp.name)
+        save(root / "config.yaml", self.config)
+        self.assertEqual(jira.title_fields(root, ["app plan", ""], api=self.jira), ["App Plan"])
+        from agent_matrix.config import load
+        self.config.jira_title_fields = load(root / "config.yaml").jira_title_fields   # both same-named fields
+        self.jira.issues["LL-1"]["plan"] = "Pro"
+        self.jira.issues["LL-2"].update(plan="TBD", plan_option="Advanced")       # TBD skipped, the other one used
+        self.sync()
+        self.assertEqual(self.made("LL-1")["标题"], "[Pro] LL-1 概要设计")
+        self.assertEqual(self.made("LL-2")["标题"], "[Advanced] LL-2 安全合规")
+        self.jira.issues["LL-1"]["plan"] = "N/A"
+        self.sync()
+        self.assertEqual(self.made("LL-1")["标题"], "LL-1 概要设计")
 
     def test_watch_projects_checks_each_key(self):
         from agent_matrix.config import load, save

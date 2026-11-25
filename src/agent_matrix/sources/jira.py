@@ -26,6 +26,26 @@ def _owner_field(config):
     return (config.jira_owner_field or {}).get("id") or ""
 
 
+def _extra(config):
+    """Fields read on top of FIELDS: the owner field and the ones shown in the title."""
+    ids = [_owner_field(config)] + [x["id"] for x in config.jira_title_fields]
+    return list(dict.fromkeys(i for i in ids if i))
+
+
+BLANK = {"", "n/a", "na", "tbd", "none", "-"}
+
+
+def _labels(issue, config):
+    """Values of the title fields, one per field name (same-named fields: the first filled one)."""
+    f, out = issue.get("fields") or {}, {}
+    for x in config.jira_title_fields:
+        v = f.get(x["id"])
+        v = v.get("value") or v.get("name") if isinstance(v, dict) else v
+        if x["name"] not in out and isinstance(v, (str, int, float)) and str(v).strip().lower() not in BLANK:
+            out[x["name"]] = str(v).strip()
+    return list(out.values())
+
+
 def open_jql(config):
     ids = [o["id"] for o in config.jira_others if o.get("id")]
     projects, owner = config.jira_unassigned_projects, _owner_field(config)
@@ -97,7 +117,7 @@ def call(config, method, path, body=None):
 def search(config, jql, *, api=call):
     issues, token = [], None
     while True:
-        body = {"jql": jql, "fields": FIELDS + ([_owner_field(config)] if _owner_field(config) else []), "maxResults": 100, **({"nextPageToken": token} if token else {})}
+        body = {"jql": jql, "fields": FIELDS + _extra(config), "maxResults": 100, **({"nextPageToken": token} if token else {})}
         data = api(config, "POST", "/rest/api/3/search/jql", body)
         issues += data.get("issues") or []
         token = data.get("nextPageToken")
@@ -113,7 +133,8 @@ def fields_for(issue, config):
     f = issue.get("fields") or {}
     other = _other(issue, config)
     tag = other["name"] + " · " if other else "没人领 · " if _nobody(issue, config) else ""
-    title = " ".join(f"{tag}{issue['key']} {f.get('summary') or ''}".split())[:60]
+    labels = "".join(f"[{v}]" for v in _labels(issue, config))
+    title = " ".join(f"{tag}{labels} {issue['key']} {f.get('summary') or ''}".split())[:60]
     out = {"标题": title, "执行方": ["别人" if other else "我"], "状态": ["未开始"], "进度": "0/1 未开始",
            "负责人": [{"id": config.owner_open_id}], "来源": ["Jira"], "类型": ["临时"],
            "来源链接": f"{site_url(config.jira_site)}/browse/{issue['key']}"}
@@ -323,6 +344,26 @@ def watch_projects(root, keys, field=None, *, api=call):
             config.jira_owner_field = {"id": hit[0]["id"], "name": hit[0]["name"]}
     save(path, config)
     return {"projects": wanted, "field": config.jira_owner_field.get("name", "")}
+
+
+def title_fields(root, names, *, api=call):
+    """The fields shown in front of item titles, by the names Jira shows (every field with that name)."""
+    from ..config import load, save
+    path = root / "config.yaml"
+    config = load(path)
+    if not connected(config):
+        raise MatrixError("先连接 Jira。")
+    wanted = list(dict.fromkeys(n.strip() for n in names if n and n.strip()))
+    all_fields = api(config, "GET", "/rest/api/3/field") or [] if wanted else []
+    picked = []
+    for name in wanted:
+        hit = [x for x in all_fields if (x.get("name") or "").lower() == name.lower()]
+        if not hit:
+            raise MatrixError(f"Jira 里没有叫「{name}」的字段，照单子页面上显示的名字填。")
+        picked += [{"id": x["id"], "name": hit[0]["name"]} for x in hit]
+    config.jira_title_fields = picked
+    save(path, config)
+    return list(dict.fromkeys(x["name"] for x in picked))
 
 
 def follow(root, name=None, remove=None, *, api=call):
