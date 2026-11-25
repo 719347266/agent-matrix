@@ -168,7 +168,9 @@ def _codex(home,now):
                 alive[proc.get("conversationId")]=proc.get("turnId")
     for p in sorted(base.glob("state_[0-9]*.sqlite"),reverse=True)[:1]:
         with closing(_ro(p)) as db:
-            rows=db.execute("""SELECT id,title,cwd,rollout_path,updated_at FROM threads WHERE archived=0
+            # `codex exec` runs are scripts (心响's own jobs, other apps' judges), not conversations the owner opened
+            scripted="AND source!='exec'" if "source" in {c[1] for c in db.execute("PRAGMA table_info(threads)")} else ""
+            rows=db.execute(f"""SELECT id,title,cwd,rollout_path,updated_at FROM threads WHERE archived=0 {scripted}
                 ORDER BY updated_at DESC LIMIT 48""").fetchall()
         for sid,title,cwd,rollout,updated in rows:
             if not rollout: continue
