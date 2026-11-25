@@ -2,6 +2,7 @@
 
 - Every open issue (statusCategory != Done) assigned to the owner → one row (executor 我, source Jira, link back).
 - One assigned to a followed person (config.jira_others) → a row with executor 别人, the name in front of the title.
+- One with no assignee in a watched project (config.jira_unassigned_projects) → a row waiting for the owner's yes.
 - The issue moves to a Done status in Jira → the row becomes 完成.
 - Read only: nothing is ever written back to Jira.
 Auth: Jira Cloud site + account email + API token (id.atlassian.com/manage-profile/security/api-tokens).
@@ -10,22 +11,31 @@ import base64
 from hashlib import sha1
 import json
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from .. import activity
 from ..models import MatrixError
 
 OPEN_JQL = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
-FIELDS = ["summary", "duedate", "status", "assignee"]
+FIELDS = ["summary", "duedate", "status", "assignee", "project"]
 
 
 def open_jql(config):
     ids = [o["id"] for o in config.jira_others if o.get("id")]
-    if not ids:
+    projects = config.jira_unassigned_projects
+    if not ids and not projects:
         return OPEN_JQL
-    who = ", ".join(["currentUser()"] + [json.dumps(i) for i in ids])
-    return f"assignee in ({who}) AND statusCategory != Done ORDER BY updated DESC"
+    who = f"assignee in ({', '.join(['currentUser()'] + [json.dumps(i) for i in ids])})"
+    if projects:
+        who = f"({who} OR (project in ({', '.join(json.dumps(p) for p in projects)}) AND assignee is EMPTY))"
+    return f"{who} AND statusCategory != Done ORDER BY updated DESC"
+
+
+def _nobody(issue, config):
+    """No assignee yet, in a project the owner watches for that."""
+    f = issue.get("fields") or {}
+    return not f.get("assignee") and (f.get("project") or {}).get("key") in set(config.jira_unassigned_projects)
 
 
 def _other(issue, config):
@@ -82,7 +92,8 @@ def connected(config):
 def fields_for(issue, config):
     f = issue.get("fields") or {}
     other = _other(issue, config)
-    title = " ".join(f"{other['name'] + ' · ' if other else ''}{issue['key']} {f.get('summary') or ''}".split())[:60]
+    tag = other["name"] + " · " if other else "没人领 · " if _nobody(issue, config) else ""
+    title = " ".join(f"{tag}{issue['key']} {f.get('summary') or ''}".split())[:60]
     out = {"标题": title, "执行方": ["别人" if other else "我"], "状态": ["未开始"], "进度": "0/1 未开始",
            "负责人": [{"id": config.owner_open_id}], "来源": ["Jira"], "类型": ["临时"],
            "来源链接": f"{site_url(config.jira_site)}/browse/{issue['key']}"}
@@ -119,15 +130,17 @@ def sync(config, client, state, now, *, api=call):
             merged.append(key)
             continue
         fields = fields_for(issue, config)
-        waits = getattr(config, "intake_mode", "all") == "accepted" and fields["执行方"] == ["我"]
-        if waits:   # 全自动: an issue someone assigned waits for the owner's yes
+        nobody = _nobody(issue, config)
+        waits = nobody or (getattr(config, "intake_mode", "all") == "accepted" and fields["执行方"] == ["我"])
+        if waits:   # 全自动 (or nobody has it yet): waits for the owner's yes
             fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
         rid = gateway.create(fields, "jira:" + key, "jira")["record_id_list"][0]
         created.append(key)
         created_ids.append(rid)
         if waits:
             from ..thread import judge
-            judge(client.root, rid, "ask", "别人在 Jira 里指派给你的，等你确认接不接")
+            judge(client.root, rid, "ask", "Jira 里还没人领的单子，等你确认接不接" if nobody
+                  else "别人在 Jira 里指派给你的，等你确认接不接")
     # Rows this sync made and still open. Merged rows keep the owner's own judgment.
     tracked = {k: r for k, r in by_key.items()
                if single(r.get("状态")) not in {"完成", "取消"} and single(r.get("执行方")) in {"我", "别人"}}
@@ -204,7 +217,7 @@ def _me(config, state, api):
 def _left(config, state, key, api):
     """Why an issue is no longer open-and-followed: ("完成"|"取消", by, why), or None when it still is (a race)."""
     try:
-        issue = api(config, "GET", f"/rest/api/3/issue/{key}?fields=status,assignee")
+        issue = api(config, "GET", f"/rest/api/3/issue/{key}?fields=status,assignee,project")
     except JiraHTTPError as exc:
         if exc.status in (404, 403):
             return "取消", "Jira", "Jira 里这个单子删了，或你已经看不到它"
@@ -212,6 +225,10 @@ def _left(config, state, key, api):
     f = issue.get("fields") or {}
     if ((f.get("status") or {}).get("statusCategory") or {}).get("key") == "done":
         return "完成", "Jira", "在 Jira 里改成了完成"
+    if not f.get("assignee"):
+        if (f.get("project") or {}).get("key") in set(config.jira_unassigned_projects):
+            return None
+        return "取消", "Jira", "没人领，且不再看这个项目没人领的单子"
     me = _me(config, state, api)
     if not me:
         return None   # without the owner's id a reassignment cannot be told apart: close nothing
@@ -223,7 +240,6 @@ def _left(config, state, key, api):
 
 def _find_user(config, name, api):
     """One Jira user for a name or email the owner typed; several or none → a plain message to type it fully."""
-    from urllib.parse import quote
     name = (name or "").strip()
     if not name:
         raise MatrixError("填一个名字或邮箱。")
@@ -236,6 +252,26 @@ def _find_user(config, name, api):
     if not pick:
         raise MatrixError(f"Jira 里没找到「{name}」，换成全名或邮箱试试。")
     raise MatrixError(f"「{name}」对上了好几个人：{'、'.join(u.get('displayName') or '?' for u in pick[:5])}，写全名或邮箱。")
+
+
+def watch_projects(root, keys, *, api=call):
+    """The projects whose unassigned open issues come in; each key is checked with Jira first."""
+    from ..config import load, save
+    path = root / "config.yaml"
+    config = load(path)
+    if not connected(config):
+        raise MatrixError("先连接 Jira。")
+    wanted = list(dict.fromkeys(k.strip().upper() for k in keys if k and k.strip()))
+    for k in wanted:
+        try:
+            api(config, "GET", f"/rest/api/3/project/{quote(k)}")
+        except JiraHTTPError as exc:
+            if exc.status in (404, 403):
+                raise MatrixError(f"Jira 里没有项目 {k}，或你看不到它。填项目 key（单号前面那段，比如 LGS-123 的 LGS）。") from None
+            raise
+    config.jira_unassigned_projects = wanted
+    save(path, config)
+    return wanted
 
 
 def follow(root, name=None, remove=None, *, api=call):

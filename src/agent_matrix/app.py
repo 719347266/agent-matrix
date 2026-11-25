@@ -439,9 +439,10 @@ def system_info(root):
     if jira:
         try:
             from .config import load
-            jira["others"] = load(Path(root) / "config.yaml").jira_others
+            cfg = load(Path(root) / "config.yaml")
+            jira["others"], jira["unassigned"] = cfg.jira_others, cfg.jira_unassigned_projects
         except Exception:
-            jira["others"] = []
+            jira["others"], jira["unassigned"] = [], []
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
@@ -1042,6 +1043,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if path == "/api/jira/connect":
                         return self._send(200, {"ok": True, **jira.connect(root, body.get("site"), body.get("email"), body.get("token"))})
+                    if path == "/api/jira/unassigned":   # projects whose issues nobody has yet come in too
+                        return self._send(200, {"ok": True, "projects": jira.watch_projects(root, body.get("projects") or [])})
                     if path == "/api/jira/others":   # follow another person's open issues too, or stop
                         return self._send(200, {"ok": True, "others": jira.follow(root, body.get("add"), body.get("remove"))})
                     if path == "/api/jira/disconnect":

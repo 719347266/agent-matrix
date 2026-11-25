@@ -49,11 +49,16 @@ class FakeJira:
         if path == "/rest/api/3/search/jql":
             assert "key in" not in body["jql"]   # one stale key must not break the whole query
             self.jql = body["jql"]
-            watched = {"me"} | set(re.findall(r'"([^"]+)"', body["jql"]))
+            quoted = set(re.findall(r'"([^"]+)"', body["jql"]))
             return {"isLast": True, "issues": [
-                {"key": k, "fields": {"summary": v["summary"], "duedate": v["duedate"],
-                                      "assignee": {"accountId": v["assignee"], "displayName": v["assignee"]}}}
-                for k, v in self.issues.items() if not v["done"] and v["assignee"] in watched]}
+                {"key": k, "fields": {"summary": v["summary"], "duedate": v["duedate"], "project": {"key": k.split("-")[0]},
+                                      "assignee": v["assignee"] and {"accountId": v["assignee"], "displayName": v["assignee"]}}}
+                for k, v in self.issues.items() if not v["done"] and (v["assignee"] in {"me"} | quoted
+                                                                    or not v["assignee"] and k.split("-")[0] in quoted)]}
+        if path.startswith("/rest/api/3/project/"):
+            if path.endswith("/LGS"):
+                return {"key": "LGS"}
+            raise jira.JiraHTTPError("Jira 失败：HTTP 404", 404)
         key = path.split("/issue/")[1].split("?")[0]
         if key in self.broken:
             raise jira.JiraHTTPError("Jira 失败：HTTP 500", 500)
@@ -61,7 +66,8 @@ class FakeJira:
             raise jira.JiraHTTPError("Jira 失败：HTTP 404", 404)
         v = self.issues[key]
         return {"key": key, "fields": {"status": {"statusCategory": {"key": "done" if v["done"] else "indeterminate"}},
-                                       "assignee": {"accountId": v["assignee"], "displayName": v["assignee"]}}}
+                                       "project": {"key": key.split("-")[0]},
+                                       "assignee": v["assignee"] and {"accountId": v["assignee"], "displayName": v["assignee"]}}}
 
 
 class JiraSyncTests(unittest.TestCase):
@@ -158,6 +164,29 @@ class JiraSyncTests(unittest.TestCase):
         self.config.jira_others = []                          # stop following Amy: her issue closes
         self.assertEqual(self.sync()["closed"], 1)
         self.assertEqual(self.made("LL-1")["状态"], ["取消"])
+
+    def test_unassigned_issues_in_watched_projects_wait_for_the_owner(self):
+        self.config.jira_unassigned_projects = ["LGS"]
+        self.jira.issues["LGS-7"] = {"summary": "商家反馈积分没到账", "duedate": None, "done": False, "assignee": None}
+        self.jira.issues["SEC-1"] = {"summary": "别的项目", "duedate": None, "done": False, "assignee": None}
+        self.assertEqual(self.sync()["created"], 3)
+        row = self.made("LGS-7")
+        self.assertEqual((row["标题"], row["状态"]), ("没人领 · LGS-7 商家反馈积分没到账", ["待确认"]))
+        self.assertFalse(any(r.get("去重键") == "jira:SEC-1" for r in self.rows))
+        self.assertEqual(self.sync()["closed"], 0)            # still nobody's: stays
+        self.jira.issues["LGS-7"]["assignee"] = "carl"         # someone else picked it up
+        self.assertEqual(self.sync()["closed"], 1)
+        self.assertEqual(row["状态"], ["取消"])
+
+    def test_watch_projects_checks_each_key(self):
+        from agent_matrix.config import load, save
+        from agent_matrix.models import MatrixError
+        root = Path(self.tmp.name)
+        save(root / "config.yaml", self.config)
+        self.assertEqual(jira.watch_projects(root, [" lgs", "LGS", ""], api=self.jira), ["LGS"])
+        with self.assertRaisesRegex(MatrixError, "没有项目 NOPE"):
+            jira.watch_projects(root, ["LGS", "NOPE"], api=self.jira)
+        self.assertEqual(load(root / "config.yaml").jira_unassigned_projects, ["LGS"])
 
     def test_follow_finds_one_person_by_name_or_email(self):
         from agent_matrix.config import load, save
