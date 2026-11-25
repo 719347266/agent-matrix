@@ -40,6 +40,7 @@ jira_email: ''
 jira_token: ''
 jira_others: []
 jira_unassigned_projects: []
+jira_owner_field: {}
 # 会议标题里太常见、不能用来关联事项的词，例如公司名
 topic_stopwords: []
 

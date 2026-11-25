@@ -49,12 +49,16 @@ class FakeJira:
         if path == "/rest/api/3/search/jql":
             assert "key in" not in body["jql"]   # one stale key must not break the whole query
             self.jql = body["jql"]
-            quoted = set(re.findall(r'"([^"]+)"', body["jql"]))
-            return {"isLast": True, "issues": [
-                {"key": k, "fields": {"summary": v["summary"], "duedate": v["duedate"], "project": {"key": k.split("-")[0]},
-                                      "assignee": v["assignee"] and {"accountId": v["assignee"], "displayName": v["assignee"]}}}
-                for k, v in self.issues.items() if not v["done"] and (v["assignee"] in {"me"} | quoted
-                                                                    or not v["assignee"] and k.split("-")[0] in quoted)]}
+            jql, quoted = body["jql"], set(re.findall(r'"([^"]+)"', body["jql"]))
+            by_owner = "cf[9]" in jql
+            def wanted(k, v):
+                taken = v.get("owner") if by_owner else v["assignee"]
+                return not v["done"] and (v["assignee"] in {"me"} | quoted or by_owner and v.get("owner") in {"me"} | quoted
+                                          or not taken and k.split("-")[0] in quoted)
+            return {"isLast": True, "issues": [{"key": k, "fields": self.fields(k, v) | {"summary": v["summary"], "duedate": v["duedate"]}}
+                                               for k, v in self.issues.items() if wanted(k, v)]}
+        if path == "/rest/api/3/field":
+            return [{"id": "summary", "name": "Summary"}, {"id": "customfield_9", "name": "Issue Owner"}]
         if path.startswith("/rest/api/3/project/"):
             if path.endswith("/LGS"):
                 return {"key": "LGS"}
@@ -65,9 +69,12 @@ class FakeJira:
         if key not in self.issues:
             raise jira.JiraHTTPError("Jira 失败：HTTP 404", 404)
         v = self.issues[key]
-        return {"key": key, "fields": {"status": {"statusCategory": {"key": "done" if v["done"] else "indeterminate"}},
-                                       "project": {"key": key.split("-")[0]},
-                                       "assignee": v["assignee"] and {"accountId": v["assignee"], "displayName": v["assignee"]}}}
+        return {"key": key, "fields": self.fields(key, v)}
+
+    def fields(self, key, v):
+        user = lambda a: a and {"accountId": a, "displayName": a}
+        return {"status": {"statusCategory": {"key": "done" if v["done"] else "indeterminate"}},
+                "project": {"key": key.split("-")[0]}, "assignee": user(v["assignee"]), "customfield_9": user(v.get("owner"))}
 
 
 class JiraSyncTests(unittest.TestCase):
@@ -178,12 +185,33 @@ class JiraSyncTests(unittest.TestCase):
         self.assertEqual(self.sync()["closed"], 1)
         self.assertEqual(row["状态"], ["取消"])
 
+    def test_owner_field_decides_who_took_it(self):
+        """LPB-style: 经办人 is whoever filed it; Issue Owner is who handles it, empty until someone takes it."""
+        self.config.jira_unassigned_projects = ["LPB"]
+        self.config.jira_owner_field = {"id": "customfield_9", "name": "Issue Owner"}
+        self.jira.issues["LPB-268"] = {"summary": "积分邮件", "duedate": None, "done": False, "assignee": "kathy", "owner": None}
+        self.jira.issues["LPB-270"] = {"summary": "我领的", "duedate": None, "done": False, "assignee": "kathy", "owner": "me"}
+        self.assertEqual(self.sync()["created"], 4)
+        self.assertIn('cf[9] is EMPTY AND statusCategory = "To Do"', self.jira.jql)
+        self.assertEqual((self.made("LPB-268")["标题"], self.made("LPB-268")["状态"]), ("没人领 · LPB-268 积分邮件", ["待确认"]))
+        self.assertEqual((self.made("LPB-270")["标题"], self.made("LPB-270")["执行方"]), ("LPB-270 我领的", ["我"]))
+        self.jira.issues["LPB-268"]["owner"] = "me"            # the owner takes it: same row, no longer 没人领
+        out = self.sync()
+        self.assertEqual((out["edited"], out["closed"]), (1, 0))
+        self.assertEqual(self.made("LPB-268")["标题"], "LPB-268 积分邮件")
+        self.jira.issues["LPB-270"]["owner"] = "carl"          # handed to someone not followed: closed
+        self.assertEqual(self.sync()["closed"], 1)
+
     def test_watch_projects_checks_each_key(self):
         from agent_matrix.config import load, save
         from agent_matrix.models import MatrixError
         root = Path(self.tmp.name)
         save(root / "config.yaml", self.config)
-        self.assertEqual(jira.watch_projects(root, [" lgs", "LGS", ""], api=self.jira), ["LGS"])
+        self.assertEqual(jira.watch_projects(root, [" lgs", "LGS", ""], api=self.jira), {"projects": ["LGS"], "field": ""})
+        self.assertEqual(jira.watch_projects(root, ["LGS"], "issue owner", api=self.jira)["field"], "Issue Owner")
+        self.assertEqual(load(root / "config.yaml").jira_owner_field, {"id": "customfield_9", "name": "Issue Owner"})
+        with self.assertRaisesRegex(MatrixError, "没有叫「Owner X」"):
+            jira.watch_projects(root, ["LGS"], "Owner X", api=self.jira)
         with self.assertRaisesRegex(MatrixError, "没有项目 NOPE"):
             jira.watch_projects(root, ["LGS", "NOPE"], api=self.jira)
         self.assertEqual(load(root / "config.yaml").jira_unassigned_projects, ["LGS"])

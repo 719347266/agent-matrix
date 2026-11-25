@@ -2,7 +2,8 @@
 
 - Every open issue (statusCategory != Done) assigned to the owner → one row (executor 我, source Jira, link back).
 - One assigned to a followed person (config.jira_others) → a row with executor 别人, the name in front of the title.
-- One with no assignee in a watched project (config.jira_unassigned_projects) → a row waiting for the owner's yes.
+- One nobody has taken yet in a watched project (config.jira_unassigned_projects), still in a 待办 status → a row
+  waiting for the owner's yes. "Taken" is 经办人, or the field set in config.jira_owner_field (e.g. Issue Owner).
 - The issue moves to a Done status in Jira → the row becomes 完成.
 - Read only: nothing is ever written back to Jira.
 Auth: Jira Cloud site + account email + API token (id.atlassian.com/manage-profile/security/api-tokens).
@@ -21,26 +22,45 @@ OPEN_JQL = "assignee = currentUser() AND statusCategory != Done ORDER BY updated
 FIELDS = ["summary", "duedate", "status", "assignee", "project"]
 
 
+def _owner_field(config):
+    return (config.jira_owner_field or {}).get("id") or ""
+
+
 def open_jql(config):
     ids = [o["id"] for o in config.jira_others if o.get("id")]
-    projects = config.jira_unassigned_projects
-    if not ids and not projects:
+    projects, owner = config.jira_unassigned_projects, _owner_field(config)
+    if not ids and not projects and not owner:
         return OPEN_JQL
-    who = f"assignee in ({', '.join(['currentUser()'] + [json.dumps(i) for i in ids])})"
+    people = ", ".join(["currentUser()"] + [json.dumps(i) for i in ids])
+    cf = f"cf[{owner.rsplit('_', 1)[-1]}]" if owner else ""
+    who = [f"assignee in ({people})"] + ([f"{cf} in ({people})"] if cf else [])
     if projects:
-        who = f"({who} OR (project in ({', '.join(json.dumps(p) for p in projects)}) AND assignee is EMPTY))"
-    return f"{who} AND statusCategory != Done ORDER BY updated DESC"
+        nobody = f"{cf} is EMPTY" if cf else "assignee is EMPTY"
+        who.append(f'(project in ({", ".join(json.dumps(p) for p in projects)}) AND {nobody} AND statusCategory = "To Do")')
+    return f"({' OR '.join(who)}) AND statusCategory != Done ORDER BY updated DESC"
+
+
+def _handler(issue, config):
+    """Who took the issue: the owner field when it is set and filled; else, in a watched project with that field,
+    nobody; else 经办人. A user dict, or None."""
+    f = issue.get("fields") or {}
+    owner = _owner_field(config)
+    if owner and isinstance(f.get(owner), dict):
+        return f[owner]
+    if owner and (f.get("project") or {}).get("key") in set(config.jira_unassigned_projects):
+        return None
+    return f.get("assignee") or None
 
 
 def _nobody(issue, config):
-    """No assignee yet, in a project the owner watches for that."""
+    """Nobody has taken it yet, in a project the owner watches for that."""
     f = issue.get("fields") or {}
-    return not f.get("assignee") and (f.get("project") or {}).get("key") in set(config.jira_unassigned_projects)
+    return _handler(issue, config) is None and (f.get("project") or {}).get("key") in set(config.jira_unassigned_projects)
 
 
 def _other(issue, config):
-    """The followed person this issue is assigned to, or None when it is the owner's."""
-    aid = ((issue.get("fields") or {}).get("assignee") or {}).get("accountId")
+    """The followed person who took this issue, or None when it is the owner's (or nobody's)."""
+    aid = (_handler(issue, config) or {}).get("accountId")
     return next((o for o in config.jira_others if aid and o.get("id") == aid), None)
 
 
@@ -77,7 +97,7 @@ def call(config, method, path, body=None):
 def search(config, jql, *, api=call):
     issues, token = [], None
     while True:
-        body = {"jql": jql, "fields": FIELDS, "maxResults": 100, **({"nextPageToken": token} if token else {})}
+        body = {"jql": jql, "fields": FIELDS + ([_owner_field(config)] if _owner_field(config) else []), "maxResults": 100, **({"nextPageToken": token} if token else {})}
         data = api(config, "POST", "/rest/api/3/search/jql", body)
         issues += data.get("issues") or []
         token = data.get("nextPageToken")
@@ -217,7 +237,7 @@ def _me(config, state, api):
 def _left(config, state, key, api):
     """Why an issue is no longer open-and-followed: ("完成"|"取消", by, why), or None when it still is (a race)."""
     try:
-        issue = api(config, "GET", f"/rest/api/3/issue/{key}?fields=status,assignee,project")
+        issue = api(config, "GET", f"/rest/api/3/issue/{key}?fields=" + ",".join(["status", "assignee", "project"] + ([_owner_field(config)] if _owner_field(config) else [])))
     except JiraHTTPError as exc:
         if exc.status in (404, 403):
             return "取消", "Jira", "Jira 里这个单子删了，或你已经看不到它"
@@ -225,16 +245,16 @@ def _left(config, state, key, api):
     f = issue.get("fields") or {}
     if ((f.get("status") or {}).get("statusCategory") or {}).get("key") == "done":
         return "完成", "Jira", "在 Jira 里改成了完成"
-    if not f.get("assignee"):
+    taken = _handler(issue, config)
+    if not taken:
         if (f.get("project") or {}).get("key") in set(config.jira_unassigned_projects):
             return None
         return "取消", "Jira", "没人领，且不再看这个项目没人领的单子"
     me = _me(config, state, api)
     if not me:
         return None   # without the owner's id a reassignment cannot be told apart: close nothing
-    if ((f.get("assignee") or {}).get("accountId")) not in {me} | {o.get("id") for o in config.jira_others}:
-        who = (f.get("assignee") or {}).get("displayName") or "没人"
-        return "取消", "Jira", f"在 Jira 里改派给了{who}（不在你跟的人里）"
+    if taken.get("accountId") not in {me} | {o.get("id") for o in config.jira_others}:
+        return "取消", "Jira", f"在 Jira 里给了{taken.get('displayName') or '别人'}（不在你跟的人里）"
     return None
 
 
@@ -275,8 +295,9 @@ def sync_now(root, *, api=call):
             state.close()
 
 
-def watch_projects(root, keys, *, api=call):
-    """The projects whose unassigned open issues come in; each key is checked with Jira first."""
+def watch_projects(root, keys, field=None, *, api=call):
+    """The projects whose not-yet-taken issues come in (each key checked with Jira first), and optionally the field
+    that says who took one (by its name; "" or 经办人 = assignee)."""
     from ..config import load, save
     path = root / "config.yaml"
     config = load(path)
@@ -291,8 +312,17 @@ def watch_projects(root, keys, *, api=call):
                 raise MatrixError(f"Jira 里没有项目 {k}，或你看不到它。填项目 key（单号前面那段，比如 LGS-123 的 LGS）。") from None
             raise
     config.jira_unassigned_projects = wanted
+    if field is not None:
+        name = field.strip()
+        if name.lower() in {"", "经办人", "assignee"}:
+            config.jira_owner_field = {}
+        else:
+            hit = [x for x in api(config, "GET", "/rest/api/3/field") or [] if (x.get("name") or "").lower() == name.lower()]
+            if not hit:
+                raise MatrixError(f"Jira 里没有叫「{name}」的字段，照单子页面上显示的名字填。")
+            config.jira_owner_field = {"id": hit[0]["id"], "name": hit[0]["name"]}
     save(path, config)
-    return wanted
+    return {"projects": wanted, "field": config.jira_owner_field.get("name", "")}
 
 
 def follow(root, name=None, remove=None, *, api=call):

@@ -58,6 +58,9 @@ class Config(BaseModel):
     jira_others: list[dict[str, str]] = Field(default_factory=list)
     # Projects whose open issues with no assignee yet come in too, waiting for the owner's yes (e.g. ["LGS", "LPB"]).
     jira_unassigned_projects: list[str] = Field(default_factory=list)
+    # The field that says who took an issue, when it is not 经办人 (e.g. {"id": "customfield_11294", "name": "Issue Owner"}):
+    # a person there makes the issue theirs; empty there (in the projects above) means nobody has taken it yet.
+    jira_owner_field: dict[str, str] = Field(default_factory=dict)
     # WeChat as a chat source, read on this computer through the wechat-cli command (the owner's own local messages).
     wechat_enabled: bool = False
     wechat_binary: str = ""          # path to wechat-cli; empty = find it on PATH
