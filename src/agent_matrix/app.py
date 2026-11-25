@@ -436,6 +436,12 @@ def system_info(root):
         db.close()
     except Exception:
         status, beat, slack, jira, notion_url, wechat_status, feishu_health = {}, None, None, None, None, None, None
+    if jira:
+        try:
+            from .config import load
+            jira["others"] = load(Path(root) / "config.yaml").jira_others
+        except Exception:
+            jira["others"] = []
     alive = False
     try:
         alive = datetime.now(TZ) - datetime.fromisoformat(beat) < timedelta(minutes=3)
@@ -1036,6 +1042,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if path == "/api/jira/connect":
                         return self._send(200, {"ok": True, **jira.connect(root, body.get("site"), body.get("email"), body.get("token"))})
+                    if path == "/api/jira/others":   # follow another person's open issues too, or stop
+                        return self._send(200, {"ok": True, "others": jira.follow(root, body.get("add"), body.get("remove"))})
                     if path == "/api/jira/disconnect":
                         jira.disconnect(root)
                         return self._send(200, {"ok": True})

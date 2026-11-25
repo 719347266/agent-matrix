@@ -1,6 +1,7 @@
-"""Jira issues assigned to the owner → the task table. Pure code, no model.
+"""Jira issues assigned to the owner (and to the people the owner follows) → the task table. Pure code, no model.
 
 - Every open issue (statusCategory != Done) assigned to the owner → one row (executor 我, source Jira, link back).
+- One assigned to a followed person (config.jira_others) → a row with executor 别人, the name in front of the title.
 - The issue moves to a Done status in Jira → the row becomes 完成.
 - Read only: nothing is ever written back to Jira.
 Auth: Jira Cloud site + account email + API token (id.atlassian.com/manage-profile/security/api-tokens).
@@ -16,7 +17,21 @@ from .. import activity
 from ..models import MatrixError
 
 OPEN_JQL = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
-FIELDS = ["summary", "duedate", "status"]
+FIELDS = ["summary", "duedate", "status", "assignee"]
+
+
+def open_jql(config):
+    ids = [o["id"] for o in config.jira_others if o.get("id")]
+    if not ids:
+        return OPEN_JQL
+    who = ", ".join(["currentUser()"] + [json.dumps(i) for i in ids])
+    return f"assignee in ({who}) AND statusCategory != Done ORDER BY updated DESC"
+
+
+def _other(issue, config):
+    """The followed person this issue is assigned to, or None when it is the owner's."""
+    aid = ((issue.get("fields") or {}).get("assignee") or {}).get("accountId")
+    return next((o for o in config.jira_others if aid and o.get("id") == aid), None)
 
 
 class JiraHTTPError(MatrixError):
@@ -66,8 +81,9 @@ def connected(config):
 
 def fields_for(issue, config):
     f = issue.get("fields") or {}
-    title = " ".join(f"{issue['key']} {f.get('summary') or ''}".split())[:60]
-    out = {"标题": title, "执行方": ["我"], "状态": ["未开始"], "进度": "0/1 未开始",
+    other = _other(issue, config)
+    title = " ".join(f"{other['name'] + ' · ' if other else ''}{issue['key']} {f.get('summary') or ''}".split())[:60]
+    out = {"标题": title, "执行方": ["别人" if other else "我"], "状态": ["未开始"], "进度": "0/1 未开始",
            "负责人": [{"id": config.owner_open_id}], "来源": ["Jira"], "类型": ["临时"],
            "来源链接": f"{site_url(config.jira_site)}/browse/{issue['key']}"}
     if f.get("duedate"):
@@ -90,7 +106,7 @@ def sync(config, client, state, now, *, api=call):
     by_key = {str(r.get("去重键") or "")[5:]: r for r in rows if str(r.get("去重键") or "").startswith("jira:")}
     others = [r for r in rows if not str(r.get("去重键") or "").startswith("jira:")]   # two issues are never one thing
     created, merged, completed, created_ids = [], [], [], []
-    open_issues = {i["key"]: i for i in search(config, OPEN_JQL, api=api)}
+    open_issues = {i["key"]: i for i in search(config, open_jql(config), api=api)}
     for issue in open_issues.values():
         key = issue["key"]
         if key in by_key or state.get("jira:merged:" + key):
@@ -103,7 +119,7 @@ def sync(config, client, state, now, *, api=call):
             merged.append(key)
             continue
         fields = fields_for(issue, config)
-        waits = getattr(config, "intake_mode", "all") == "accepted"
+        waits = getattr(config, "intake_mode", "all") == "accepted" and fields["执行方"] == ["我"]
         if waits:   # 全自动: an issue someone assigned waits for the owner's yes
             fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
         rid = gateway.create(fields, "jira:" + key, "jira")["record_id_list"][0]
@@ -114,12 +130,12 @@ def sync(config, client, state, now, *, api=call):
             judge(client.root, rid, "ask", "别人在 Jira 里指派给你的，等你确认接不接")
     # Rows this sync made and still open. Merged rows keep the owner's own judgment.
     tracked = {k: r for k, r in by_key.items()
-               if single(r.get("状态")) not in {"完成", "取消"} and single(r.get("执行方")) == "我"}
+               if single(r.get("状态")) not in {"完成", "取消"} and single(r.get("执行方")) in {"我", "别人"}}
     closed_rows, edited = [], []
     for key, row in tracked.items():
-        if key in open_issues:   # still open and still the owner's: follow a new title / due date
+        if key in open_issues:   # still open and still followed: follow a new title / due date / assignee
             want = fields_for(open_issues[key], config)
-            patch = {k: want[k] for k in ("标题", "截止日") if want.get(k) and want[k] != row.get(k)}
+            patch = {k: want[k] for k in ("标题", "截止日", "执行方") if want.get(k) and want[k] != row.get(k)}
             if patch:
                 gateway.update(row, patch, f"jira-edit:{row['record_id']}:{sha1(json.dumps(patch, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]}", "jira")
                 edited.append(key)
@@ -186,7 +202,7 @@ def _me(config, state, api):
 
 
 def _left(config, state, key, api):
-    """Why an issue is no longer open-and-mine: ("完成"|"取消", by, why), or None when it still is (a race)."""
+    """Why an issue is no longer open-and-followed: ("完成"|"取消", by, why), or None when it still is (a race)."""
     try:
         issue = api(config, "GET", f"/rest/api/3/issue/{key}?fields=status,assignee")
     except JiraHTTPError as exc:
@@ -199,10 +215,53 @@ def _left(config, state, key, api):
     me = _me(config, state, api)
     if not me:
         return None   # without the owner's id a reassignment cannot be told apart: close nothing
-    if ((f.get("assignee") or {}).get("accountId")) != me:
+    if ((f.get("assignee") or {}).get("accountId")) not in {me} | {o.get("id") for o in config.jira_others}:
         who = (f.get("assignee") or {}).get("displayName") or "没人"
-        return "取消", "Jira", f"在 Jira 里改派给了{who}"
+        return "取消", "Jira", f"在 Jira 里改派给了{who}（不在你跟的人里）"
     return None
+
+
+def _find_user(config, name, api):
+    """One Jira user for a name or email the owner typed; several or none → a plain message to type it fully."""
+    from urllib.parse import quote
+    name = (name or "").strip()
+    if not name:
+        raise MatrixError("填一个名字或邮箱。")
+    found = [u for u in api(config, "GET", "/rest/api/3/user/search?maxResults=20&query=" + quote(name)) or []
+             if u.get("accountId") and u.get("accountType", "atlassian") == "atlassian" and u.get("active", True)]
+    exact = [u for u in found if name.lower() in {(u.get("displayName") or "").lower(), (u.get("emailAddress") or "").lower()}]
+    pick = exact if exact else found
+    if len(pick) == 1:
+        return pick[0]
+    if not pick:
+        raise MatrixError(f"Jira 里没找到「{name}」，换成全名或邮箱试试。")
+    raise MatrixError(f"「{name}」对上了好几个人：{'、'.join(u.get('displayName') or '?' for u in pick[:5])}，写全名或邮箱。")
+
+
+def follow(root, name=None, remove=None, *, api=call):
+    """Add a person (looked up in Jira by name or email) or remove one (by accountId); returns the list."""
+    from ..config import load, save
+    path = root / "config.yaml"
+    config = load(path)
+    if not connected(config):
+        raise MatrixError("先连接 Jira。")
+    from ..state import State
+    others = [o for o in config.jira_others if o.get("id") != remove]
+    if name:
+        u = _find_user(config, name, api)
+        state = State(root / "state/state.db")
+        try:
+            me = _me(config, state, api)
+        finally:
+            state.close()
+        if u["accountId"] == me:
+            raise MatrixError("这是你自己，指派给你的单子本来就会收进来。")
+        if all(o["id"] != u["accountId"] for o in others):
+            others.append({"id": u["accountId"], "name": u.get("displayName") or name})
+    config.jira_others = others
+    save(path, config)
+    return others
+
 
 
 def connect(root, site, email, token, *, api=call):

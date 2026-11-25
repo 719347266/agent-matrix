@@ -1745,8 +1745,12 @@ async function slackApprovalsOff(){
 }
 function jiraRow(s){
   const me=s.jira;
-  if(me) return setRow("Jira",`已连接 ${esc(me.site||"")}，${esc(me.user||"")}。每 10 分钟把指派给你、没完成的单子同步进来；在 Jira 里完成、改派或删掉，这里跟着关掉。`,
-    `<button class="btn ghost" onclick="jiraOff()">断开</button>`);
+  if(me){ const others=me.others||[];
+    return setRow("Jira",`已连接 ${esc(me.site||"")}，${esc(me.user||"")}。每 10 分钟把指派给你、没完成的单子同步进来；在 Jira 里完成、改派或删掉，这里跟着关掉。`,
+    `<button class="btn ghost" onclick="jiraOff()">断开</button>`)
+    +setRow("也跟这些人的单子",`指派给这些人、没完成的单子也收进来，执行方记成「别人」，标题前带上名字。${others.length?"":"还没加人。"}`
+      +(others.length?`<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${others.map(o=>`<span class="chip on">${esc(o.name)}<button class="btn ghost" style="padding:0 4px;margin-left:4px" title="不跟了" data-id="${esc(o.id)}" onclick="jiraOther({remove:this.dataset.id})">×</button></span>`).join("")}</div>`:""),
+      `<input id="jiraother" data-draft="jiraother" placeholder="名字或邮箱" style="width:150px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraOther()"><button class="btn" onclick="jiraOther()">添加</button>`); }
   const field=(id,ph,w,extra="")=>`<input id="${id}" data-draft="${id}" placeholder="${ph}" style="width:${w}px;height:28px;padding:3px 8px" ${extra}>`;
   return setRow("连接 Jira","指派给你、没完成的 Jira 单子自动收进来。只读，不会改 Jira。",
     field("jirasite","xxx.atlassian.net",150)+field("jiraemail","登录邮箱",150)
@@ -1759,6 +1763,11 @@ async function jiraOn(){
   if(!site||!email||!token) return toast("地址、邮箱、API Token 都要填");
   try{ const r=await api("/api/jira/connect",{site,email,token},30000); ["jiratok","jirasite","jiraemail"].forEach(k=>drafts.delete(k)); toast(`已连接 ${r.user||""}`); load(); }
   catch(e){ toast(e.name==="AbortError"?"连 Jira 超时了，再试一次":e.message); }
+}
+async function jiraOther(body){
+  if(!body){ const add=($("#jiraother")||{}).value?.trim()||""; if(!add) return toast("填一个名字或邮箱"); body={add}; }
+  try{ await api("/api/jira/others",body,30000); drafts.delete("jiraother"); toast(body.add?"加上了，下一轮同步就收进来":"不跟了，这个人的单子下一轮会关掉"); load(); }
+  catch(e){ toast(e.message); }
 }
 async function jiraOff(){
   if(!confirm("断开 Jira？已经收进来的事项不受影响。")) return;

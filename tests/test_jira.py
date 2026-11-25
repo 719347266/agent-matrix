@@ -1,6 +1,7 @@
 """Jira source: open assigned issues become items once; Done in Jira closes them; reassigned / deleted ones are
 closed with the reason; a new title or due date is followed."""
 from datetime import datetime
+import re
 import tempfile
 import unittest
 import unittest.mock
@@ -41,11 +42,18 @@ class FakeJira:
     def __call__(self, cfg, method, path, body=None):
         if path == "/rest/api/3/myself":
             return {"accountId": self.me, "displayName": "我"} if self.me else {}
+        if path.startswith("/rest/api/3/user/search"):
+            return [{"accountId": "a-amy", "displayName": "Amy Chen", "emailAddress": "amy@x.com"},
+                     {"accountId": "a-amos", "displayName": "Amos Li"},
+                     {"accountId": "me", "displayName": "我自己"}]
         if path == "/rest/api/3/search/jql":
             assert "key in" not in body["jql"]   # one stale key must not break the whole query
+            self.jql = body["jql"]
+            watched = {"me"} | set(re.findall(r'"([^"]+)"', body["jql"]))
             return {"isLast": True, "issues": [
-                {"key": k, "fields": {"summary": v["summary"], "duedate": v["duedate"]}}
-                for k, v in self.issues.items() if not v["done"] and v["assignee"] == "me"]}
+                {"key": k, "fields": {"summary": v["summary"], "duedate": v["duedate"],
+                                      "assignee": {"accountId": v["assignee"], "displayName": v["assignee"]}}}
+                for k, v in self.issues.items() if not v["done"] and v["assignee"] in watched]}
         key = path.split("/issue/")[1].split("?")[0]
         if key in self.broken:
             raise jira.JiraHTTPError("Jira 失败：HTTP 500", 500)
@@ -129,6 +137,42 @@ class JiraSyncTests(unittest.TestCase):
         self.jira.me = None
         self.assertEqual(self.sync()["closed"], 0)
         self.assertEqual(self.made("LL-1")["状态"], ["未开始"])
+
+    def test_followed_people_issues_come_in_as_someone_elses(self):
+        self.config.jira_others = [{"id": "a-amy", "name": "Amy"}]
+        self.jira.issues["LL-5"] = {"summary": "接口联调", "duedate": None, "done": False, "assignee": "a-amy"}
+        self.jira.issues["LL-6"] = {"summary": "不相干", "duedate": None, "done": False, "assignee": "carl"}
+        self.assertEqual(self.sync()["created"], 3)
+        self.assertIn('assignee in (currentUser(), "a-amy")', self.jira.jql)
+        row = self.made("LL-5")
+        self.assertEqual((row["标题"], row["执行方"]), ("Amy · LL-5 接口联调", ["别人"]))
+        self.assertEqual(self.made("LL-1")["执行方"], ["我"])
+        self.assertFalse(any(r.get("去重键") == "jira:LL-6" for r in self.rows))
+        self.jira.issues["LL-5"]["assignee"] = "me"          # Amy hands it to the owner
+        self.assertEqual(self.sync()["edited"], 1)
+        self.assertEqual((row["标题"], row["执行方"]), ("LL-5 接口联调", ["我"]))
+        self.jira.issues["LL-1"]["assignee"] = "a-amy"       # and the other way round: still followed, not closed
+        out = self.sync()
+        self.assertEqual((out["edited"], out["closed"]), (1, 0))
+        self.assertEqual(self.made("LL-1")["执行方"], ["别人"])
+        self.config.jira_others = []                          # stop following Amy: her issue closes
+        self.assertEqual(self.sync()["closed"], 1)
+        self.assertEqual(self.made("LL-1")["状态"], ["取消"])
+
+    def test_follow_finds_one_person_by_name_or_email(self):
+        from agent_matrix.config import load, save
+        from agent_matrix.models import MatrixError
+        root = Path(self.tmp.name)
+        save(root / "config.yaml", self.config)
+        (root / "state").mkdir()
+        self.assertEqual(jira.follow(root, "amy@x.com", api=self.jira), [{"id": "a-amy", "name": "Amy Chen"}])
+        jira.follow(root, "Amy Chen", api=self.jira)          # already there: no duplicate
+        self.assertEqual(len(load(root / "config.yaml").jira_others), 1)
+        with self.assertRaisesRegex(MatrixError, "好几个人"):
+            jira.follow(root, "Am", api=self.jira)
+        with self.assertRaisesRegex(MatrixError, "你自己"):
+            jira.follow(root, "我自己", api=self.jira)
+        self.assertEqual(jira.follow(root, remove="a-amy", api=self.jira), [])
 
     def test_connect_checks_with_jira_then_saves(self):
         from agent_matrix.config import load, save

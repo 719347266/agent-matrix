@@ -54,6 +54,8 @@ class Config(BaseModel):
     jira_site: str = ""      # https://xxx.atlassian.net
     jira_email: str = ""
     jira_token: str = ""     # API token from id.atlassian.com/manage-profile/security/api-tokens
+    # Other people whose open issues are followed too (executor 别人): [{"id": accountId, "name": displayName}].
+    jira_others: list[dict[str, str]] = Field(default_factory=list)
     # WeChat as a chat source, read on this computer through the wechat-cli command (the owner's own local messages).
     wechat_enabled: bool = False
     wechat_binary: str = ""          # path to wechat-cli; empty = find it on PATH
