@@ -1038,11 +1038,13 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     return self._send(400, {"ok": False, "reply": "连不上 Notion，检查网络后再试。"})
             if path.startswith("/api/jira/"):
-                from .models import MatrixError
+                from .models import MatrixBusy, MatrixError
                 from .sources import jira
                 try:
                     if path == "/api/jira/connect":
                         return self._send(200, {"ok": True, **jira.connect(root, body.get("site"), body.get("email"), body.get("token"))})
+                    if path == "/api/jira/sync":   # 立即同步: don't wait for the 10-minute round
+                        return self._send(200, {"ok": True, **jira.sync_now(root)})
                     if path == "/api/jira/unassigned":   # projects whose issues nobody has yet come in too
                         return self._send(200, {"ok": True, "projects": jira.watch_projects(root, body.get("projects") or [])})
                     if path == "/api/jira/others":   # follow another person's open issues too, or stop
@@ -1050,6 +1052,8 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/jira/disconnect":
                         jira.disconnect(root)
                         return self._send(200, {"ok": True})
+                except MatrixBusy:
+                    return self._send(400, {"ok": False, "reply": "心响正在忙别的，过一会儿再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 except OSError:

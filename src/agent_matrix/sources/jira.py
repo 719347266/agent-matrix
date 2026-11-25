@@ -254,6 +254,27 @@ def _find_user(config, name, api):
     raise MatrixError(f"「{name}」对上了好几个人：{'、'.join(u.get('displayName') or '?' for u in pick[:5])}，写全名或邮箱。")
 
 
+def sync_now(root, *, api=call):
+    """The 「立即同步」 button: one sync right away, under the same project lock as the 10-minute timer
+    (waits up to 20 s behind a running round)."""
+    from datetime import datetime
+    from ..config import load
+    from ..feishu import Feishu
+    from ..state import State, exclusive_lock
+    from ..timeutil import TZ
+    config = load(root / "config.yaml")
+    if not connected(config):
+        raise MatrixError("先连接 Jira。")
+    with exclusive_lock(root / "state", wait=20):
+        state = State(root / "state/state.db")
+        try:
+            client = Feishu(config, root)
+            client.verify_owner(client.auth())   # same check as the timer before it touches the table
+            return sync(config, client, state, datetime.now(TZ), api=api)
+        finally:
+            state.close()
+
+
 def watch_projects(root, keys, *, api=call):
     """The projects whose unassigned open issues come in; each key is checked with Jira first."""
     from ..config import load, save

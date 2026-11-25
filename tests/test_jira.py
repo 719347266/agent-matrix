@@ -188,6 +188,15 @@ class JiraSyncTests(unittest.TestCase):
             jira.watch_projects(root, ["LGS", "NOPE"], api=self.jira)
         self.assertEqual(load(root / "config.yaml").jira_unassigned_projects, ["LGS"])
 
+    def test_sync_now_runs_one_round_under_the_lock(self):
+        from agent_matrix.config import save
+        root = Path(self.tmp.name)
+        save(root / "config.yaml", self.config)
+        fake = SimpleNamespace(root=root, config=self.config, auth=lambda: None, verify_owner=lambda a: None)
+        with unittest.mock.patch("agent_matrix.feishu.Feishu", lambda c, r: fake):
+            self.assertEqual(jira.sync_now(root, api=self.jira)["created"], 2)
+            self.assertEqual(jira.sync_now(root, api=self.jira)["created"], 0)
+
     def test_follow_finds_one_person_by_name_or_email(self):
         from agent_matrix.config import load, save
         from agent_matrix.models import MatrixError

@@ -1747,7 +1747,7 @@ function jiraRow(s){
   const me=s.jira;
   if(me){ const others=me.others||[];
     return setRow("Jira",`已连接 ${esc(me.site||"")}，${esc(me.user||"")}。每 10 分钟把指派给你、没完成的单子同步进来；在 Jira 里完成、改派或删掉，这里跟着关掉。`,
-    `<button class="btn ghost" onclick="jiraOff()">断开</button>`)
+    `<button class="btn" onclick="jiraSync(this)">立即同步</button><button class="btn ghost" onclick="jiraOff()">断开</button>`)
     +setRow("也跟这些人的单子",`指派给这些人、没完成的单子也收进来，执行方记成「别人」，标题前带上名字。${others.length?"":"还没加人。"}`
       +(others.length?`<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${others.map(o=>`<span class="chip on">${esc(o.name)}<button class="btn ghost" style="padding:0 4px;margin-left:4px" title="不跟了" data-id="${esc(o.id)}" onclick="jiraOther({remove:this.dataset.id})">×</button></span>`).join("")}</div>`:""),
       `<input id="jiraother" data-draft="jiraother" placeholder="名字或邮箱" style="width:150px;height:28px;padding:3px 8px" onkeydown="if(event.key==='Enter')jiraOther()"><button class="btn" onclick="jiraOther()">添加</button>`)
@@ -1765,6 +1765,14 @@ async function jiraOn(){
   if(!site||!email||!token) return toast("地址、邮箱、API Token 都要填");
   try{ const r=await api("/api/jira/connect",{site,email,token},30000); ["jiratok","jirasite","jiraemail"].forEach(k=>drafts.delete(k)); toast(`已连接 ${r.user||""}`); load(); }
   catch(e){ toast(e.name==="AbortError"?"连 Jira 超时了，再试一次":e.message); }
+}
+async function jiraSync(btn){
+  btn.disabled=true; btn.textContent="同步中…";
+  try{ const r=await api("/api/jira/sync",{},60000);
+    const said=[r.created&&`新增 ${r.created} 件`,r.merged&&`${r.merged} 件并到已有的事`,r.completed&&`完成 ${r.completed} 件`,r.closed&&`关掉 ${r.closed} 件`,r.edited&&`更新 ${r.edited} 件`].filter(Boolean);
+    toast(said.length?`同步好了：${said.join("，")}`:"同步好了，没有变化"); load(); }
+  catch(e){ toast(e.message); }
+  finally{ btn.disabled=false; btn.textContent="立即同步"; }
 }
 async function jiraProjects(){
   const projects=(($("#jiraproj")||{}).value||"").split(/[,，\s]+/).filter(Boolean);
