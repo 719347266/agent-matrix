@@ -42,11 +42,12 @@ class LocalSessions(unittest.TestCase):
         folder.mkdir(parents=True)
         stamp = datetime.now(timezone.utc).isoformat()
         with closing(sqlite3.connect(base/"state_5.sqlite")) as db, db:
-            db.execute("CREATE TABLE threads(id,title,cwd,rollout_path,updated_at,archived)")
-            for sid, events in [("working",["task_started"]),("ended",["task_started","task_complete"]),("aborted",["task_started","turn_aborted"])]:
+            db.execute("CREATE TABLE threads(id,title,cwd,rollout_path,updated_at,archived,source)")
+            for sid, events, source in [("working",["task_started"],"vscode"),("ended",["task_started","task_complete"],"cli"),
+                                        ("aborted",["task_started","turn_aborted"],"vscode"),("script",["task_started"],"exec")]:
                 path = folder/(sid+".jsonl")
                 path.write_text("\n".join(json.dumps({"timestamp":stamp,"type":"event_msg","payload":{"type":ev}}) for ev in events))
-                db.execute("INSERT INTO threads VALUES(?,?,?,?,?,0)",(sid,sid,str(folder),str(path),self.now))
+                db.execute("INSERT INTO threads VALUES(?,?,?,?,?,0,?)",(sid,sid,str(folder),str(path),self.now,source))
         (base/"process_manager").mkdir()
         (base/"process_manager/chat_processes.json").write_text(json.dumps([dict(osPid=os.getpid(),updatedAtMs=self.now*1000,conversationId="ended")]))
         found = ls.discover(self.home)
