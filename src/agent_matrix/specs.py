@@ -21,7 +21,16 @@ BIG = ("需求文档", "方案", "调研报告")          # worth an outline the
 ROLE = {"需求文档": "产品经理", "方案": "方案负责人", "调研报告": "研究员", "周报": "项目负责人", "会议材料": "会议组织者",
         "回复草稿": "沟通顾问", "数据汇总": "数据分析师"}
 LABELS = {"none": "还没有", "draft": "草稿", "trial": "试用中", "stable": "稳定", "review": "待复核"}
-MODES = {"auto": "自动", "fast": "快速", "careful": "仔细"}
+MODES = {"fast": "快速", "auto": "平衡", "careful": "仔细"}
+# 做事方式 is three choices put together; the three named ways are ready-made mixes, any other mix is 自定义
+STYLE = {
+    "start": {"auto": "直接开工", "ask": "先问我"},              # an item the AI judged it can do: start, or wait for 「交给 AI」
+    "outline": {"never": "不给提纲", "new": "新类型先给提纲", "always": "每件先给提纲"},   # 调研 + 提纲, then wait for the owner
+    "review": {"list": "对照清单自查", "new": "新类型多审一轮", "always": "每件多审一轮"},   # a seasoned reader's round of its own
+}
+PRESETS = {"fast": {"start": "auto", "outline": "never", "review": "list"},
+           "auto": {"start": "auto", "outline": "new", "review": "new"},
+           "careful": {"start": "ask", "outline": "always", "review": "always"}}
 RECENT, STABLE_PASSES, REVIEW_BADS, REVIEW_DAYS, REVIEW_USES = 5, 4, 2, 30, 10
 GUESS = [("需求文档", r"需求|PRD|prd|功能规则|产品规则"), ("调研报告", r"调研|研究|竞品|分析报告|摸底"),
          ("周报", r"周报|周总结|周汇报|月报"), ("会议材料", r"会议材料|议程|会前|评审材料|汇报材料"),
@@ -135,17 +144,51 @@ def overview(root):
 
 # ---- 做事方式: 自动 (by how settled the spec is) / 快速 / 仔细; one for everything, and one item may differ --------
 
+def style(root):
+    """The owner's way of working: {start, outline, review, preset} (preset: fast / auto / careful, or custom)."""
+    from .thread import setting
+    value = setting(Path(root), "work_style", None)
+    if not isinstance(value, dict):   # before the three choices: the named way chosen then
+        old = setting(Path(root), "work_mode", "auto")
+        value = PRESETS.get(old, PRESETS["auto"])
+    out = {k: value.get(k) if value.get(k) in opts else PRESETS["auto"][k] for k, opts in STYLE.items()}
+    return {**out, "preset": next((name for name, p in PRESETS.items() if p == out), "custom")}
+
+
+def set_style(root, **choices):
+    """Change some of the three choices; the rest stay."""
+    from .thread import set_setting
+    now = {k: v for k, v in style(root).items() if k in STYLE}
+    for k, v in choices.items():
+        if k not in STYLE or v not in STYLE[k]:
+            raise ValueError(f"「{k}」没有「{v}」这个选项。")
+        now[k] = v
+    set_setting(Path(root), "work_style", now)
+    return style(root)
+
+
+def describe(st):
+    """「直接开工 · 新类型先给提纲 · 新类型多审一轮」"""
+    return " · ".join(STYLE[k][st[k]] for k in STYLE)
+
+
 def mode(root, rid=None):
+    """The named way for one item (its own if the owner set one), else the owner's: fast / auto / careful / custom."""
     from .thread import setting
     own = (setting(Path(root), "work_mode:items", {}) or {}).get(rid) if rid else None
     if own in MODES:
         return own
-    value = setting(Path(root), "work_mode", "auto")
-    return value if value in MODES else "auto"
+    return style(root)["preset"]
+
+
+def item_style(root, rid=None):
+    from .thread import setting
+    own = (setting(Path(root), "work_mode:items", {}) or {}).get(rid) if rid else None
+    return dict(PRESETS[own]) if own in MODES else {k: v for k, v in style(root).items() if k in STYLE}
 
 
 def set_mode(root, value, rid=None):
-    """value: auto / fast / careful; for one item, "" goes back to the default."""
+    """value: fast / auto / careful (one of the ready-made mixes); for one item, "" goes back to the owner's way."""
     from .thread import set_setting, setting
     if rid:
         items = dict(setting(Path(root), "work_mode:items", {}) or {})
@@ -154,30 +197,27 @@ def set_mode(root, value, rid=None):
         elif value == "":
             items.pop(rid, None)
         else:
-            raise ValueError("做事方式只有：自动、快速、仔细。")
+            raise ValueError("做事方式只有：快速、平衡、仔细。")
         set_setting(Path(root), "work_mode:items", items)
         return
     if value not in MODES:
-        raise ValueError("做事方式只有：自动、快速、仔细。")
+        raise ValueError("做事方式只有：快速、平衡、仔细。")
     set_setting(Path(root), "work_mode", value)
+    set_setting(Path(root), "work_style", dict(PRESETS[value]))
 
 
 def plan(root, rid, kind, outline_done=False):
     """What this round does. outline: stop at 调研 + 提纲 and wait for the owner; review: a round of its own after the draft
     (else a check against the list in the same round); expert: bring the built-in expert view; form / revise: write the
     spec (first time) or a proposed revision (under review)."""
-    how = mode(root, rid)
+    how, st = mode(root, rid), item_style(root, rid)
     s = state(root, kind) if kind else {"state": "none", "label": LABELS["none"]}
     unsettled = s["state"] in ("none", "draft", "review")
-    if how == "careful":
-        outline, review = True, True
-    elif how == "fast":
-        outline, review = False, False
-    else:
-        outline, review = bool(kind in BIG and unsettled), bool(kind and s["state"] != "stable")
-    return {"mode": how, "mode_label": MODES[how], "kind": kind, "state": s["state"], "state_label": s["label"],
-            "outline": outline and not outline_done, "review": review, "check": how != "fast",
-            "expert": bool(kind) and (s["state"] in ("none", "review") or how == "careful"),
+    outline = st["outline"] == "always" or (st["outline"] == "new" and kind in BIG and unsettled)
+    review = st["review"] == "always" or (st["review"] == "new" and bool(kind) and s["state"] != "stable")
+    return {"mode": how, "mode_label": MODES.get(how, "自定义"), "kind": kind, "state": s["state"], "state_label": s["label"],
+            "outline": outline and not outline_done, "review": review, "check": True,
+            "expert": bool(kind) and (s["state"] in ("none", "review") or st["review"] == "always"),
             "form": bool(kind) and s["state"] == "none", "revise": bool(kind) and s["state"] == "review"}
 
 

@@ -1523,6 +1523,8 @@ def _submit_triage(root, job):
         return {"ok": False, "status": "fix", "problem": "没有找到有效的 triage.json（格式见说明里的例子）。"}
     by_n = {i["n"]: i for i in job["ref"]["items"]}
     applied = []
+    from . import specs
+    ask_first = specs.style(root)["start"] == "ask"   # 做事方式 → 开工：先问我
     for v in verdicts if isinstance(verdicts, list) else []:
         item = by_n.get(v.get("n") if isinstance(v, dict) else None)
         decision = (v or {}).get("decision")
@@ -1537,7 +1539,8 @@ def _submit_triage(root, job):
         url = str(v.get("url") or "") if str(v.get("url") or "").startswith("http") else ""
         n = item["n"]
         # from a meeting: talk, not a handoff. The AI only suggests; the item stays 待确认 until the owner says 「AI做」.
-        held = decision in {"ai", "prep"} and item.get("source") == "会议"
+        # the owner chose 「先问我」: the same, for everything
+        held = decision in {"ai", "prep"} and (item.get("source") == "会议" or ask_first)
         commands = [] if held else {"ai": [f"{n} AI做"], "prep": [f"{n} AI备"], "skip": [f"{n} 不做"],
                                     "done": [f"{n} 完成", f"{n} + {url}"] if url else [f"{n} 无交付"]}.get(decision, [])
         ok = all([_reply_command(root, c) for c in commands])
@@ -1551,8 +1554,9 @@ def _submit_triage(root, job):
             except Exception as exc:
                 activity.swallowed(root, "drive._submit_triage", exc)
         extra = "、".join(x for x in (f"串上了 {links} 件前后的事" if links else "", f"记下 {expected} 件这个版本预计会遇到的事" if expected else "") if x)
-        label = ("建议 AI 做，会议里提的事等你点「AI做」才开工" if decision == "ai" else
-                 "建议你来做、AI 先备材料，等你点「AI备」才开工") if held else TRIAGE_LABEL[decision]
+        why = "会议里提的事" if item.get("source") == "会议" else "你选了开工前先问你"
+        label = (f"建议 AI 做，{why}，等你点「交给 AI」才开工" if decision == "ai" else
+                 f"建议你来做、AI 先备材料，{why}，等你点「AI备」才开工") if held else TRIAGE_LABEL[decision]
         conversation.add(root, item["record_id"], "ai", "say", f"判断：{label}。{reason}" +
                          (f"\n依据：{evidence}" if evidence else "") + (f"\n{extra}。" if extra else ""), driver=job.get("driver"))
         applied.append({"n": item["n"], "decision": decision, **({"held": True} if held else {}), **({"links": links} if links else {}), **({"expected": expected} if expected else {})})

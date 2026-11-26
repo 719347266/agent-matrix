@@ -62,11 +62,31 @@ class Maturity(unittest.TestCase):
         self.assertFalse(specs.plan(self.root, "r1", "回复草稿")["outline"], "a small thing never waits for an outline in 自动")
         self.assertFalse(specs.plan(self.root, "r1", "需求文档", outline_done=True)["outline"], "the outline is asked for once")
         specs.set_mode(self.root, "fast")
-        self.assertEqual([specs.plan(self.root, "r1", "需求文档")[k] for k in ("outline", "review", "check")], [False, False, False])
+        self.assertEqual([specs.plan(self.root, "r1", "需求文档")[k] for k in ("outline", "review", "check")], [False, False, True], "快速 still checks against the list")
         specs.set_mode(self.root, "careful", rid="r2")
         self.assertTrue(specs.plan(self.root, "r2", "回复草稿")["outline"], "one item can be more careful than the rest")
         specs.set_mode(self.root, "", rid="r2")
         self.assertEqual(specs.mode(self.root, "r2"), "fast")
+
+    def test_the_way_of_working_is_three_choices_and_the_named_ways_are_mixes_of_them(self):
+        self.assertEqual(specs.style(self.root)["preset"], "auto", "平衡 to begin with")
+        self.assertEqual(specs.describe(specs.style(self.root)), "直接开工 · 新类型先给提纲 · 新类型多审一轮")
+        st = specs.set_style(self.root, outline="always")
+        self.assertEqual((st["preset"], st["start"], st["outline"], st["review"]), ("custom", "auto", "always", "new"))
+        self.assertTrue(specs.plan(self.root, "r1", "回复草稿")["outline"], "每件先给提纲: even a small thing")
+        self.assertTrue(specs.plan(self.root, "r1", "回复草稿")["review"], "新类型多审一轮: a kind with no settled way of writing yet gets its round")
+        with self.assertRaises(ValueError):
+            specs.set_style(self.root, start="maybe")
+        specs.set_mode(self.root, "careful")
+        self.assertEqual(specs.style(self.root), {"start": "ask", "outline": "always", "review": "always", "preset": "careful"})
+        specs.set_mode(self.root, "fast", rid="r9")
+        self.assertFalse(specs.plan(self.root, "r9", "需求文档")["outline"], "one item can use another named way")
+        self.assertEqual(specs.mode(self.root, "r9"), "fast")
+
+    def test_an_owner_from_before_keeps_the_named_way_chosen_then(self):
+        from agent_matrix.thread import set_setting
+        set_setting(self.root, "work_mode", "careful")
+        self.assertEqual(specs.style(self.root)["preset"], "careful")
 
     def test_a_revision_waits_for_the_owner(self):
         specs.form(self.root, "方案", SPEC)

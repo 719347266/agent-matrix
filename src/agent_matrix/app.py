@@ -239,6 +239,7 @@ def build_state(root):
     settings["dev_mode"] = approvals.mode(root)
     settings["people"] = part("人的分组", lambda: _people_tags(root), {})   # who the owner marked as 客户 / 同事
     settings["work_mode"] = part("做事方式", lambda: _specs_module().mode(root), "auto")
+    settings["work_style"] = part("做事方式的三个选择", lambda: {**_specs_module().style(root), "text": _specs_module().describe(_specs_module().style(root))}, {})
     settings["specs"] = part("交付规格", lambda: [{**s, "text": _specs_module().text(root, s["kind"]), "proposal": _specs_module().proposed(root, s["kind"])}
                                               for s in _specs_module().overview(root)], [])
     waiting = [{**a, "n": n_of.get(a.get("record_id"))} for a in approvals.pending(root)]
@@ -916,6 +917,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/workstyle":  # 做事方式的三个选择 (开工 / 提纲 / 自审), some or all of them
+                from . import specs
+                try:
+                    st = specs.set_style(root, **{k: str(v) for k, v in body.items() if k in specs.STYLE})
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True, "style": st, "text": specs.describe(st)})
             if path == "/api/workmode":  # 做事方式: auto / fast / careful, for everything or for one item ("" = back to the default)
                 from . import specs
                 try:

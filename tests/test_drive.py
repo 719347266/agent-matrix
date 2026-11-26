@@ -127,6 +127,23 @@ class DriveTests(unittest.TestCase):
         said = thread.history(self.root)["r49"]["messages"][0]
         self.assertEqual((said["driver"], said["text"][:6]), ("Claude Code", "判断：AI "))
 
+    def test_ask_me_first_holds_what_the_ai_judged_it_can_do(self):
+        from agent_matrix import drive, specs, thread
+        specs.set_style(self.root, start="ask")
+        items = [{"n": 49, "record_id": "r49", "who": "我", "title": "发 JD"}, {"n": 51, "record_id": "r51", "who": "我", "title": "旧需求"}]
+        job, folder = self.open_job("triage", ref={"items": items})
+        (folder / "triage.json").write_text(json.dumps([{"n": 49, "decision": "ai", "reason": "起草 JD"},
+                                                        {"n": 51, "decision": "skip", "reason": "已经不做了"}], ensure_ascii=False))
+        commands = []
+
+        class Done:
+            stdout = "✓"
+        with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[argv.index("--text") + 1]) or Done()):
+            out = drive.submit(self.root, self.config, job["id"])
+        self.assertEqual(commands, ["51 不做"], "nothing starts by itself; closing is not starting")
+        self.assertTrue(out["applied"][0]["held"])
+        self.assertIn("你选了开工前先问你", thread.history(self.root)["r49"]["messages"][0]["text"])
+
     def test_the_command_any_ai_calls(self):
         from agent_matrix import drive
         with patch("agent_matrix.drive.Path.home", lambda: self.root):

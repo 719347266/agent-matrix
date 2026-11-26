@@ -51,8 +51,8 @@ function reset(item) {
   // the menu says what is chosen now, and a page only shows what follows from the choices made
   evaluate('D.settings={engine:"cindy",engine_sort:"codex",intake_mode:"manual"}; D.system={record:{feishu_ready:false,mode:"device"},store:{local:true}}');
   const menu = evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0];
-  for (const label of ["驱动心响的 AI","接入","数据与通知","问题反馈","版本与更新","更多","都没接","Cindy","只存本机"]) assert.ok(menu.includes(label), label);
-  assert.equal((menu.match(/class="cell /g)||[]).length, 6, "six places in the settings, no more");
+  for (const label of ["驱动心响的 AI","接入","AI 做事","数据与通知","问题反馈","版本与更新","更多","都没接","Cindy","只存本机","平衡"]) assert.ok(menu.includes(label), label);
+  assert.equal((menu.match(/class="cell /g)||[]).length, 7, "seven places in the settings, no more");
   // 聊天判断: every line read says what became of it, and why it was not taken
   evaluate('S.chatlog=[{who:"Carl",chat:"Slack · Carl",p2p:true,at:"2026-11-23 18:40",text:"好的",verdict:"drop",why:"只是客套话或表情"},{who:"Carl",chat:"Slack · Carl",p2p:true,at:"2026-11-23 14:24",text:"部署后通知我",verdict:"item",why:31}]');
   const log = evaluate('S.setTab="chatlog"; S.clQ="carl"; sysPage()');
@@ -505,7 +505,19 @@ function reset(item) {
              {n:72,rid:"rec72",title:"写周报",status:"待验收",who:"AI",work:{kind:"周报",spec:"草稿",mode:"careful",own_mode:"careful",outline:"",waiting_outline:false,review:["✓ 有结果","改了：补了风险"],fixed:1}}];
     D.deliverables={72:[{v:1,at:"11-26 18:00",summary:"本周周报",url:"https://x.feishu.cn/docx/a",confirm:"下周计划要不要加评审"}]}; D.inbox=[]; S.view="all"; S.all="全部"; S.dim="type"`);
   const bar = evaluate("allPage()");
-  for (const label of ["做事方式","自动","快速","仔细","setGlobalMode"]) assert.ok(bar.includes(label), label);
+  for (const label of ["AI 做事","快速","平衡","仔细","setGlobalMode","直接开工 · 新类型先给提纲 · 新类型多审一轮"]) assert.ok(bar.includes(label), label);
+  assert.doesNotMatch(bar, /<select aria-label="做事方式"/, "no dropdown: the choices are on the page, with what the current one means");
+  assert.match(bar, /class="on" role="radio" aria-checked="true"[^>]*>平衡</);
+  // a mix of the three choices that is none of the ready-made ones is 自定义, and says what it is
+  evaluate('D.settings.work_style={start:"ask",outline:"new",review:"list"}');
+  const mixed = evaluate("allPage()");
+  assert.match(mixed, /aria-checked="true"[^>]*>自定义</); assert.match(mixed, /先问我 · 新类型先给提纲 · 对照清单自查/);
+  const work = evaluate('S.setTab="work"; sysPage()');
+  for (const label of ["搭好的三种","逐项选","开工","写之前","写完后","直接开工","先问我","不给提纲","每件先给提纲","对照清单自查","每件多审一轮","自定义","setStyle('start','auto')","会议里提的事"]) assert.ok(work.includes(label), label);
+  assert.match(work, /class="ws-opt on" aria-pressed="true" onclick="setStyle\('start','ask'\)"/);
+  await evaluate("setStyle('outline','never')"); assert.equal(evaluate("wsNow().preset"), "custom");
+  await evaluate("setGlobalMode('careful')"); assert.deepEqual(plain("[wsNow().preset,wsNow().start,wsNow().outline,wsNow().review]"), ["careful","ask","always","always"]);
+  await evaluate("setGlobalMode('auto')");
   evaluate("S.more=71"); const outline = evaluate("itemView(byN(71))");
   for (const label of ["提纲：等你看过再写","按提纲写","修改提纲…","要解决什么问题","类型：需求文档 · 规格：试用中"]) assert.ok(outline.includes(label), label);
   assert.doesNotMatch(outline, /按现有资料继续/, "an outline waits for 按提纲写, not a generic continue");
@@ -514,11 +526,12 @@ function reset(item) {
   for (const label of ["周报","规格：草稿","做事方式：仔细","v1","本周周报","待你确认","下周计划要不要加评审","自审 2 项，改了 1 处","打开文档 ↗","验收通过","让 AI 修改"]) assert.ok(done.includes(label), label);
   assert.ok(done.indexOf("打开文档 ↗") < done.indexOf(">验收通过<") && done.indexOf(">验收通过<") < done.indexOf('class="tabs"'), "the delivery and what to do with it are one card, above the conversation");
   evaluate("S.more=null"); const plainView = evaluate("itemView(byN(72))");
-  assert.doesNotMatch(plainView, /做事方式<\/span>|跟随默认|哪个 AI/, "the rarely used settings stay in 更多");
+  assert.doesNotMatch(plainView, /做事方式<\/span>|跟着你的|哪个 AI/, "the rarely used settings stay in 更多");
   assert.match(plainView, />更多</);
   assert.equal((done.match(/>验收通过</g)||[]).length, 1, "deciding on it is in one place");
-  assert.match(done, /<option value="careful" selected>仔细</, "this item's own mode is shown as chosen");
-  assert.match(done, /跟随默认（自动）/); evaluate("S.more=71"); assert.match(evaluate("itemView(byN(71))"), /跟随默认/); evaluate("S.more=null");
+  assert.match(done, /aria-checked="true" onclick="event.stopPropagation\(\);setWorkMode\('careful'/, "this item's own mode is shown as chosen");
+  assert.match(done, /先问我 · 每件先给提纲 · 每件多审一轮/, "and what it means");
+  evaluate("S.more=71"); assert.match(evaluate("itemView(byN(71))"), /跟着你的/); evaluate("S.more=null");
   assert.equal((outline.match(/按提纲写/g)||[]).length, 1, "one place for each button");
   assert.match(evaluate('row({n:99,title:"交付",status:"待验收",who:"AI",url:"https://x.test/d"})'), /class="doc-link" href="https:\/\/x.test\/d"[^>]*>文档 ↗</, "the deliverable opens straight from the row");
   assert.doesNotMatch(evaluate('row({n:98,title:"无",status:"未开始",who:"我"})'), /doc-link/);

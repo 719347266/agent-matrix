@@ -573,6 +573,21 @@ details.later>summary{cursor:pointer;list-style:none}details.later>summary::-web
 .dv-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 12px;border-radius:10px;border:1px solid var(--line);border-left:3px solid var(--green);background:var(--panel);line-height:1.5}
 .composer .cmp-state{font-size:12px;color:var(--blue);margin:0 0 6px}
 .composer .bot .btns .btn[disabled]{opacity:.5}
+
+/* 做事方式 */
+.ws{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}.ws .ws-k{font-size:12.5px;color:var(--ink3)}
+.ws-seg{margin:0}.ws-seg button{padding:4px 12px}
+.ws-sum{border:0;background:none;padding:0;font-size:12px;color:var(--ink3);display:inline-flex;align-items:center;gap:4px;cursor:pointer}.ws-sum:hover{color:var(--brand)}.ws-sum .chev{font-size:14px}
+.ws-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.ws-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px 16px;border-radius:14px;border:1.5px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
+.ws-card:hover{border-color:var(--brand)}.ws-card.on{border-color:var(--brand);background:var(--sel)}.ws-card.custom{cursor:default}
+.ws-card b{font-size:15px}.ws-card .lead{font-size:12px;color:var(--ink3);margin-bottom:6px}
+.ws-card .ln{font-size:12.5px;color:var(--ink2)}.ws-card .ln em{font-style:normal;color:var(--ink3);margin-right:8px}
+.ws-dim{padding:12px 0;border-top:1px solid var(--line2)}.ws-dim:first-of-type{border-top:0}
+.ws-dh{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}.ws-dh b{font-size:14px}.ws-dh span{font-size:12.5px;color:var(--ink3)}
+.ws-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.ws-opt{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
+.ws-opt:hover{border-color:var(--brand)}.ws-opt.on{border-color:var(--brand);background:var(--sel)}.ws-opt b{font-size:13.5px}.ws-opt span{font-size:12px;color:var(--ink3);line-height:1.5}
 </style>
 </head>
 <body>
@@ -757,7 +772,7 @@ const TERM={
   act:{me:"我负责",ai:"交给 AI",done:"标为完成",cancel:"取消",restore:"撤销",approve:"验收通过",focus:"让 AI 修改",answer:"答复…",
        cont:"按现有资料继续",first:"优先处理",date:"改截止日…",notdone:"未完成",evidence:"查看依据",
        allMe:"全部我负责",allAi:"全部交给 AI",allCancel:"全部取消",outlineOk:"按提纲写",outlineEdit:"修改提纲…"},
-  mode:{auto:"自动",fast:"快速",careful:"仔细"},
+  mode:{fast:"快速",auto:"平衡",careful:"仔细"},
   health:{ok:"运行正常",fixing:"自动修复中",you:n=>`需你处理 ${n} 项`},
 };
 const whoText = i => TERM.owner[i.who]||"";
@@ -822,28 +837,54 @@ function detailButtons(i){
 }
 const waitsOutline = i => !!(i.work&&i.work.waiting_outline);
 /* ---------- 做事方式：自动（按这一类交付的成熟度）/ 快速 / 仔细。全局一个，单件可以不同 ---------- */
-const MODE_TIPS={auto:"按这一类交付的成熟度：新的、不稳的先调研给提纲，写完单独审一轮；稳定的直接写",fast:"直接写完交，只对照清单自查",careful:"每件都先调研给提纲，写完单独审一轮"};
-function modeSeg(cur,fn,withDefault){
-  const opts=[...(withDefault?[["","默认"]]:[]),...Object.entries(TERM.mode)];
-  return `<div class="seg mode-seg" role="radiogroup" aria-label="做事方式">${opts.map(([k,l])=>`<button class="${k===cur?"on":""}" role="radio" aria-checked="${k===cur}" title="${esc(k?MODE_TIPS[k]:"跟随事项页上选的做事方式")}" onclick="event.stopPropagation();${fn}('${k}')">${l}${!k&&withDefault?`（${TERM.mode[(D.settings||{}).work_mode||"auto"]}）`:""}</button>`).join("")}</div>`;
+/* ---------- 做事方式：三个选择搭在一起（开工 / 写之前 / 写完后）；快速、平衡、仔细是搭好的三种，别的搭法叫「自定义」。
+   设置 → AI 做事 里逐项选；事项页上一排按钮快速换，旁边写着现在是什么样 ---------- */
+const WS=[
+  ["start","开工","AI 判断能做的事，要不要等你点头",[["auto","直接开工","AI 判断能做的，马上开始做"],["ask","先问我","AI 判断能做的，也等你点「交给 AI」才开始"]]],
+  ["outline","写之前","先调研、给提纲，你看过再写正文",[["never","不给提纲","直接写正文"],["new","新类型先给提纲","需求文档、方案、调研报告这类，还没形成稳定写法时先给提纲"],["always","每件先给提纲","每件都先给提纲"]]],
+  ["review","写完后","交给你之前怎么检查",[["list","对照清单自查","按这一类交付的检查清单自己查一遍"],["new","新类型多审一轮","还没形成稳定写法的类型，换资深同行的眼光单独挑一轮毛病再交"],["always","每件多审一轮","每件都单独审一轮再交"]]]];
+const WS_PRESETS={fast:{start:"auto",outline:"never",review:"list"},auto:{start:"auto",outline:"new",review:"new"},careful:{start:"ask",outline:"always",review:"always"}};
+const WS_LEAD={fast:"小事多、要快",auto:"大多数时候",careful:"要紧的事、刚开始用"};
+const modeName = k => TERM.mode[k]||"自定义";
+const wsOpt = (dim,v) => { const d=WS.find(x=>x[0]===dim); const o=d&&d[3].find(x=>x[0]===v); return o?o[1]:""; };
+const wsText = st => WS.map(([k])=>wsOpt(k,st[k])).join(" · ");
+function wsNow(){ const st={...WS_PRESETS.auto,...((D.settings||{}).work_style||{})}; const preset=Object.keys(WS_PRESETS).find(k=>WS.every(([d])=>WS_PRESETS[k][d]===st[d]))||"custom"; return {...st,preset}; }
+/* 事项页：一排按钮换做事方式，后面一行字说清现在是什么样，点它去设置里细调 */
+function wsSwitch(){
+  const st=wsNow(), keys=[...Object.keys(WS_PRESETS),...(st.preset==="custom"?["custom"]:[])];
+  return `<div class="ws"><span class="ws-k">AI 做事</span><div class="seg ws-seg" role="radiogroup" aria-label="做事方式">${keys.map(k=>`<button class="${st.preset===k?"on":""}" role="radio" aria-checked="${st.preset===k}" title="${esc(k==="custom"?wsText(st):wsText(WS_PRESETS[k]))}" ${k==="custom"?`onclick="openWorkSettings()"`:`onclick="setGlobalMode('${k}')"`}>${modeName(k)}</button>`).join("")}</div>
+    <button class="ws-sum" onclick="openWorkSettings()" title="去设置里逐项选">${esc(wsText(st))}<span class="chev">›</span></button></div>`;
+}
+function openWorkSettings(){ S.setTab="work"; go("sys"); }
+/* 设置 → AI 做事 */
+function workPage(){
+  const st=wsNow();
+  const card=k=>{ const p=WS_PRESETS[k]; return `<button class="ws-card ${st.preset===k?"on":""}" aria-pressed="${st.preset===k}" onclick="setGlobalMode('${k}')"><b>${modeName(k)}</b><span class="lead">${WS_LEAD[k]}</span>${WS.map(([d,l])=>`<span class="ln"><em>${l}</em>${wsOpt(d,p[d])}</span>`).join("")}</button>`; };
+  const custom=st.preset==="custom"?`<div class="ws-card on custom"><b>自定义</b><span class="lead">你自己搭的</span>${WS.map(([d,l])=>`<span class="ln"><em>${l}</em>${wsOpt(d,st[d])}</span>`).join("")}</div>`:"";
+  const dims=WS.map(([d,label,what,opts])=>`<div class="ws-dim"><div class="ws-dh"><b>${label}</b><span>${what}</span></div><div class="ws-opts">${opts.map(([v,l,desc])=>`<button class="ws-opt ${st[d]===v?"on":""}" aria-pressed="${st[d]===v}" onclick="setStyle('${d}','${v}')"><b>${l}</b><span>${desc}</span></button>`).join("")}</div></div>`).join("");
+  return `<div class="set-sec"><div class="sec-h">搭好的三种</div><div class="ws-cards">${Object.keys(WS_PRESETS).map(card).join("")}${custom}</div></div>
+    <div class="set-sec"><div class="sec-h">逐项选<span class="aside">改了任何一项，就成了「自定义」</span></div>${dims}</div>
+    <p class="hint" style="margin:10px 2px 0">你自己点「交给 AI」的事总是直接开工；会议里提的事，AI 只建议，等你点了才开工。单独一件可以在它详情的「更多」里换。删数据、对外发消息、付款这类事，AI 只准备材料，不执行。</p>`;
+}
+async function setStyle(dim,v){
+  D.settings={...(D.settings||{}),work_style:{...wsNow(),[dim]:v}}; render();
+  if(!LIVE) return;
+  try{ const r=await api("/api/workstyle",{[dim]:v}); toast(`${WS.find(x=>x[0]===dim)[1]}：${wsOpt(dim,v)}`); load(); }
+  catch(e){ toast(e.message||"没保存成功"); load(); }
 }
 async function setWorkMode(mode,rid){
-  if(rid){ const it=D.items.find(x=>x.rid===rid); if(it) it.work={...(it.work||{}),own_mode:mode,mode:mode||(D.settings||{}).work_mode||"auto"}; }
-  else D.settings={...(D.settings||{}),work_mode:mode};
+  if(rid){ const it=D.items.find(x=>x.rid===rid); if(it) it.work={...(it.work||{}),own_mode:mode,mode:mode||wsNow().preset}; }
+  else D.settings={...(D.settings||{}),work_mode:mode,work_style:{...WS_PRESETS[mode]}};
   render();
   if(!LIVE) return;
-  try{ await api("/api/workmode",{mode,...(rid?{rid}:{})}); toast(rid?(mode?`这件改为「${TERM.mode[mode]}」`:"这件跟随默认做事方式"):`做事方式改为「${TERM.mode[mode]}」：${MODE_TIPS[mode]}`); load(); }
+  try{ await api("/api/workmode",{mode,...(rid?{rid}:{})}); toast(rid?(mode?`这件改为「${modeName(mode)}」：${wsText(WS_PRESETS[mode])}`:"这件跟着你的做事方式"):`做事方式：${modeName(mode)}（${wsText(WS_PRESETS[mode])}）`); load(); }
   catch(e){ toast(e.message||"没保存成功"); load(); }
 }
 const setGlobalMode = m => setWorkMode(m,null);
-function modeSelect(cur,onchange,withDefault){
-  const def=(D.settings||{}).work_mode||"auto";
-  const opts=[...(withDefault?[["",`跟随默认（${TERM.mode[def]}）`]]:[]),...Object.entries(TERM.mode)];
-  return `<select aria-label="做事方式" title="${esc(MODE_TIPS[cur||def])}" onclick="event.stopPropagation()" onchange="${onchange}">${opts.map(([k,l])=>`<option value="${k}" ${k===cur?"selected":""}>${l}</option>`).join("")}</select>`;
-}
-function workLine(i){
-  const w=i.work||{}, n=i.n;
-  return `<div class="work-line"><span class="k">这件的做事方式</span>${modeSelect(w.own_mode||"",`setWorkMode(this.value,byN(${n}).rid)`,true)}${w.kind?`<span class="hint" style="margin:0">类型：${esc(w.kind)} · 规格：${esc(w.spec||"")}</span>`:""}</div>`;
+/* 单独一件：跟着你的方式，或者这件用搭好的某一种 */
+function itemModeSeg(i){
+  const own=(i.work||{}).own_mode||"", st=own?WS_PRESETS[own]:wsNow();
+  return `<div class="seg ws-seg" role="radiogroup" aria-label="这件的做事方式">${[["","跟着你的"],...Object.keys(WS_PRESETS).map(k=>[k,modeName(k)])].map(([k,l])=>`<button class="${own===k?"on":""}" role="radio" aria-checked="${own===k}" onclick="event.stopPropagation();setWorkMode('${k}',byN(${i.n}).rid)">${l}</button>`).join("")}</div><span class="hint" style="margin:0">${esc(wsText(st))}</span>`;
 }
 function btn(i,[label,k,cls,ph]){ return `<button data-n="${i.n}" ${pendingFor(i.n)?"disabled aria-busy=\"true\"":""} class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
 function act(n,k,ph,el){
@@ -1180,7 +1221,7 @@ function allPage(){
   if(!F[S.all]) S.all="今天";
   const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking, by=dimNow();
   const bar=`<div class="list-bar"><div class="seg" role="tablist" aria-label="看哪些">${Object.keys(F).map(k=>`<button class="${k===S.all?"on":""}" role="tab" aria-selected="${k===S.all}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>
-    <label class="by mode-by">做事方式 ${modeSelect((D.settings||{}).work_mode||"auto","setGlobalMode(this.value)",false)}</label>
+    ${wsSwitch()}
 </div>`;
   const chips="";
   const shown=D.items.filter(i=>!i.hidden&&topLevel(i)&&F[S.all](i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
@@ -1759,7 +1800,7 @@ async function newsClose(){ S.news=false; render(); await guideSeen(); }
 const setRow=(title,desc,ctl,below="")=>`<div class="set-row"><div><div class="k">${title}</div>${desc?`<div class="d">${desc}</div>`:""}</div><div class="ctl">${ctl||""}</div>${below?`<div class="below">${below}</div>`:""}</div>`;
 const setSec=(id,title,hint,rows)=>`<div class="set-sec" id="set-${id}">${title?`<div class="sec-h">${title}</div>`:""}${hint?`<p class="hint">${hint}</p>`:""}<div class="list">${rows}</div></div>`;
 const choice=(key,cur,opts)=>`<div class="chips">${opts.map(([v,l,ok])=>ok===false?`<button class="chip" disabled title="这台电脑上没有">${l}（没装）</button>`:`<button class="chip ${cur===v?"on":""}" onclick="setSetting('${key}','${v}')">${l}</button>`).join("")}</div>`;
-const SET_IC={bug:'<path d="M9 8a3 3 0 0 1 6 0M7 11h10v4a5 5 0 0 1-10 0zM4 13h3M17 13h3M5 19l2.5-2M19 19l-2.5-2M5 8l2.5 2M19 8l-2.5 2"/>',update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
+const SET_IC={work:'<path d="M4 7h10M4 12h16M4 17h7"/><circle cx="17" cy="7" r="2"/><circle cx="14" cy="17" r="2"/>',bug:'<path d="M9 8a3 3 0 0 1 6 0M7 11h10v4a5 5 0 0 1-10 0zM4 13h3M17 13h3M5 19l2.5-2M19 19l-2.5-2M5 8l2.5 2M19 8l-2.5 2"/>',update:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>',check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',tool:'<path d="M4 7h16M4 12h16M4 17h10"/>',inbox:'<path d="M4 13l2-8h12l2 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>',ai:'<rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',chat:'<path d="M5 5h14v10H9l-4 4z"/>',
   bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20h4"/>',db:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',eye:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',guide:'<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.2L12 16.8 6.4 20l1.6-6.2-5-4.3 6.5-.5z"/>',adv:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const engName = v => String(v||"").startsWith("driver:")?String(v).slice(7):(ENGINE_NAME[v]||v||"");   // an AI that said hello goes by its own name
 const ENGINE_NAME={cindy:"Cindy",codex:"本机 GPT",claude:"本机 Claude",gemini:"本机 Gemini",api:"模型接口"}, STORE_NAME={feishu:"飞书多维表格",notion:"Notion",device:"只存本机"}, THEME_NAME={auto:"跟随系统",light:"浅色",dark:"深色"};
@@ -1769,6 +1810,7 @@ function setMenu(st,s){ const r=s.record||{};
   const tools=[r.feishu_ready&&(r.feishu_broken?"飞书（读不到）":"飞书"),s.slack&&"Slack",wxOn(s)&&"微信"].filter(Boolean).join("、");
   return [["",[["ai","ai",left?"#ff3b30":"#5856d6","驱动心响的 AI",[...new Set([engName(st.engine||"codex"),engName(st.engine_sort||st.engine||"codex")])].join(" / ")+(left?` · 还差 ${left} 步`:"")],
       ["tool","tool","#007aff","接入",tools||"都没接"],
+      ["work","work","#af52de","AI 做事",modeName(wsNow().preset)],
       ["data","db","#00c7be","数据与通知",STORE_NAME[r.mode||"feishu"]||""]]],
     ["通用",[["bugs","bug","#ff9500","问题反馈",waiting?`${waiting} 条待提交`:""],["update","update",upd.newer&&upd.can?"#ff3b30":"#007aff","版本与更新",upd.newer?`有新版 ${upd.latest}`:(upd.current||"")],
       ["more","adv","#636366","更多",""]]]];
@@ -1941,7 +1983,8 @@ async function updateNow(){
 }
 const SET_PAGES={
   ai:(st,s,w)=>["驱动心响的 AI","",aiPage(st,s)],
-  tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收事和做事</div>${modePage(st,s)}</div>`
+  work:(st,s,w)=>["AI 做事","AI 做一件事分三步：开工、写之前、写完后。每一步怎么做由你选，也可以直接用搭好的一种。",workPage()],
+  tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收进来的事</div>${modePage(st,s)}</div>`
     +setSec("chatlog","","",setRow("聊天判断","读到的每条消息最后怎么样了，没收进来的写着原因。",`<button class="btn" onclick="S.setTab='chatlog';S.chatlog=null;render()">查看</button>`))],
   data:(st,s,w)=>["数据与通知","",dataSection(s)+boostSection(st)+setSec("notify","通知","",setRow("心响里","待验收、待答复、待分配的事项。",`<span class="eng-state ok">一直开着</span>`)+notifyRow(s))],
   chatlog:(st,s,w)=>["聊天判断","读到的每条聊天消息最后怎么样了：建成事项、并入已有的事、AI 看过没建（写了原因），或者在交给 AI 之前就被规则挡掉（也写了原因）。",chatlogPage()],
@@ -2180,15 +2223,14 @@ function toolPage(st,s){
      :`<p class="hint" style="margin:14px 2px 0">现在没有接任何工具。要做的事点右上角「＋ 新建事项」自己添加。</p>`);
 }
 function modePage(st,s){
-  const manual=st.intake_mode==="manual", any=(s.record||{}).feishu_ready||s.slack, auto=!!st.auto_assign, wm=st.work_mode||"auto";
+  const manual=st.intake_mode==="manual", any=(s.record||{}).feishu_ready||s.slack, auto=!!st.auto_assign;
   const cards=(list,cur,click)=>`<div class="modes">${list.map(([k,l,d])=>`<button class="mode ${cur===k?"on":""}" aria-pressed="${cur===k}" onclick="${click(k)}"><b>${l}</b><span>${d}</span></button>`).join("")}</div>`;
   const custom=!manual&&(!auto||!st.prework_enabled);   // switched off by hand some time: say so, and keep the switches reachable
   return `<div class="set-h">接哪些事</div>`+cards(MODES,st.intake_mode||"all",k=>`setSetting('intake_mode','${k}')`)
    +(manual?"":`<details class="more-set" ${custom?"open":""}><summary>细调${custom?"（已手动改过）":""}</summary>`
       +setRow("AI 先判断能不能做",auto?"已完成的标为完成，不用做的取消，AI 能做的交给 AI，需要你决定的先备材料。":"已关闭：新事项由你分配。",switchCtl(auto,`toggleAuto(${!auto})`))
       +setRow("自动开工",st.prework_enabled?"交给 AI 的事会自动开始，做完交你验收。":"已关闭：交给 AI 的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled))+`</details>`)
-   +`<div class="set-h">AI 做事的方式</div>`+cards(Object.entries(TERM.mode).map(([k,l])=>[k,l,MODE_TIPS[k]]),wm,k=>`setGlobalMode('${k}')`)
-   +`<p class="hint" style="margin:8px 2px 0">事项页上方也能切换做事方式；单独一件可以在它的详情里改。删数据、对外发消息、付款这类事，AI 只准备材料，不执行。</p>`
+   +`<p class="hint" style="margin:8px 2px 0">AI 怎么做这些事（开工前要不要问你、写之前给不给提纲、写完怎么检查），在<a href="#" onclick="openWorkSettings();return false">「AI 做事」</a>里选。</p>`
    +(!any&&!manual?`<p class="hint" style="margin:8px 2px 0;color:var(--amber)">你还没有接任何办公工具，所以现在不会有事自动进来。</p>`:"");
 }
 const MODES=[["all","全部接","别人找你的事都接进来；AI 先判断，能做的直接开工。"],["accepted","答应了才接","你回了「好的」「我来」才接进来；AI 先判断，能做的直接开工。"],["manual","不自动接","要做的事你自己新建；AI 只做你交给它的。"]];
@@ -2432,7 +2474,7 @@ function moreView(i){
   const open=!["完成","取消"].includes(i.status), pj=projOf(i.project), guessed=pj&&i.project_by==="猜", dvs=D.deliverables[i.n]||[];
   const rows=[
     ...(i.who==="AI"&&open?[["哪个 AI",aiOfItem(i)]]:[]),
-    ...(open?[["做事方式",modeSelect((i.work||{}).own_mode||"",`setWorkMode(this.value,byN(${i.n}).rid)`,true)+((i.work||{}).kind?`<span class="hint" style="margin:0">类型：${esc(i.work.kind)} · 规格：${esc(i.work.spec||"")}</span>`:"")]]:[]),
+    ...(open?[["做事方式",itemModeSeg(i)+((i.work||{}).kind?`<span class="hint" style="margin:0">类型：${esc(i.work.kind)} · 规格：${esc(i.work.spec||"")}</span>`:"")]]:[]),
     ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="hint" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
     ...(i.version?[["版本",`<a href="#" class="quiet-link" style="margin:0" onclick="go('mem');return false">${esc(i.version.name)}</a><span class="hint" style="margin:0">${esc(i.version.status)}</span>`]]:[]),
     ...(i.status!=="取消"&&!dvs.length?[["交付",`<a href="#" class="quiet-link" style="margin:0" onclick="dvOpen(${i.n},0);return false">${i.url?"换交付链接":"填交付链接"}</a>`]]:[]),
@@ -2442,7 +2484,7 @@ function moreView(i){
 }
 function dvTags(i){
   const w=i.work||{}, rv=w.review||[];
-  const tags=[w.kind&&esc(w.kind),w.spec&&`规格：${esc(w.spec)}`,w.mode&&`做事方式：${esc(TERM.mode[w.mode]||"")}`].filter(Boolean).join(" · ");
+  const tags=[w.kind&&esc(w.kind),w.spec&&`规格：${esc(w.spec)}`,w.mode&&`做事方式：${esc(modeName(w.mode))}`].filter(Boolean).join(" · ");
   const review=rv.length?`<details class="nc-review"><summary>自审 ${rv.length} 项${w.fixed?`，改了 ${w.fixed} 处`:"，都通过"}</summary><div class="prof-text">${rv.map(esc).join("<br>")}</div></details>`:"";
   return (tags?`<div class="nc-tags">${tags}</div>`:"")+review;
 }
