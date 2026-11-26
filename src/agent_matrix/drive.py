@@ -157,6 +157,70 @@ def _prepare_triage(root, config, driver):
             "instructions": promptfile.read(root, "triage.md")}
 
 
+def _prepare_donecheck(root, config, driver):
+    """The owner's own open items, with what was said after each: has the owner already done it? (donecheck)"""
+    from . import donecheck
+    from .workenv import project, scratch
+    if _busy(root, "donecheck"):
+        return None
+    from .snapshot import _snapshot
+    if not donecheck.due(root, _snapshot(root).get("rows") or [], now()):   # cheap, local: most rounds stop here
+        return None
+    from .workflow import Gateway
+    with project(root, config) as (client, state):
+        rows = Gateway(client, state).rows()
+    picked = donecheck.due(root, rows, now())
+    if not picked:
+        return None
+    from .background import after_context
+    one = lambda v: (v[0] if isinstance(v, list) and v else v) or ""
+    items = []
+    for r in picked:
+        try:
+            n = int(str(r.get("编号")).strip())
+        except (TypeError, ValueError):
+            continue
+        items.append({"n": n, "record_id": r["record_id"], "title": str(one(r.get("标题")))[:80],
+                      "what": str(one(r.get("下一步动作")))[:300], "done_when": str(one(r.get("完成标准")))[:120],
+                      "quote": str(one(r.get("原话引用")))[:300], "source": one(r.get("来源")), "since": str(r.get("创建时间") or "")[:16],
+                      "after": after_context(client, r, now())})
+    if not items:
+        return None
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "donecheck", stamp)
+    (folder / "items.json").write_text(json.dumps([{k: v for k, v in i.items() if k != "record_id"} for i in items],
+                                                 ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"id": f"donecheck-{stamp}", "kind": "donecheck", "title": f"看你的 {len(items)} 件事办完没有", "folder": str(folder),
+            "ref": {"items": items}, "output": ["donecheck.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": promptfile.read(root, "donecheck.md")}
+
+
+def _submit_donecheck(root, job):
+    from . import activity, donecheck, thread as conversation
+    try:
+        verdicts = json.loads((Path(job["folder"]) / "donecheck.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "没有找到有效的 donecheck.json（格式见说明里的例子）。"}
+    by_n = {i["n"]: i for i in job["ref"]["items"]}
+    found = []
+    for v in verdicts if isinstance(verdicts, list) else []:
+        item = by_n.get(v.get("n") if isinstance(v, dict) else None)
+        if not item:
+            continue
+        hint = donecheck.accept(root, item, v, now())
+        if hint:
+            conversation.add(root, item["record_id"], "ai", "say", f"看起来已经办完了：{hint['evidence']}"
+                             + (f"\n出处：{hint['where']}" if hint["where"] else "") + (f"\n{hint['url']}" if hint["url"] else "")
+                             + "\n点「完成」关掉；没办完就点「没办完」。", driver=job.get("driver"))
+            found.append(item["n"])
+    donecheck.mark_checked(root, [i["record_id"] for i in job["ref"]["items"]], now())
+    activity.log(root, "detect", f"看了你的 {len(by_n)} 件事办完没有" + (f"：#{'、#'.join(map(str, found))} 看起来办完了" if found else "：都还没办完"))
+    _close(root, job, "done")
+    return {"ok": True, "status": "done", "done": found}
+
+
 TRIAGE_OTHERS = 200
 
 
@@ -839,7 +903,7 @@ def _item_job(root, config, driver, item, client, rows, row, notes):
             "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
 
 
-SORTING = ("triage", "meeting", "chat", "learn")   # 整理: judging new items, meetings, chats, learning rules
+SORTING = ("triage", "meeting", "chat", "learn", "donecheck")   # 整理: judging new items, meetings, chats, learning rules, done yet
 
 
 def item_runner(root):
@@ -906,6 +970,11 @@ def has_sorting_for(root, config):
             from .snapshot import _snapshot
             if _pending_new(_snapshot(root).get("rows") or [], conversation.judgments(root)):
                 return "triage"
+        if not _busy(root, "donecheck"):
+            from . import donecheck
+            from .snapshot import _snapshot
+            if donecheck.due(root, _snapshot(root).get("rows") or [], now()):
+                return "donecheck"
     except Exception as exc:
         activity.swallowed(root, "drive.has_sorting_for", exc)
     return None
@@ -945,7 +1014,7 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = _prepare_organize(root, config, driver)
         if job:
             return _open(root, job, driver)
-    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
+    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn, _prepare_donecheck)):
         if kind not in wanted:
             continue
         if kind in {"chat", "learn"}:
@@ -1060,7 +1129,8 @@ def work_for(root, config, driver):
 
 
 WORK_WORDS = {"setup": "接入设置", "profile": "「认识你」", "organize": "整理项目和版本", "tidy": "整理记忆",
-              "item": "交给 AI 的事", "meeting": "整理会议", "chat": "整理聊天", "triage": "判断新进来的事"}
+              "item": "交给 AI 的事", "meeting": "整理会议", "chat": "整理聊天", "triage": "判断新进来的事",
+              "donecheck": "看你的事办完没有"}
 
 
 def has_items_for(root, config, driver="Cindy"):
@@ -1135,6 +1205,9 @@ def fail(root, job, problem):
     if job["kind"] == "learn":
         activity.log(root, "learn", "学规矩已延后，后台会再试", detail=str(problem)[:300], status="deferred", ref=job["id"])
         return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
+    if job["kind"] == "donecheck":   # nothing waits on it: the same items are looked at again next round, quietly
+        activity.log(root, "detect", "看你的事办完没有：这一轮没做成，下一轮再看", detail=str(problem)[:300], status="deferred", ref=job["id"])
+        return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
     activity.log(root, "error", f"{job.get('title') or job['kind']}：没做成", detail=str(problem)[:300], status="failed")
     try:
         key = f"job-failed:{job['id']}:{job.get('rounds', 0)}"
@@ -1173,6 +1246,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_item(root, config, job)
     if kind == "triage":
         return _submit_triage(root, job)
+    if kind == "donecheck":
+        return _submit_donecheck(root, job)
     if kind == "learn":
         return _submit_learn(root, job)
     if kind == "setup":

@@ -23,6 +23,7 @@
 | `triage.md` | 判断新进来的事：已办完 / 不用做 / AI 做 / 本人做 AI 备材料 / 本人做 | `triage.json` | `drive._submit_triage` |
 | `worker.md` | 做一件事 | `交付.md` + `结果.json` | `itemwork` |
 | `learn.md` | 从评审和反馈里学规矩 | `learned.json` | `drive._submit_learn` |
+| `donecheck.md` | 看本人手上开着的事是不是已经办完（只认抄得出原话或给得出链接的） | `donecheck.json` | `donecheck` |
 | `organize.md` | 把事归到项目和版本 | `organize.json` | `versions` |
 | `tidy.md` | 每天整理记忆，只提议 | `tidy.json` | `tidy` |
 | `profile_scan.md` | 第一次认识本人，写「关于你」草稿 | `画像.md` | `memory` |

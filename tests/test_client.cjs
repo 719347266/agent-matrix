@@ -289,19 +289,54 @@ function reset(item) {
   assert.doesNotMatch(evaluate("allPage()"),/未归类|多选|全部项目|proj-grid/, "no projects yet: a plain list, nothing standing alone beside it");
   assert.match(evaluate("allPage()"),/openNewProject\(\)">＋ 新建项目/);
   evaluate("S.newProj=true"); assert.match(evaluate("allPage()"),/id="proj-name"/); evaluate("S.newProj=false");
-  // 今天: what waits on the owner, the owner's own work due, what the AI is doing and today's messages, on one page
+  // 今天: only what the owner acts on today, each with why; new items wait in 新进来, the AI's work is one line
   const keepAll = evaluate("JSON.stringify([D.items,D.inbox])");
   evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"}];
     D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"brief",title:"旧早报",text:"旧\\n第二行",read:true}]; S.view=null; S.openMsg=null; S.working=false; render()`);
   assert.equal(evaluate("S.view"),"today");
   const today = evaluate("todayPage()");
-  for (const label of ["要你处理","等验收的事","问你的事","你自己要做的","今天要交的事","AI 排队","排队的事","今天的消息","早报","全部消息"]) assert.ok(today.includes(label), label);
+  for (const label of ["要你定","等验收的事","问你的事","今天要做的","今天要交的事","AI 在做 0 件，排队 1 件","今天还有 1 条消息（简报）"]) assert.ok(today.includes(label), label);
   assert.doesNotMatch(today,/别人的事|旧早报/);
   assert.equal(today.split("等验收的事").length,2,"an item listed above is not repeated as a message");
-  assert.equal(evaluate("todayCount()"),2);
+  assert.equal(evaluate("todayCount()"),3);
   const side = evaluate("sideHTML()");
-  assert.match(side,/今天<span class="c hot">2</); assert.doesNotMatch(side,/收件箱|等我处理|进行中|已完成/);
+  assert.match(side,/今天<span class="c hot">3</); assert.doesNotMatch(side,/收件箱|等我处理|进行中|已完成/);
   evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('today'\)"/);
+  // 新进来: grouped by where they came from, a group taken or dropped at once; 备材料 sits inside its item
+  evaluate(`D.items=[
+    {n:11,title:"暂停代运营",status:"待确认",who:"我",created:"2026-11-25 10:00",origin:{kind:"会议",group:"观己日常运营沟通",person:null,client:false,at:"2026-11-25 10:00"},quote:"[00:05:13]  00:05:13   代运营先停"},
+    {n:12,title:"试投搜索广告",status:"待确认",who:"我",created:"2026-11-25 10:01",origin:{kind:"会议",group:"观己日常运营沟通",person:null,client:false,at:"2026-11-25 10:00"}},
+    {n:13,title:"给实习生排工作",status:"待确认",who:"我",created:"2026-11-26 09:00",origin:{kind:"聊天",group:"陈娈娇",person:"陈娈娇",client:false,at:"2026-11-26 09:45"},quote:"[陈娈娇 2026-11-26 09:45 陈娈娇] 你直接跟她说一声就行"},
+    {n:14,title:"客户要发票",status:"待确认",who:"我",created:"2026-11-26 10:00",origin:{kind:"聊天",group:"曼朗外部群",person:"王客户",client:true,at:"2026-11-26 10:00"}},
+    {n:15,title:"告诉实习生安排",status:"进行中",who:"我",due:TODAY,created:"2026-11-26 09:46",origin:{kind:"聊天",group:"陈娈娇",person:"陈娈娇",client:false,at:"2026-11-26 09:45"},quote:"[陈娈娇 2026-11-26 09:45 陈娈娇] 你直接跟她说一声就行，谢谢~"},
+    {n:16,title:"备材料：告诉实习生安排",status:"待验收",who:"AI",parent:15},
+    {n:17,title:"让豪铭加返回按钮",status:"未开始",who:"我",done_hint:{evidence:"[11-25 14:02 李瑞轩] 返回按钮加上了",where:"和李瑞轩的私聊"}}];
+    D.inbox=[{id:9,at:TODAY+"T09:06:00",kind:"system",title:"⚠ AI 员工已经 269 分钟没检查会议和事项了。",read:false},{id:10,at:TODAY+"T09:40:00",kind:"new",title:"飞书任务 · 新增 1 件：#13",refs:[13],read:false}]; render()`);
+  const groups = plain("newGroups().map(g=>[g.label,g.tag,g.items.map(i=>i.n)])");
+  assert.deepEqual(groups,[["王客户","客户",[14]],["陈娈娇","聊天",[13]],["观己日常运营沟通","会议",[11,12]]]);
+  const fresh = evaluate('S.view="new"; newPage()');
+  for (const label of ["都我来","都交给 AI","都不要","观己日常运营沟通","2 件"]) assert.ok(fresh.includes(label), label);
+  assert.match(evaluate("sideHTML()"),/新进来<span class="c need">4</);
+  const t2 = evaluate('S.view="today"; todayPage()');
+  assert.ok(t2.includes("告诉实习生安排") && t2.includes("AI 备好了材料，等你看"), "the 备材料 shows inside its item");
+  assert.doesNotMatch(t2,/备材料：告诉实习生安排/, "not as a row of its own");
+  assert.ok(t2.includes("陈娈娇 11/26 09:45：「你直接跟她说一声就行，谢谢~」"), "why it is here: who said what, when");
+  assert.ok(t2.includes("看起来已经办完") && t2.includes("返回按钮加上了") && t2.includes("没办完"), "done, with the words that show it");
+  assert.ok(t2.includes("新进来 4 件"), "new items are one card that leads to 新进来");
+  assert.doesNotMatch(t2,/269 分钟|暂停代运营/, "no system notice and no new item in the list");
+  // the status dot: the system's own trouble, handled in the background
+  assert.match(evaluate("healthDot()"),/件要你来/, "what only the owner can do comes first");
+  assert.match(evaluate("healthDot(0)"),/AI 在处理/);
+  assert.match(evaluate("S.health=true; healthPanel()"),/269 分钟没检查[\s\S]*不用你处理/); evaluate("S.health=false");
+  evaluate("D.inbox=[]"); assert.match(evaluate("healthDot(0)"),/后台正常/);
+  // 事项 → 按人: clients apart, a person picked shows their items, and the guess can be corrected
+  evaluate('S.view="all"; S.dim="people"; S.all="进行中"; S.who=null');
+  const people = evaluate("allPage()");
+  for (const label of ["按项目","按人","客户","同事","会议","王客户","陈娈娇","观己日常运营沟通"]) assert.ok(people.includes(label), label);
+  assert.ok(people.indexOf(">客户<") < people.indexOf(">同事<"), "clients first");
+  evaluate('S.who="王客户"'); assert.match(evaluate("allPage()"),/不是客户/);
+  evaluate('S.who="陈娈娇"'); assert.match(evaluate("allPage()"),/标成客户/);
+  evaluate('S.dim="proj"; S.who=null');
   evaluate(`[D.items,D.inbox]=${keepAll}; S.view="todo"`);
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
   for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
@@ -427,7 +462,9 @@ function reset(item) {
   assert.equal(evaluate('inboxBucket({kind:"blocked",at:"2026-11-15T09:00:00",title:"AI 卡住，需要你补材料",refs:[],read:true})'),"old","an old question about an item that is gone asks nothing of the owner");
   page=evaluate("inboxPage()");
   assert.match(page,/要你处理[\s\S]*#65 标签更新[\s\S]*今天发生的[\s\S]*#74 加到总表/);
-  assert.match(page,/来自聊天/); assert.match(page,/和录音对不上，没有采用/); assert.match(page,/查看更早的 1 条/);
+  assert.match(page,/来自聊天/); assert.match(page,/查看更早的 1 条/);
+  assert.doesNotMatch(page,/和录音对不上/, "the system's own notices are not in the owner's messages");
+  assert.match(evaluate('S.inboxTab="system"; inboxPage()'),/和录音对不上，没有采用/); evaluate('S.inboxTab=""');
   assert.doesNotMatch(page,/校验拦掉|展开 74 看原话|13:00 复盘会/);
   assert.match(evaluate('S.inboxTab="全部"; inboxPage()'),/更早[\s\S]*13:00 复盘会/);
   console.log("Client checks passed: new, running, cancel, restore, complete, closed-item conversation, stale status, concurrency copy, briefs opened in the inbox.");

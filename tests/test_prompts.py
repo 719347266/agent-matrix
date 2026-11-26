@@ -6,7 +6,7 @@ import unittest
 
 from agent_matrix import drive, memory, promptfile
 
-JOBS = ("meeting_extract.md", "chat_extract.md", "triage.md", "worker.md", "learn.md", "organize.md", "tidy.md",
+JOBS = ("meeting_extract.md", "chat_extract.md", "triage.md", "worker.md", "learn.md", "donecheck.md", "organize.md", "tidy.md",
         "profile_scan.md", "profile_update.md")
 
 
