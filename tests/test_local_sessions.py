@@ -98,6 +98,37 @@ class LocalSessions(unittest.TestCase):
         with patch.object(ls, "discover", return_value=found):
             self.assertIsNone(next(r["n"] for r in ls.view(self.home, {}, [], items) if r["key"] == "claude:c-1"))
 
+    def test_a_scheduled_run_binds_only_to_the_item_whose_work_it_did(self):
+        items = [{"rid": "r94", "n": 94, "title": "制定旅程任务能量奖励方案", "status": "待验收"},
+                 {"rid": "r9", "n": 9, "title": "写方案时照会上定的写", "status": "进行中"},
+                 {"rid": "r62", "n": 62, "title": "复验 2.1 版本反馈的问题", "status": "未开始"}]
+        run = lambda sid, doing: ls._record("cindy", sid, "[Schedule] 心响｜领活来做", self.now, doing=doing, app="Cindy 定时任务")
+        did = run("s-1", "心响 #94 制定旅程任务能量奖励方案 已提交。方案建议每阶段奖励 3、5、7 颗")
+        meeting = run("s-2", "心响 #7711910987926424840 提取会议待办：AI项目例会 新增本人待办：**复验 2.1 版本反馈的问题**")
+        lesson = run("s-3", "心响 #learn-20261124 从评审里学规矩 收录 1 条：写方案时照会上定的写 #9")
+        chat = ls._record("cindy", "s-4", "随便聊聊", self.now, doing="已经帮你看了 #62，也顺便看了 #9")
+        found = {r["key"]: r for r in (did, meeting, lesson, chat)}
+        by_item = {}
+        with patch.object(ls, "discover", return_value=found):
+            out = {r["key"]: r["n"] for r in ls.view(self.home, by_item, [], items)}
+        self.assertEqual(out, {"cindy:s-1": 94, "cindy:s-2": None, "cindy:s-3": None, "cindy:s-4": None})
+        shown = by_item["r94"][0]
+        self.assertTrue(shown["title"].startswith("定时任务 ") and shown["title"].endswith("那一轮"), shown["title"])
+        self.assertIn("能量奖励方案 已提交", shown["doing"])
+        self.assertEqual(ls._title("# 你是本人的 AI 员工。这一轮只做一件事：#61 备材料：更新考核方案"), "#61 备材料：更新考核方案")
+
+    def test_old_scheduled_runs_bound_by_a_mention_come_off_once(self):
+        items = [{"rid": "r62", "n": 62, "title": "复验 2.1 版本反馈的问题", "status": "未开始"}]
+        wrong = ls._record("cindy", "s-9", "[Schedule] 心响｜领活来做", self.now, doing="心响 #7711 提取会议待办：复验 2.1 版本反馈的问题", app="Cindy 定时任务")
+        mine = ls._record("cindy", "s-8", "我自己的对话", self.now)
+        with closing(ls._db(self.home)) as db, db:
+            for r in (wrong, mine):
+                db.execute("INSERT INTO local_session_items VALUES(?,?,?)", (r["key"], "r62", json.dumps(r, ensure_ascii=False)))
+        by_item = {}
+        with patch.object(ls, "discover", return_value={}):
+            ls.view(self.home, by_item, [], items)
+        self.assertEqual([s["key"] for s in by_item["r62"]], ["cindy:s-8"], "what the owner bound by hand stays")
+
     def test_claude_conversations_open_in_the_claude_app_at_that_conversation(self):
         with patch.object(ls.subprocess, "run") as run:
             ls.open_claude("11111111-2222-4333-8444-555555555555", "local_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")

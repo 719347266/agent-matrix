@@ -131,7 +131,7 @@ class Applier:
         self.now = _now(config)
 
     def closed(self, row, how):
-        """Remember who closed it: the owner (心响, Feishu reply, 豚豚) or the AI judging it already done."""
+        """Remember who closed it: the owner (心响, Feishu reply, Cindy) or the AI judging it already done."""
         if self.client is None:
             return
         try:
