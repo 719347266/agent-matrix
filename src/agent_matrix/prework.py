@@ -36,7 +36,7 @@ OUTPUT_FIELDS = ["AI草稿链接", "预做结果摘要", "预做凭据"]
 
 # Each deliverable type has required sections and a length cap (FIX 2.2 / 3.1).
 TEMPLATES = {
-    "需求文档": (["要解决什么问题", "需求"], 10000),
+    "需求文档": (["要解决什么问题|背景", "需求"], 10000),   # a|b: either heading will do
     "周报": (["本周完成", "进行中", "下周计划", "风险"], 1500),
     "数据汇总": (["结论", "口径"], 3000),
     "方案": (["推荐", "对比", "拍板"], 4000),
