@@ -235,6 +235,19 @@ def check(root, plan, rows=None, *, profile_evidence=None):
 
 # ---- the list the owner decides on --------------------------------------------------------------------------------
 
+def _spot(d):
+    """Where a 经验库 draft lands: the entry plus the paragraph it changes (old_text) or the first heading it adds."""
+    heading = next((l.strip() for l in str(d.get("body") or "").splitlines() if l.startswith("## ")), "")
+    return d.get("name"), (d.get("old_text") or "").strip() or heading
+
+
+def _same_spot(db, d):
+    """Item work and feedback learning often draft the same lesson in different words: one waiting per spot is enough."""
+    spot = _spot(d)
+    return spot[1] and any(_spot(json.loads(x)) == spot for (x,) in
+                           db.execute("SELECT data FROM memory_updates WHERE kind='memory' AND status='pending'"))
+
+
 def save(root, proposals, job=""):
     """Keep proposals as 待定; the same one already waiting is not added twice. Returns how many are new."""
     db = _db(root)
@@ -253,6 +266,8 @@ def save(root, proposals, job=""):
                         db.execute("UPDATE memory_updates SET status='superseded',decided=? WHERE kind='profile' "
                                    "AND status='pending' AND json_extract(data,'$.old')=?", (_now(), anchor))
                 if db.execute("SELECT 1 FROM memory_updates WHERE kind=? AND data=? AND status='pending'", (kind, data)).fetchone():
+                    continue
+                if kind == "memory" and _same_spot(db, json.loads(data)):
                     continue
                 db.execute("INSERT INTO memory_updates (job, kind, content, why, data, status, created) VALUES (?,?,?,?,?,'pending',?)",
                            (job, kind, content[:2000], why, data, _now()))

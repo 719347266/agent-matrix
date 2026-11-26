@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from agent_matrix.meeting_review import Action, Grounded, Review, Waiting, repair_review, validate_review
 
@@ -104,6 +105,25 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(drive.submit(self.root, None, job["id"])["proposed"], 3)
         self.assertEqual(library.get(self.root, library.GENERAL)["raw"], before)     # nothing changes until 用
         self.assertEqual(len(tidy.updates(self.root)), 3)
+
+    def test_the_same_lesson_in_other_words_waits_only_once(self):
+        from agent_matrix import library, tidy
+        d = lambda body: ("memory", "x", "本人说过", {"mode": "append", "name": library.GENERAL, "body": body, "why": "本人说过"})
+        self.assertEqual(tidy.save(self.root, [d("## 交付用中文写\n不要整段英文")]), 1)
+        self.assertEqual(tidy.save(self.root, [d("## 交付用中文写\n名字、命令以外都翻成中文")]), 0)   # item work said it again
+        self.assertEqual(tidy.save(self.root, [d("## 切分支先核基点\n用 ls-remote")]), 1)
+
+    def test_feedback_is_learned_at_most_once_a_day(self):
+        from datetime import datetime, timedelta
+        from agent_matrix import drive, thread as conversation
+        from agent_matrix.timeutil import TZ
+        conversation.add(self.root, "r1", "me", "feedback", "不行，私聊发给他")
+        today = datetime.now(TZ)
+        conversation.set_setting(self.root, "learned_at", today.isoformat(timespec="seconds"))
+        with patch("agent_matrix.snapshot._snapshot", return_value={"rows": []}):
+            self.assertIsNone(drive._prepare_learn(self.root, None, "本机 GPT"))
+            conversation.set_setting(self.root, "learned_at", (today - timedelta(days=1)).isoformat(timespec="seconds"))
+            self.assertEqual(drive._prepare_learn(self.root, None, "本机 GPT")["kind"], "learn")
 
     def test_a_bad_draft_is_sent_back_with_what_to_fix(self):
         from agent_matrix import drive, library

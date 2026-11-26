@@ -88,7 +88,7 @@ def check_result(workdir, row, root=None):
     missing = [s for s in SECTIONS_ALWAYS if not any(s in n for n in names)]
     if missing:
         return result, "交付.md 最后要有这两节小标题：" + "、".join(f"## {s}" for s in missing) + "。"
-    sections, cap = TEMPLATES[template]
+    sections = TEMPLATES[template]
     missing = [s for s in sections if not any(s in n for n in names)]
     if missing:
         return result, f"按「{template}」模板，交付.md 缺少这些小标题：" + "、".join(missing) + "。"
@@ -97,8 +97,6 @@ def check_result(workdir, row, root=None):
         return result, "交付.md 里还有占位文字：" + "、".join(found) + "。换成真实内容。"
     body = re.split(r"^#{1,6}\s*用到的资料", doc, flags=re.M)[0]
     length = len(_plain(body))
-    if length > cap:
-        return result, f"正文 {length} 字，「{template}」上限 {cap} 字。先给结论，删掉铺垫和重复。"
     if length < 80:
         return result, "交付.md 正文太短，像没做完。"
     return result, None
@@ -110,8 +108,8 @@ def draft_problem(result, root):
     drafts = result.get("memory_drafts")
     if drafts is None:
         return None
-    if not isinstance(drafts, list) or len(drafts) > 3:
-        return "memory_drafts 是草稿数组，一轮最多 3 份；没有就不写这一项。"
+    if not isinstance(drafts, list) or len(drafts) > 1:
+        return "memory_drafts 是草稿数组，一轮最多 1 份；没撞墙、没被纠正就不写这一项。"
     for i, d in enumerate(drafts, 1):
         try:
             library.check_draft(root, d)

@@ -226,7 +226,6 @@ def _triage_relations(root, job, item, verdict):
     return links, expected
 
 
-LEARN_MIN_NEW, LEARN_EVERY_HOURS = 3, 24
 LEARN_RETRY_MINUTES = (30, 120, 1440)
 
 
@@ -538,9 +537,8 @@ def _prepare_learn(root, config, driver):
     for o in outcomes:
         row = snap.get(o["record_id"]) or {}
         verdicts.append({**{k: v for k, v in o.items() if k != "record_id"}, "n": row.get("编号"), "item": str(row.get("标题") or "")})
-    fresh_enough = len(feedback) + len(verdicts) >= LEARN_MIN_NEW
-    stale = not since or now() - datetime.fromisoformat(since) > timedelta(hours=LEARN_EVERY_HOURS)
-    if not (fresh_enough or stale):
+    # At most once a calendar day, so the day's lessons come as one batch (the first tick of the day, i.e. morning).
+    if since and datetime.fromisoformat(since).date() >= now().date():
         return None
     stamp = now().strftime("%Y%m%d%H%M%S")
     folder = scratch(root, "learn", stamp)

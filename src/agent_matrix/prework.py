@@ -34,14 +34,14 @@ EXTRA_FIELDS = [select("预做策略", ["自动判断", "仅备草稿", "不代�
 OUTPUT_FIELDS = ["AI草稿链接", "预做结果摘要", "预做凭据"]
 
 
-# Each deliverable type has required sections and a length cap (FIX 2.2 / 3.1).
+# Each deliverable type has required sections. No hard length cap: the prompt asks for brevity (a cap blocked real work).
 TEMPLATES = {
-    "周报": (["本周完成", "进行中", "下周计划", "风险"], 800),
-    "数据汇总": (["结论", "口径"], 2000),
-    "方案": (["推荐", "对比", "拍板"], 1200),
-    "会议材料": (["议程", "决策", "背景"], 800),
-    "回复草稿": (["草稿", "确认"], 800),
-    "其他": ([], 1500),
+    "周报": ["本周完成", "进行中", "下周计划", "风险"],
+    "数据汇总": ["结论", "口径"],
+    "方案": ["推荐", "对比", "拍板"],
+    "会议材料": ["议程", "决策", "背景"],
+    "回复草稿": ["草稿", "确认"],
+    "其他": [],
 }
 PLACEHOLDERS = ["TODO", "待补充", "XX", "（略）", "(略)", "此处填写", "待完善"]
 
@@ -348,15 +348,13 @@ def stage(config, client, state, result_path):
     text = _xml_text(data.decode())
     if not text.strip():
         raise MatrixError("结果文档为空。")
-    sections, cap = TEMPLATES[result.template]
+    sections = TEMPLATES[result.template]
     missing = [name for name in sections if name not in text]
     if missing:
         raise MatrixError("没做完：模板必备栏目缺少「" + "、".join(missing) + "」，补齐后再交付。")
     found = [word for word in PLACEHOLDERS if word in text]
     if found:
         raise MatrixError("没做完：文档里还有占位文字「" + "、".join(found) + "」。")
-    if len(text) > cap:
-        raise MatrixError(f"写太长了：{len(text)} 字，{result.template}上限 {cap} 字；先给结论，删掉铺垫。")
     if _v1(state) and result.template == "其他" and not (fresh.get("完成标准") or "").strip():
         raise MatrixError("事项没有完成标准，不能按「其他」交付；先在卡点里问本人做到什么程度算完。")
     check_result = client._exec(["docs", "+script", "--command", "parse", "--content", "@./"+artifact.relative_to(client.root).as_posix(), "--format", "json"])
