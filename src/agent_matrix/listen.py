@@ -506,7 +506,8 @@ class Listener:
                     from .sources import jira
                     if config.intake_mode == "manual":
                         return "off"
-                    return jira.sync(config, client, state, datetime.now(TZ))
+                    from .engines import translate_jira
+                    return jira.sync(config, client, state, datetime.now(TZ), translate=translate_jira)
                 jobs.append(("jira", jira_sync))
         if auto and cfg.feishu_tasks_enabled and not no_source and self.every("tasks", 3600 if lark else 900):   # Lark: hourly
             def tasks(config, client, state):

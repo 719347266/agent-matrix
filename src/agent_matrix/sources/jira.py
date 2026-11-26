@@ -5,6 +5,7 @@
 - One nobody has taken yet in a watched project (config.jira_unassigned_projects), still in a 待办 status → a row
   waiting for the owner's yes. "Taken" is 经办人, or the field set in config.jira_owner_field (e.g. Issue Owner).
 - The issue moves to a Done status in Jira → the row becomes 完成.
+- The issue's description, translated into Chinese (translator passed in by the caller), goes into 原话引用 (shown under 来源).
 - Read only: nothing is ever written back to Jira.
 Auth: Jira Cloud site + account email + API token (id.atlassian.com/manage-profile/security/api-tokens).
 """
@@ -19,7 +20,7 @@ from .. import activity
 from ..models import MatrixError
 
 OPEN_JQL = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
-FIELDS = ["summary", "duedate", "status", "assignee", "project"]
+FIELDS = ["summary", "duedate", "status", "assignee", "project", "description"]
 
 
 def _owner_field(config):
@@ -143,7 +144,55 @@ def fields_for(issue, config):
     return out
 
 
-def sync(config, client, state, now, *, api=call):
+def plain(node):
+    """Jira's description (Atlassian document format, or plain text on old issues) → plain text."""
+    if isinstance(node, str):
+        return node
+    if not isinstance(node, dict):
+        return ""
+    kind = node.get("type")
+    if kind == "text":
+        return node.get("text") or ""
+    if kind == "hardBreak":
+        return "\n"
+    if kind in ("mention", "emoji", "status"):
+        return (node.get("attrs") or {}).get("text") or ""
+    if kind in ("inlineCard", "blockCard"):
+        return (node.get("attrs") or {}).get("url") or ""
+    inner = "".join(plain(c) for c in node.get("content") or [])
+    return inner + "\n" if kind in ("paragraph", "heading", "listItem", "codeBlock", "blockquote", "tableRow") else inner
+
+
+def _original(issue):
+    f = issue.get("fields") or {}
+    body = "\n".join(line.rstrip() for line in plain(f.get("description")).splitlines() if line.strip())
+    return f"{f.get('summary') or ''}\n\n{body}"[:3000] if body else ""
+
+
+TRANSLATE_PER_ROUND = 10
+TRANSLATE_RETRY_MINUTES = 60
+
+
+def _translations(root, state, now, issues, *, translate):
+    """Translations for these issues (newest first, a handful per round); {} without a translator or while a failed
+    try is cooling down. The translator ({key: text} → {key: 中文}) comes from the caller: this layer runs no AI."""
+    if translate is None:
+        return {}
+    texts = {i["key"]: t for i in issues if (t := _original(i))}
+    texts = dict(list(texts.items())[:TRANSLATE_PER_ROUND])
+    failed = state.get("jira:translate-failed")
+    if not texts or failed and now.isoformat() < failed:
+        return {}
+    try:
+        return translate(root, texts)
+    except Exception as exc:   # no AI set up, a timeout …: the sync itself goes on
+        from datetime import timedelta
+        state.set("jira:translate-failed", (now + timedelta(minutes=TRANSLATE_RETRY_MINUTES)).isoformat())
+        activity.swallowed(root, "sources.jira.translate", exc)
+        return {}
+
+
+def sync(config, client, state, now, *, api=call, translate=None):
     if not connected(config):
         return "no_token"
     from ..brief_migration import single
@@ -159,6 +208,11 @@ def sync(config, client, state, now, *, api=call):
     others = [r for r in rows if not str(r.get("去重键") or "").startswith("jira:")]   # two issues are never one thing
     created, merged, completed, created_ids = [], [], [], []
     open_issues = {i["key"]: i for i in search(config, open_jql(config), api=api)}
+    tracked = {k: r for k, r in by_key.items()
+               if single(r.get("状态")) not in {"完成", "取消"} and single(r.get("执行方")) in {"我", "别人"}}
+    fresh = [i for k, i in open_issues.items() if k not in by_key and not state.get("jira:merged:" + k)]
+    untranslated = [open_issues[k] for k, r in tracked.items() if k in open_issues and not r.get("原话引用")]
+    chinese = _translations(client.root, state, now, fresh + untranslated, translate=translate)
     for issue in open_issues.values():
         key = issue["key"]
         if key in by_key or state.get("jira:merged:" + key):
@@ -171,6 +225,8 @@ def sync(config, client, state, now, *, api=call):
             merged.append(key)
             continue
         fields = fields_for(issue, config)
+        if chinese.get(key):
+            fields["原话引用"] = chinese[key]
         nobody = _nobody(issue, config)
         waits = nobody or (getattr(config, "intake_mode", "all") == "accepted" and fields["执行方"] == ["我"])
         if waits:   # 全自动 (or nobody has it yet): waits for the owner's yes
@@ -182,14 +238,14 @@ def sync(config, client, state, now, *, api=call):
             from ..thread import judge
             judge(client.root, rid, "ask", "Jira 里还没人领的单子，等你确认接不接" if nobody
                   else "别人在 Jira 里指派给你的，等你确认接不接")
-    # Rows this sync made and still open. Merged rows keep the owner's own judgment.
-    tracked = {k: r for k, r in by_key.items()
-               if single(r.get("状态")) not in {"完成", "取消"} and single(r.get("执行方")) in {"我", "别人"}}
+    # Rows this sync made and still open (``tracked`` above). Merged rows keep the owner's own judgment.
     closed_rows, edited = [], []
     for key, row in tracked.items():
         if key in open_issues:   # still open and still followed: follow a new title / due date / assignee
             want = fields_for(open_issues[key], config)
             patch = {k: want[k] for k in ("标题", "截止日", "执行方") if want.get(k) and want[k] != row.get(k)}
+            if chinese.get(key) and not row.get("原话引用"):   # rows made before translations, or a missed round
+                patch["原话引用"] = chinese[key]
             if patch:
                 gateway.update(row, patch, f"jira-edit:{row['record_id']}:{sha1(json.dumps(patch, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]}", "jira")
                 edited.append(key)
@@ -295,7 +351,7 @@ def _find_user(config, name, api):
     raise MatrixError(f"「{name}」对上了好几个人：{'、'.join(u.get('displayName') or '?' for u in pick[:5])}，写全名或邮箱。")
 
 
-def sync_now(root, *, api=call):
+def sync_now(root, *, api=call, translate=None):
     """The 「立即同步」 button: one sync right away, under the same project lock as the 10-minute timer
     (waits up to 20 s behind a running round)."""
     from datetime import datetime
@@ -311,7 +367,7 @@ def sync_now(root, *, api=call):
         try:
             client = Feishu(config, root)
             client.verify_owner(client.auth())   # same check as the timer before it touches the table
-            return sync(config, client, state, datetime.now(TZ), api=api)
+            return sync(config, client, state, datetime.now(TZ), api=api, translate=translate)
         finally:
             state.close()
 

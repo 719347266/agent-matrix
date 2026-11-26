@@ -1041,12 +1041,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "连不上 Notion，检查网络后再试。"})
             if path.startswith("/api/jira/"):
                 from .models import MatrixBusy, MatrixError
+                from .engines import translate_jira
                 from .sources import jira
                 try:
                     if path == "/api/jira/connect":
                         return self._send(200, {"ok": True, **jira.connect(root, body.get("site"), body.get("email"), body.get("token"))})
                     if path == "/api/jira/sync":   # 立即同步: don't wait for the 10-minute round
-                        return self._send(200, {"ok": True, **jira.sync_now(root)})
+                        return self._send(200, {"ok": True, **jira.sync_now(root, translate=translate_jira)})
                     if path == "/api/jira/title":   # fields shown in front of item titles, e.g. App Plan
                         return self._send(200, {"ok": True, "fields": jira.title_fields(root, body.get("fields") or [])})
                     if path == "/api/jira/unassigned":   # projects whose issues nobody has yet come in too

@@ -587,3 +587,23 @@ def test_engine(root, config, name):
     result.update(model=model, at=now().strftime("%m-%d %H:%M"), name=base.NAME)
     conversation.set_setting(Path(root), f"engine_test:{name}", result)
     return result
+
+
+def translate_jira(root, texts):
+    """{key: original} → {key: Chinese}, one short run of the sorting AI for the whole batch (Jira sync
+    passes it in). Raises when the AI gives nothing usable; the rows then wait for a later round."""
+    from .config import load
+    from .workenv import scratch
+    config = load(root / "config.yaml")
+    folder = scratch(root, "jira-translate")
+    (folder / ".last.txt").unlink(missing_ok=True)
+    prompt = ("把下面 JSON 里每个 Jira 单子的标题和正文翻译成简体中文，给中国同事看：意思完整、不删不总结，"
+              "单号、代码、链接、产品名、人名原样保留；本来就是中文的原样照抄。不要运行任何命令，"
+              "最终回复只输出一个 JSON 对象，键不变，值是译文。\n\n" + json.dumps(texts, ensure_ascii=False))
+    engine(root, "sort")(config, folder, effort="low", timeout_minutes=5, ephemeral=True).run(prompt)
+    reply = (folder / ".last.txt").read_text(encoding="utf-8") if (folder / ".last.txt").is_file() else ""
+    try:
+        out = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except ValueError:
+        raise MatrixError("Jira 翻译：AI 没有回 JSON") from None
+    return {k: str(v).strip()[:3000] for k, v in out.items() if k in texts and str(v).strip()}

@@ -55,7 +55,8 @@ class FakeJira:
                 taken = v.get("owner") if by_owner else v["assignee"]
                 return not v["done"] and (v["assignee"] in {"me"} | quoted or by_owner and v.get("owner") in {"me"} | quoted
                                           or not taken and k.split("-")[0] in quoted)
-            return {"isLast": True, "issues": [{"key": k, "fields": self.fields(k, v) | {"summary": v["summary"], "duedate": v["duedate"]}}
+            return {"isLast": True, "issues": [{"key": k, "fields": self.fields(k, v) | {"summary": v["summary"], "duedate": v["duedate"],
+                                                                                    "description": v.get("description")}}
                                                for k, v in self.issues.items() if wanted(k, v)]}
         if path == "/rest/api/3/field":
             return [{"id": "summary", "name": "Summary"}, {"id": "customfield_9", "name": "Issue Owner"},
@@ -269,6 +270,32 @@ class JiraSyncTests(unittest.TestCase):
         self.assertEqual(load(root / "config.yaml").jira_email, "me@x.com")
         with self.assertRaises(jira.MatrixError):   # the site is the owner's to fill in
             jira.connect(root, "", "me@x.com", "t", api=lambda *a, **k: {})
+
+    def test_description_is_translated_into_the_quote(self):
+        adf = lambda t: {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": t}]}]}
+        self.jira.issues["LL-1"]["description"] = adf("Fix the login bug")
+        asked = []
+        def fake(root, texts):
+            asked.append(dict(texts))
+            return {k: "译：" + v for k, v in texts.items()}
+        jira.sync(self.config, self.client, self.state, self.now, api=self.jira, translate=fake)
+        self.assertEqual(asked, [{"LL-1": "概要设计\n\nFix the login bug"}])   # LL-2 has no description: not asked
+        self.assertEqual(self.made("LL-1")["原话引用"], "译：概要设计\n\nFix the login bug")
+        self.assertNotIn("原话引用", self.made("LL-2"))
+        self.jira.issues["LL-2"]["description"] = "Old plain text"   # an existing row is filled in later
+        jira.sync(self.config, self.client, self.state, self.now, api=self.jira, translate=fake)
+        self.assertEqual(asked[-1], {"LL-2": "安全合规\n\nOld plain text"})
+        self.assertEqual(self.made("LL-2")["原话引用"], "译：安全合规\n\nOld plain text")
+
+    def test_a_failed_translation_does_not_stop_the_sync_and_waits_an_hour(self):
+        self.jira.issues["LL-1"]["description"] = "Text"
+        calls = []
+        def broken(root, texts):
+            calls.append(1)
+            raise jira.MatrixError("no AI")
+        self.assertEqual(jira.sync(self.config, self.client, self.state, self.now, api=self.jira, translate=broken)["created"], 2)
+        jira.sync(self.config, self.client, self.state, self.now, api=self.jira, translate=broken)
+        self.assertEqual(len(calls), 1)   # cooling down
 
     def test_off_without_token(self):
         self.assertEqual(jira.sync(Config(), None, None, None), "no_token")
