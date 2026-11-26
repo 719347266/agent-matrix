@@ -36,6 +36,22 @@ class PromptSystem(unittest.TestCase):
                 self.assertNotIn(line, text, f"{name} repeats a shared rule: say it once in _common.md")
         self.assertIn("宁缺毋滥", shared)
 
+    def test_the_hands_off_list_is_the_same_everywhere_an_ai_reads_it(self):
+        hands_off = "删数据、停服、花钱、对外发消息（本人之外有人会收到的都算，包括 GitHub 等公开平台的评论）、提交审批、发布、改产品方向、新建或轮换密钥、修改权限"
+        for name in ("_common.md", "triage.md"):
+            self.assertIn(hands_off, promptfile.read(".", name), f"{name}: keep the same list as _common.md")
+        self.assertIn(hands_off, Path(drive.__file__).read_text(encoding="utf-8"), "drive.py guide: keep the same list as _common.md")
+
+    def test_doing_work_keeps_the_do_it_all_and_check_it_rules(self):
+        worker = promptfile.read(".", "worker.md")
+        for line in ("## 工作方式", "## 改全与核实", "## 改代码时", "## 网页与联网调研", "动手前列全、一起改",
+                     "交付前照本人会用的方式用一遍", "把同类全部复查", "已有的违规记成欠账"):
+            self.assertIn(line, worker)
+        shared = promptfile.read(".", "_common.md")
+        for line in ("### 角色", "### 先问清单", "### 怎么跟他讲", "你推荐哪个、各选项的后果", "不用技术缩写和黑话"):
+            self.assertIn(line, shared)
+        self.assertIn("纠正一次，拦住一类", promptfile.read(".", "learn.md"))
+
     def test_no_prompt_is_left_unused(self):
         folder = Path(promptfile.BUILT_IN)
         used = set(re.findall(r'"([a-z_]+\.md)"', "".join(p.read_text(encoding="utf-8") for p in folder.parent.rglob("*.py"))))
