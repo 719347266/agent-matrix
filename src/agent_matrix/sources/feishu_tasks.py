@@ -104,7 +104,7 @@ def sync(config, client, state, now, *, notify=True):
         created.append(receipt["record_id_list"][0])
         if waits:
             from ..thread import judge
-            judge(client.root, created[-1], "ask", "别人在飞书任务里分给你的，等你确认接不接")
+            judge(client.root, created[-1], "ask", "他人在飞书任务里分配给你")
     # Completion follows the Feishu task, whether the item was created from it or merged with it.
     by_link = {}
     for r in all_rows:

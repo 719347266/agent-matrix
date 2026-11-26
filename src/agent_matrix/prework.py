@@ -36,9 +36,11 @@ OUTPUT_FIELDS = ["AI草稿链接", "预做结果摘要", "预做凭据"]
 
 # Each deliverable type has required sections. No hard length cap: the prompt asks for brevity (a cap blocked real work).
 TEMPLATES = {
+    "需求文档": ["要解决什么问题|背景", "需求"],   # a|b: either heading will do
     "周报": ["本周完成", "进行中", "下周计划", "风险"],
     "数据汇总": ["结论", "口径"],
     "方案": ["推荐", "对比", "拍板"],
+    "调研报告": ["结论"],
     "会议材料": ["议程", "决策", "背景"],
     "回复草稿": ["草稿", "确认"],
     "其他": [],
@@ -51,7 +53,7 @@ class Result(BaseModel):
     record_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     input_version: str = Field(pattern=r"^[a-f0-9]{64}$")
     kind: Literal["internal_result", "draft"]
-    template: Literal["周报", "数据汇总", "方案", "会议材料", "回复草稿", "其他"]
+    template: Literal["需求文档", "调研报告", "周报", "数据汇总", "方案", "会议材料", "回复草稿", "其他"]
     # One line in the 12:00/17:00 batch: "#15 周报初稿 · <summary>".
     summary: str = Field(min_length=1, max_length=40)
     artifact_path: str

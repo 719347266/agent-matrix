@@ -236,8 +236,8 @@ def sync(config, client, state, now, *, api=call, translate=None):
         created_ids.append(rid)
         if waits:
             from ..thread import judge
-            judge(client.root, rid, "ask", "Jira 里还没人领的单子，等你确认接不接" if nobody
-                  else "别人在 Jira 里指派给你的，等你确认接不接")
+            judge(client.root, rid, "ask", "Jira 里还没人领的单子，待确认是否接下" if nobody
+                  else "他人在 Jira 里指派给你")
     # Rows this sync made and still open (``tracked`` above). Merged rows keep the owner's own judgment.
     closed_rows, edited = [], []
     for key, row in tracked.items():
@@ -294,7 +294,7 @@ def _announce(client, state, gateway, record_ids):
         nums = " ".join(f"#{number(r['编号'])}" for r in made if r.get("编号") is not None)
         if not nums:
             return
-        waiting = "，等你确认接不接" if any("待确认" in (r.get("状态") or []) for r in made) else ""
+        waiting = "，待确认是否接下" if any("待确认" in (r.get("状态") or []) for r in made) else ""
         text = f"Jira · 新增 {len(made)} 件：你 {nums}{waiting}\n回复：展开 {nums.split()[0].lstrip('#')} 看单子"
         key = "jira-new-" + sha256(",".join(sorted(record_ids)).encode()).hexdigest()[:24]
         send_once(state, key, lambda: client.send_self(text, key))

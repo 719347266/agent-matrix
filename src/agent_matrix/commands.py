@@ -208,9 +208,7 @@ def run_action(root, payload, request_id, progress):
                     return {"ok": True, "reply": f"#{payload['n']} 已记进对话；这件事标为不做，要接着做先点「恢复」"}
                 # A short action ("完成了", "周五", "不做") runs as that action. Other words go to the AI:
                 # on a finished item they reopen it, and the AI picks up the same conversation.
-                text = say_text(payload["n"], text)
-                if status in {"完成", "待验收"} and " + " in text:
-                    text = f"{payload['n']} 改 {payload['text'].strip()}"
+                text = say_command(payload["n"], payload["text"], status, _one((row or {}).get("执行方")) if row else "AI")
             ops, problems = parse(text, datetime.now(TZ).date())
             applier = Applier(config, client, state, source="cindy", message_ref="app-" + request_id,
                               immediate=True, progress=progress, note=note)
@@ -225,6 +223,24 @@ def run_action(root, payload, request_id, progress):
                     "reply": "\n".join([*lines, *problems]), "deferred": applier.deferred}
         finally:
             state.close()
+
+
+def _one(value):
+    return (value[0] if value else "") if isinstance(value, list) else (value or "")
+
+
+def say_command(n, text, status, executor):
+    """What 「发给 AI」 runs. A short action runs as itself. Other words: on a delivered item the AI revises it; on an
+    item the AI has, they are material for it; on the owner's own item (or one not assigned yet) the AI takes it over
+    with them, since the owner pressed 「发给 AI」 (「只记备注」 is the way to keep words to oneself)."""
+    said = say_text(n, text)
+    if " + " not in said:
+        return said
+    if status in {"完成", "待验收"}:
+        return f"{n} 改 {text.strip()}"
+    if executor != "AI":
+        return f"{n} AI做\n{said}"
+    return said
 
 
 def say_text(n, text):

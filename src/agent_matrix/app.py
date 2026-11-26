@@ -200,6 +200,9 @@ def build_state(root):
         item["cindy_pickup"] = pickups.get(item["rid"])
         item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
+    part("来源和人", lambda: _origins(root, rows, items), None)
+    part("看起来办完了", lambda: _done_hints(root, items), None)
+    part("交付规格和这一轮", lambda: _work_views(root, items), None)
     from . import drive
     ws, running = part("AI 员工状态", lambda: (read_status(root), is_running(root)), ({}, False))
     jobs = part("正在做的活", lambda: drive.open_jobs(root), [])
@@ -234,6 +237,11 @@ def build_state(root):
     settings["cindy_project"] = thread.setting(root, "cindy_project", "")
     from . import approvals
     settings["dev_mode"] = approvals.mode(root)
+    settings["people"] = part("人的分组", lambda: _people_tags(root), {})   # who the owner marked as 客户 / 同事
+    settings["work_mode"] = part("做事方式", lambda: _specs_module().mode(root), "auto")
+    settings["work_style"] = part("做事方式的三个选择", lambda: {**_specs_module().style(root), "text": _specs_module().describe(_specs_module().style(root))}, {})
+    settings["specs"] = part("交付规格", lambda: [{**s, "text": _specs_module().text(root, s["kind"]), "proposal": _specs_module().proposed(root, s["kind"])}
+                                              for s in _specs_module().overview(root)], [])
     waiting = [{**a, "n": n_of.get(a.get("record_id"))} for a in approvals.pending(root)]
     try:
         from . import local_sessions
@@ -291,10 +299,96 @@ def build_state(root):
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": part("接入说明", lambda: drive.guide_text(str(drive.shim_path())), ""),
             **part("记忆", lambda: memory_view(root, items), {}),
+            **part("通讯录", lambda: _contacts_view(root, items), {"people": [], "meetings": []}),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
             "system": {**part("系统状态", lambda: system_info(root), {}), "store": part("存储", lambda: store_info(root), {}),
                        "update": part("版本更新", lambda: _update_status(root), {})}, "bugs": _bugs(root), "broken": broken}
+
+
+def _work_views(root, items):
+    """item["work"]: the kind of deliverable, how settled its spec is, the 做事方式, and what the AI handed in besides the
+    deliverable: the outline waiting for the owner, the review it did (自审), from the item's kept folder."""
+    from . import specs
+    for item in items:
+        folder = Path(root) / "state/work" / item["rid"]
+        p = specs.read_plan(folder) if folder.is_dir() else None
+        if not p:
+            item["work"] = {"mode": specs.mode(root, item["rid"]), "own_mode": _own_mode(root, item["rid"])}
+            continue
+        def read(name):
+            try:
+                return (folder / name).read_text(encoding="utf-8")
+            except OSError:
+                return ""
+        review = [ln.strip() for ln in read("自审.md").splitlines() if ln.strip() and not ln.startswith("#")]
+        kind = p.get("kind") or ""
+        item["work"] = {"kind": kind, "spec": specs.state(root, kind)["label"] if kind else "", "mode": specs.mode(root, item["rid"]),
+                        "own_mode": _own_mode(root, item["rid"]), "outline": read("提纲.md")[:6000],
+                        "waiting_outline": bool(p.get("outline")) and bool(read("提纲.md")) and item.get("status") == "卡住",
+                        "review": review[:30], "fixed": sum(1 for ln in review if "改" in ln[:6])}
+
+
+def _own_mode(root, rid):
+    from .thread import setting
+    return (setting(Path(root), "work_mode:items", {}) or {}).get(rid, "")
+
+
+def _specs_module():
+    from . import specs
+    return specs
+
+
+def _contacts_view(root, items):
+    """D.people: everyone the owner deals with (contacts.directory), with what 心响 understands about each; D.meetings:
+    the meetings with a transcript and who spoke. Items know their chat partner even when the chat was not kept."""
+    from . import contacts
+    extra = [(i.get("origin") or {}).get("person") for i in items]
+    asked = contacts._get(root, contacts.ASKED)
+    people = contacts.directory(root, contacts.self_names(root), [x for x in extra if x])
+    for p in people:
+        p["text"] = re.sub(r"^#\s+.*\n+", "", contacts.understanding(root, p["name"]).strip())
+        p["asked"] = p["name"] in asked
+        p["enough"] = contacts.dealings(p) >= contacts.MIN_DEALINGS
+    return {"people": people, "meetings": contacts.meetings(root)[:80]}
+
+
+def _people_tags(root):
+    from . import people
+    return people.tags(root)
+
+
+def _origins(root, rows, items):
+    """item["origin"]: the meeting, chat or task list it came from and who it is about (people.origin). A 备材料 made
+    from another item has no source of its own: it takes its parent's."""
+    from . import people
+    from .config import load
+    cfg = load(Path(root) / "config.yaml")
+    self_names = {"我", "本人", cfg.owner_name, *cfg.owner_aliases} - {"", None}
+    meetings, chats = people.known(root)
+    tags = people.tags(root)
+    by_rid, by_n = {r.get("record_id"): r for r in rows}, {i["n"]: i for i in items}
+    from . import contacts
+    for item in items:
+        o = item["origin"] = people.origin(by_rid.get(item["rid"]) or {}, item.get("source_url"), meetings, chats, self_names, tags)
+        if o["kind"] == "会议":   # which meeting, and who said the words it came from (not the owner)
+            o["meeting"] = people._param(item.get("source_url"), "meetingId")
+            who = contacts.speaker_at(root, o["meeting"], item.get("quote"))
+            o["person"] = who if who and who not in self_names else None
+    for item in items:
+        parent = by_n.get(item.get("parent"))
+        if parent and item["origin"]["kind"] == "手动":
+            item["origin"] = parent["origin"]
+
+
+def _done_hints(root, items):
+    """item["done_hint"]: the AI found the owner's open item already done somewhere (donecheck), with the words."""
+    from . import donecheck
+    hints = donecheck.hints(root)
+    for item in items:
+        h = hints.get(item["rid"])
+        if h and not h.get("dismissed") and item.get("status") not in ("完成", "取消"):
+            item["done_hint"] = {k: h.get(k) for k in ("evidence", "where", "url", "at")}
 
 
 def _draft_notice(root, row):
@@ -832,6 +926,49 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/workstyle":  # 做事方式的三个选择 (开工 / 提纲 / 自审), some or all of them
+                from . import specs
+                try:
+                    st = specs.set_style(root, **{k: str(v) for k, v in body.items() if k in specs.STYLE})
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True, "style": st, "text": specs.describe(st)})
+            if path == "/api/workmode":  # 做事方式: auto / fast / careful, for everything or for one item ("" = back to the default)
+                from . import specs
+                try:
+                    specs.set_mode(root, str(body.get("mode") or ""), rid=str(body.get("rid") or "") or None)
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True})
+            if path == "/api/spec":  # the owner edits a spec, or takes / drops a proposed revision
+                from . import specs
+                kind = str(body.get("kind") or "")
+                if kind not in specs.TYPES:
+                    return self._send(400, {"ok": False, "reply": "没有这一类交付规格。"})
+                if body.get("proposal") == "accept":
+                    specs.accept(root, kind)
+                elif body.get("proposal") == "drop":
+                    specs.drop(root, kind)
+                else:
+                    specs.save(root, kind, str(body.get("text") or ""))
+                return self._send(200, {"ok": True})
+            if path == "/api/person":  # the owner says who this is (客户 / 同事, "" = back to the guess), writes about them, or asks 心响 to (re)write its understanding
+                from . import contacts, people
+                try:
+                    if "note" in body:
+                        return self._send(200, {"ok": True, "note": contacts.set_note(root, body.get("name"), body.get("note"))})
+                    if body.get("ask"):
+                        contacts.ask(root, body.get("name"), datetime.now(TZ))
+                        return self._send(200, {"ok": True})
+                    tags = people.set_kind(root, body.get("name"), body.get("kind") or "")
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True, "people": tags})
+            if path == "/api/donehint":  # 「看起来办完了」 was wrong: not suggested again for the same words
+                from . import donecheck
+                if not donecheck.dismiss(root, str(body.get("rid") or "")):
+                    return self._send(400, {"ok": False, "reply": "这件事没有待确认的「看起来办完了」。"})
+                return self._send(200, {"ok": True})
             if path == "/api/projects":  # the owner's projects: add one, rename one, take one away
                 from . import projects
                 from .models import MatrixError
@@ -844,6 +981,14 @@ class Handler(BaseHTTPRequestHandler):
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 return self._send(200, {"ok": True, "id": made, "projects": projects.all(root)})
+            if path == "/api/item/prompt":  # the words the AI got for this item, as they were sent
+                from .drive import prompt_path
+                rid = str(body.get("rid") or "")
+                target = prompt_path(root, rid) if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", rid) else None
+                if not target or not target.is_file():
+                    return self._send(200, {"ok": True, "text": "", "at": ""})
+                at = datetime.fromtimestamp(target.stat().st_mtime, TZ).strftime("%m-%d %H:%M")
+                return self._send(200, {"ok": True, "text": target.read_text(encoding="utf-8"), "at": at})
             if path == "/api/item/project":  # put items in a project (0 = none)
                 from . import projects
                 from .models import MatrixError

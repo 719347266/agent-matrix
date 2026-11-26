@@ -5,7 +5,7 @@ Stored in state/xinxiang.db (outside Git, its own SQLite file so writing never w
 lock). The Feishu task table stays the source of truth for the item itself; this is its history.
 
     messages:      item record_id, time, from (me / ai / system), kind (say / step / ask / deliver /
-                   feedback), text, url, driver (本机 GPT / 豚豚 / …)
+                   feedback), text, url, driver (本机 GPT / Cindy / …)
     deliverables:  item record_id, version, time, summary, url, confirm, assumptions, sources
 
 Everything that writes the item notebook (prework.add_note) also lands here, so owner replies,
@@ -205,7 +205,7 @@ def backfill(root):
             month, day, hm, text = m.groups()
             at = f"{datetime.now(TZ).year}-{month}-{day}T{hm}:00+08:00"
             # Before the AI employee existed (2026-11-17 15:00) the work was done by the bot in Cindy.
-            driver = "本机 GPT" if (month, day, hm) >= ("11", "17", "15:00") else "豚豚"
+            driver = "本机 GPT" if (month, day, hm) >= ("11", "17", "15:00") else "Cindy"
             if from_note(root, rid, text, stamp=f"{month}-{day} {hm}", driver=driver):
                 count += 1
             sender, kind, body, url = classify(text)

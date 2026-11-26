@@ -136,6 +136,11 @@ def _poll(config, client, state, now, skip_chat_ids):
     data = client._exec(["im", "+chat-list", "--as", "user", "--types", "p2p,group", "--exclude-muted",
                          "--sort", "active_time", "--page-size", str(MAX_CHATS), "--format", "json"])
     chats = (data.get("items") or data.get("chats") or []) if isinstance(data, dict) else data
+    # External groups and chats are usually clients: the page's 「按人」 puts their people apart (people.origin)
+    known = set(state.get("chats:external", []) or [])
+    external = known | {c["chat_id"] for c in chats if isinstance(c, dict) and c.get("chat_id") and c.get("external")}
+    if external != known:
+        state.set("chats:external", sorted(external))
     names = owner_words(config)
     exclude = set(skip_chat_ids) | set(state.get("chats:exclude", []))
     eligible = {c["chat_id"]: c for c in chats[:MAX_CHATS] if c.get("chat_id") and c["chat_id"] not in exclude

@@ -33,6 +33,46 @@ def _one(value):
     return "" if value is None else str(value)
 
 
+def plain_quote(text):
+    """Feishu's transcript marks a speaker as <cite … user-name="张三"></cite>: keep the name, drop the markup and the
+    blank lines between turns, so what the AI reads is who said what."""
+    text = re.sub(r'<cite[^>]*user-name="([^"]*)"[^>]*>\s*</cite>\s*', r"\1 ", str(text or ""))
+    text = re.sub(r"<[^>]+>", "", text)
+    return re.sub(r"\n\s*\n+", "\n", text).strip()
+
+
+SOURCE_KEYS = ("来源", "来源链接", "原话引用", "去重键")
+
+
+def parent_of(row, rows):
+    by_id = {r.get("record_id"): r for r in rows}
+    for p in row.get("父事项") or []:
+        pid = (p.get("id") or p.get("record_id")) if isinstance(p, dict) else p
+        if pid in by_id:
+            return by_id[pid]
+    return None
+
+
+def with_parent_source(row, rows):
+    """A 备材料 made from another item has no source of its own (来源 = 手动): it works from its parent's meeting, chat
+    and words, or it would start from nothing but a title and guess."""
+    parent = parent_of(row, rows)
+    if not parent or _one(row.get("来源链接")).strip() or _one(row.get("原话引用")).strip():
+        return row
+    return {**row, **{k: parent.get(k) for k in SOURCE_KEYS if parent.get(k)}}
+
+
+def prep_means(parent):
+    """What 备材料 is, said once the same way in the brief and the order."""
+    return (f"这是为 #{_number(parent)}「{_one(parent.get('标题'))}」备的材料。那件事由本人亲自做；你备的是本人动手时要用的东西："
+            "做这件事需要的信息和数据（每条带出处）、能直接改了用的草稿、本人要先决定的问题和你的建议。不替本人做决定，没有依据的内容不写。")
+
+
+def circular(done_when):
+    """「能直接用于：<标题>」 says nothing about when it is done."""
+    return str(done_when or "").strip().startswith("能直接用于")
+
+
 def _number(row):
     try:
         return int(str(row.get("编号")).strip())
@@ -42,21 +82,21 @@ def _number(row):
 
 def task_sheet(row, rows=()):
     """任务单.md: the order as the owner gave it. The owner's later words win over the title."""
-    by_id = {r.get("record_id"): r for r in rows}
-    parent = None
-    for p in row.get("父事项") or []:
-        pid = p.get("id") or p.get("record_id") if isinstance(p, dict) else p
-        if pid in by_id:
-            parent = by_id[pid]
+    parent = parent_of(row, rows)
+    row = with_parent_source(row, rows)
     lines = [f"# #{_number(row)} {_one(row.get('标题'))}", ""]
     for label, key in [("要做什么", "下一步动作"), ("做到什么程度算完", "完成标准"), ("截止", "截止日"),
                        ("来源", "来源"), ("来源链接", "来源链接"), ("原话", "原话引用"), ("关联飞书任务", "关联任务链接")]:
         value = _one(row.get(key)).strip()
+        if key == "原话引用":
+            value = plain_quote(value)
+        if key == "完成标准" and circular(value):
+            continue
         if value:
             lines.append(f"- **{label}**：{value[:600]}")
     if parent:
-        lines.append(f"- **这是为 #{_number(parent)}「{_one(parent.get('标题'))}」备的材料**，做出来要能直接拿去用。")
-    if not _one(row.get("完成标准")).strip():
+        lines.append(f"- **备材料**：{prep_means(parent)}")
+    if not _one(row.get("完成标准")).strip() or circular(_one(row.get("完成标准"))):
         lines.append("- **做到什么程度算完**：没写。按标题和背景自己定一个合理的标准，写进交付的「我做的假设」。")
     extra = _one(row.get("补充材料")).strip()
     if extra:
@@ -95,13 +135,13 @@ def transcript_excerpt(root, row, before=TRANSCRIPT_BEFORE, after=TRANSCRIPT_AFT
             words = re.sub(r"\s+", "", stamp.group(2))[:12]
             anchor = next((i for i, line in enumerate(lines) if words and words in re.sub(r"\s+", "", line)), None)
     if anchor is None:
-        return "\n".join(lines[:before + after])[:cap], path
+        return plain_quote("\n".join(lines[:before + after]))[:cap], path
     start, end = max(0, anchor - before), min(len(lines), anchor + after)
     text = "\n".join(lines[start:end])
     if len(text) > cap:  # keep the promise in the middle when trimming
         mid_at = len("\n".join(lines[start:anchor]))
         text = text[max(0, mid_at - cap // 2): mid_at + cap // 2]
-    return text, path
+    return plain_quote(text), path
 
 
 # ---- chat around the source message -----------------------------------------------------------------

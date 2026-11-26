@@ -168,7 +168,9 @@ def _codex(home,now):
                 alive[proc.get("conversationId")]=proc.get("turnId")
     for p in sorted(base.glob("state_[0-9]*.sqlite"),reverse=True)[:1]:
         with closing(_ro(p)) as db:
-            rows=db.execute("""SELECT id,title,cwd,rollout_path,updated_at FROM threads WHERE archived=0
+            # `codex exec` runs are scripts (心响's own jobs, other apps' judges), not conversations the owner opened
+            scripted="AND source!='exec'" if "source" in {c[1] for c in db.execute("PRAGMA table_info(threads)")} else ""
+            rows=db.execute(f"""SELECT id,title,cwd,rollout_path,updated_at FROM threads WHERE archived=0 {scripted}
                 ORDER BY updated_at DESC LIMIT 48""").fetchall()
         for sid,title,cwd,rollout,updated in rows:
             if not rollout: continue
@@ -203,20 +205,32 @@ def _db(root):
     return database.open(root, "xinxiang")
 
 
+def _title(text):
+    """A run 心响 started shows its first line as the title: 「# 你是本人的 AI 员工。这一轮只做一件事：#61 …」 → 「#61 …」."""
+    return re.sub(r"^#\s*你是本人的 AI 员工。?\s*这一轮只做一件事：", "", str(text or "")).strip() or str(text or "")
+
+
 def _public(rec, present):
     """present: the conversation is open now (replying or waiting); otherwise only remembered on an item."""
     working = present and rec.get("working", True)
     return {"job":"local:"+rec["key"],"engine":{"codex":"gpt"}.get(rec["source"],rec["source"]),
-            "driver":rec.get("app") or NAMES[rec["source"]],"session":rec["sid"],"title":rec["title"],
+            "driver":rec.get("app") or NAMES[rec["source"]],"session":rec["sid"],"title":_title(rec["title"]),
             "doing":rec.get("doing",""),"working":working,
             "status":"open" if working else ("idle" if present else "recorded"),"can_open":True,"local":True,
             "step":"正在回复" if working else ("等你" if present else ""),
             "started":datetime.fromtimestamp(rec["stamp"],TZ).strftime("%m-%d %H:%M")}
 
 
+ITEM_RUN = re.compile(r"^\s*心响\s*#(\d{1,5})\s")   # a scheduled run reports its job first: 「心响 #94 标题 …」
+SCHEDULED = CINDY_SOURCES["scheduler"]
+
+
 def _bind_of(root, rec, items):
-    """The item a conversation is clearly about, or None: it runs in the item's own folder (opened from 心响),
-    or it names one item ("#62", or the item's full title)."""
+    """The item a conversation is clearly about, or None: it runs in the item's own folder (opened from 心响);
+    a scheduled run that did that item's work (its report starts 「心响 #94 …」, not a meeting, a lesson or a
+    tidy-up that only mentions items); or it names one item ("#62", or the item's full title) in its title or, for
+    Claude and Codex, in the owner's last request. Cindy's preview is not read for this: it is often the AI's own
+    report of whatever it did last, other items and meetings too."""
     from .workenv import work_base
     cwd = str(rec.get("cwd") or "")
     if cwd:
@@ -224,13 +238,35 @@ def _bind_of(root, rec, items):
         for i in items:
             if cwd == f"{base}/{i['rid']}":
                 return i["rid"]
-    text = f"{rec.get('title','')} {rec.get('doing','')}"
     shown = [i for i in items if not i.get("hidden")]
-    numbers = {int(x) for x in re.findall(r"#(\d{1,5})(?!\d)", text)}
+    if rec.get("app") == SCHEDULED:
+        m = ITEM_RUN.match(str(rec.get("doing") or ""))
+        hit = [i for i in shown if m and i["n"] == int(m.group(1))]
+        return hit[0]["rid"] if hit else None
+    text = str(rec.get("title") or "") + ("" if rec.get("source") == "cindy" else " " + str(rec.get("doing") or ""))
+    numbers = {int(x) for x in re.findall(r"(?<![\w#-])#(\d{1,5})(?![\w-])", text)}
     hit = [i for i in shown if i["n"] in numbers]
     if not hit:
         hit = [i for i in shown if len(i.get("title") or "") >= 6 and i["title"] in text]
     return hit[0]["rid"] if len(hit) == 1 else None
+
+
+def _forget_wrong(root, db, records, items):
+    """Once: scheduled runs bound before the rule above (a meeting run, a lesson, a tidy-up that only mentioned an
+    item) come off; a run that did the item's work stays."""
+    if db.execute("SELECT 1 FROM local_session_skips WHERE key='cleanup:scheduled-v1'").fetchone():
+        return
+    for key, (rid, r) in list(records.items()):
+        if r.get("app") == SCHEDULED and _bind_of(root, r, items) != rid:
+            db.execute("DELETE FROM local_session_items WHERE key=?", (key,))
+            records.pop(key)
+    db.execute("INSERT OR IGNORE INTO local_session_skips VALUES('cleanup:scheduled-v1')")
+
+
+def _scheduled_view(public, kept):
+    """A scheduled run on its item: which run, and what it did there (as kept when it was bound), not what it
+    went on to do after."""
+    return {**public, "title": f"定时任务 {public['started']} 那一轮", "doing": kept.get("doing") or public.get("doing", "")}
 
 
 def view(root,by_item,running,items):
@@ -240,6 +276,7 @@ def view(root,by_item,running,items):
     with closing(_db(root)) as db, db:
         records={key:(rid,json.loads(data)) for key,rid,data in db.execute("SELECT key,rid,data FROM local_session_items")}
         skipped={key for (key,) in db.execute("SELECT key FROM local_session_skips")}
+        _forget_wrong(root,db,records,items)
         for key,r in obs.items():
             if key in records or key in skipped:
                 continue
@@ -260,6 +297,7 @@ def view(root,by_item,running,items):
         if not any(s.get("session")==r["sid"] for s in by_item.get(rid,[])):
             now=obs.get(key)
             extra={**_public(now or r,key in obs),"key":key}
+            if r.get("app")==SCHEDULED: extra=_scheduled_view(extra,r)
             by_item.setdefault(rid,[]).append({**extra,"first":extra["started"],"rounds":1})
     for key,r in obs.items():
         if r["sid"] in active or (r.get("sdk") and r["sdk"] in active): continue
@@ -386,7 +424,7 @@ def write_context(root, item, history="", *, buddy=False):
         guide = (f"这个文件夹是心响事项 #{item['n']}「{item.get('title') or ''}」的工作文件夹。下面是这件事的简报，照它接着做，不要从头来；"
                  "先用两三句话说清现在到哪一步、还差什么，再问本人接下来要做什么。\n\n" + told)
         if buddy:
-            guide = "豚豚接手：照下面的简报接着做，按所属项目规范直接续做；没有新反馈不重做、不代验收。\n\n" + told
+            guide = "接手：照下面的简报接着做，按所属项目规范直接续做；没有新反馈不重做、不代验收。\n\n" + told
         for name in ("AGENTS.md", "CLAUDE.md"):
             (folder / name).write_text(guide, encoding="utf-8")
         return folder
@@ -417,7 +455,7 @@ def write_context(root, item, history="", *, buddy=False):
              "接手时先读 心响事项.md：里面有来龙去脉、之前的对话和已经做出的东西。接着往下做，不要从头来；"
              "先用两三句话说清现在到哪一步、还差什么，再问本人接下来要做什么。\n")
     if buddy:
-        guide = "豚豚接手：先读 心响事项.md、已有交付和最新反馈，再按所属项目规范直接续做；没有新反馈不重做、不代验收。\n"
+        guide = "接手：先读 心响事项.md、已有交付和最新反馈，再按所属项目规范直接续做；没有新反馈不重做、不代验收。\n"
     for name in ("AGENTS.md", "CLAUDE.md"):
         (folder / name).write_text(guide, encoding="utf-8")
     return folder

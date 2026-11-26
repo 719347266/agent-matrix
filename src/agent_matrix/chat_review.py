@@ -314,7 +314,7 @@ def publish(config, client, state, review):
         outcome[a.message_id] = "item:" + created[-1]
         if m.get("handed"):
             from .thread import judge
-            judge(client.root, created[-1], "ask", f"{m['sender_name']} 私聊找你的，等你确认接不接")
+            judge(client.root, created[-1], "ask", f"{m['sender_name']} 私聊发给你的")
         itemlinks.link_by_number(client.root, rows, created[-1], a.follows)
     state.db.executemany("UPDATE chat_candidates SET status=? WHERE message_id=?", [(v, k) for k, v in outcome.items()])
     state.db.execute("UPDATE chat_candidates SET status='skip:AI 看过，不是要你做的事' WHERE batch=? AND status='pending'",

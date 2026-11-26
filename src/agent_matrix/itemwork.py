@@ -27,7 +27,7 @@ from .workenv import _check, now, project, read_status, scratch, write_status
 MAX_FIX_ROUNDS = 2
 
 SECTIONS_ALWAYS = ["用到的资料", "我做的假设"]
-TEMPLATE_HINT = {"周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
+TEMPLATE_HINT = {"调研报告": "结论 / 调研的问题和范围 / 发现（每条带证据） / 建议 / 局限", "需求文档": "要解决什么问题（或背景） / 需求（按功能分节，每条规则写清条件和结果） / 待确认", "周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
                  "方案": "推荐 / 选项对比 / 需要你拍板", "会议材料": "议程 / 需要决策 / 背景数据",
                  "回复草稿": "草稿 / 需要你确认", "其他": "按完成标准逐条覆盖"}
 TRIAGE_LABEL = {"ai": "AI 能独立做，已接手", "prep": "需要你来做，AI 先备材料", "me": "需要你自己来",
@@ -49,8 +49,8 @@ def check_result(workdir, row, root=None):
         result = json.loads((Path(workdir) / "结果.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None, "没有找到有效的 结果.json。按说明写好再结束。"
-    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked", "handled"}:
-        return result, "结果.json 的 outcome 只能是 done、blocked 或 handled。"
+    if not isinstance(result, dict) or result.get("outcome") not in {"done", "blocked", "handled", "outline"}:
+        return result, "结果.json 的 outcome 只能是 done、blocked、handled 或 outline。"
     problem = draft_problem(result, root) if root else None
     if problem:
         return result, problem
@@ -62,6 +62,20 @@ def check_result(workdir, row, root=None):
         if not str(result.get("question") or "").strip() or not str(result.get("tried") or "").strip():
             return result, "卡住时必须写 question（问本人的一个具体问题）和 tried（已经试过哪些办法）。"
         return result, None
+    from . import specs
+    plan = specs.read_plan(workdir) or {}
+    if result["outcome"] == "outline":
+        try:
+            outline = (Path(workdir) / "提纲.md").read_text(encoding="utf-8")
+        except OSError:
+            return result, "交提纲时要写 提纲.md（## 调研 / ## 提纲 / ## 要你定的）。"
+        if "提纲" not in "".join(_section_names(outline)) or len(_plain(outline)) < 40:
+            return result, "提纲.md 要有「## 提纲」一节，写清每一节打算写什么。"
+        if plan.get("form") and not (Path(workdir) / "规格.md").is_file():
+            return result, "这一类还没有交付规格：同时写 规格.md（## 结构 / ## 写法 / ## 要求 / ## 检查清单 / ## 范例）。"
+        return result, None
+    if plan.get("outline"):
+        return result, "这一轮只交提纲：写 提纲.md，结果.json 的 outcome 写 outline。"
     template = result.get("template")
     if template not in TEMPLATES:
         return result, "template 只能是：" + "、".join(TEMPLATES) + "。"
@@ -89,9 +103,9 @@ def check_result(workdir, row, root=None):
     if missing:
         return result, "交付.md 最后要有这两节小标题：" + "、".join(f"## {s}" for s in missing) + "。"
     sections = TEMPLATES[template]
-    missing = [s for s in sections if not any(s in n for n in names)]
+    missing = [s for s in sections if not any(alt in n for alt in s.split("|") for n in names)]
     if missing:
-        return result, f"按「{template}」模板，交付.md 缺少这些小标题：" + "、".join(missing) + "。"
+        return result, f"按「{template}」模板，交付.md 缺少这些小标题：" + "、".join(s.replace("|", "或") for s in missing) + "。"
     found = [w for w in PLACEHOLDERS if w in doc]
     if found:
         return result, "交付.md 里还有占位文字：" + "、".join(found) + "。换成真实内容。"
@@ -99,6 +113,14 @@ def check_result(workdir, row, root=None):
     length = len(_plain(body))
     if length < 80:
         return result, "交付.md 正文太短，像没做完。"
+    if plan.get("review") or plan.get("check"):   # the review: a round of its own after the draft, or the list in the same round
+        try:
+            review = (Path(workdir) / "自审.md").read_text(encoding="utf-8")
+        except OSError:
+            review = ""
+        if "自审" not in "".join(_section_names(review)):
+            return result, specs.review_request(plan) if plan.get("review") else \
+                "交之前对照检查清单逐条自查，结论写进 自审.md（## 自审，每条一行：「✓」或改了什么），再交。"
     return result, None
 
 
@@ -165,7 +187,7 @@ def resume_prompt(changes, timed_out):
     if changes:
         lines = "\n".join("- " + c for c in changes)
         return ("本人有新的要求，事件.md 和任务单.md 已更新：\n" + lines +
-                "\n\n在上一版（上一版.md）基础上改，逐条改到。规则不变：先补背景，写 step.txt，"
+                "\n\n在上一版（上一版.md）基础上改，逐条改到；每一条都用同样的办法把同类全部复查，一次补齐。规则不变：先补背景，写 step.txt，"
                 "最后重写 交付.md 和 结果.json 再结束。")
     if timed_out:
         return "上一轮时间到了，没做完。接着做，不要从头来；最后写好 交付.md 和 结果.json 再结束。"
@@ -255,7 +277,7 @@ class Item:
         (self.workdir / "任务单.md").write_text(background.task_sheet(row, rows), encoding="utf-8")
         self.show("找背景", "程序在拉背景")
         own_base = "/base/" + self.config.base_token if self.config.base_token else ""
-        (self.workdir / "背景.md").write_text(background.build(self.root, client, rows, row, now(), notes=notes, previous=previous,
+        (self.workdir / "背景.md").write_text(background.build(self.root, client, rows, background.with_parent_source(row, rows), now(), notes=notes, previous=previous,
                                                              skip_urls=[own_base], copy_to=self.workdir), encoding="utf-8")
 
     def on_tick(self):
@@ -330,14 +352,22 @@ class Item:
         self.done_status("卡住", question[:28], tokens)
         return {"record_id": self.rid, "result": "blocked", "question": question}
 
-    def publish(self, result, tokens):
-        from .prework import add_note, notify, publish_markdown
-        self.show("交付中", "建飞书文档")
+    KEPT = ("交付.md", "结果.json", "事件.md", "任务单.md", "背景.md", "提纲.md", "自审.md", "规格.md", ".plan.json",
+            ".thread", ".claude-session", ".gemini-session", ".seen.json")
+
+    def keep_files(self):
+        """The project's own copy of what the AI wrote (the page reads 提纲 and 自审 from there)."""
         keep = record_copy(self.root, self.rid)
-        for name in ("交付.md", "结果.json", "事件.md", "任务单.md", "背景.md", ".thread", ".claude-session", ".gemini-session", ".seen.json"):
+        for name in self.KEPT:
             # On a plain-ASCII project path the AI works in the project's own copy: nothing to copy then.
             if (self.workdir / name).is_file() and (self.workdir / name).resolve() != (keep / name).resolve():
                 shutil.copyfile(self.workdir / name, keep / name)
+        return keep
+
+    def publish(self, result, tokens):
+        from .prework import add_note, notify, publish_markdown
+        self.show("交付中", "建飞书文档")
+        keep = self.keep_files()
         with project(self.root, self.config) as (client, state):
             self.require_active()
             published = publish_markdown(self.config, client, state, self.rid, self.version,

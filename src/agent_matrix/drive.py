@@ -39,6 +39,7 @@ from .timeutil import TZ
 ITEM_LEASE_MINUTES = 120
 OTHER_LEASE_MINUTES = 30
 MAX_FIX_ROUNDS = 2
+ITEM_FIX_ROUNDS = 3   # an item gets one more: one of its rounds may be the review (specs.review_request)
 
 
 
@@ -155,6 +156,124 @@ def _prepare_triage(root, config, driver):
     return {"id": f"triage-{stamp}", "kind": "triage", "title": f"判断新进来的 {len(items)} 件事", "folder": str(folder),
             "ref": {"items": items, "numbers": numbers}, "output": ["triage.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
             "instructions": promptfile.read(root, "triage.md")}
+
+
+def _prepare_donecheck(root, config, driver):
+    """The owner's own open items, with what was said after each: has the owner already done it? (donecheck)"""
+    from . import donecheck
+    from .workenv import project, scratch
+    if _busy(root, "donecheck"):
+        return None
+    from .snapshot import _snapshot
+    if not donecheck.due(root, _snapshot(root).get("rows") or [], now()):   # cheap, local: most rounds stop here
+        return None
+    from .workflow import Gateway
+    with project(root, config) as (client, state):
+        rows = Gateway(client, state).rows()
+    picked = donecheck.due(root, rows, now())
+    if not picked:
+        return None
+    from .background import after_context
+    one = lambda v: (v[0] if isinstance(v, list) and v else v) or ""
+    items = []
+    for r in picked:
+        try:
+            n = int(str(r.get("编号")).strip())
+        except (TypeError, ValueError):
+            continue
+        items.append({"n": n, "record_id": r["record_id"], "title": str(one(r.get("标题")))[:80],
+                      "what": str(one(r.get("下一步动作")))[:300], "done_when": str(one(r.get("完成标准")))[:120],
+                      "quote": str(one(r.get("原话引用")))[:300], "source": one(r.get("来源")), "since": str(r.get("创建时间") or "")[:16],
+                      "after": after_context(client, r, now())})
+    if not items:
+        return None
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "donecheck", stamp)
+    (folder / "items.json").write_text(json.dumps([{k: v for k, v in i.items() if k != "record_id"} for i in items],
+                                                 ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"id": f"donecheck-{stamp}", "kind": "donecheck", "title": f"看你的 {len(items)} 件事办完没有", "folder": str(folder),
+            "ref": {"items": items}, "output": ["donecheck.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": promptfile.read(root, "donecheck.md")}
+
+
+def _submit_donecheck(root, job):
+    from . import activity, donecheck, thread as conversation
+    try:
+        verdicts = json.loads((Path(job["folder"]) / "donecheck.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "没有找到有效的 donecheck.json（格式见说明里的例子）。"}
+    by_n = {i["n"]: i for i in job["ref"]["items"]}
+    found = []
+    for v in verdicts if isinstance(verdicts, list) else []:
+        item = by_n.get(v.get("n") if isinstance(v, dict) else None)
+        if not item:
+            continue
+        hint = donecheck.accept(root, item, v, now())
+        if hint:
+            conversation.add(root, item["record_id"], "ai", "say", f"看起来已经办完了：{hint['evidence']}"
+                             + (f"\n出处：{hint['where']}" if hint["where"] else "") + (f"\n{hint['url']}" if hint["url"] else "")
+                             + "\n点「完成」关掉；没办完就点「没办完」。", driver=job.get("driver"))
+            found.append(item["n"])
+    donecheck.mark_checked(root, [i["record_id"] for i in job["ref"]["items"]], now())
+    activity.log(root, "detect", f"看了你的 {len(by_n)} 件事办完没有" + (f"：#{'、#'.join(map(str, found))} 看起来办完了" if found else "：都还没办完"))
+    _close(root, job, "done")
+    return {"ok": True, "status": "done", "done": found}
+
+
+def _prepare_people(root, config, driver):
+    """A few people the owner deals with, with what was said with them: who are they, what do they care about (contacts)."""
+    from . import contacts
+    from .workenv import scratch
+    if _busy(root, "people"):
+        return None
+    picked = contacts.due(root, contacts.directory(root, contacts.self_names(root)), now())
+    if not picked:
+        return None
+    from .snapshot import _snapshot
+    rows = _snapshot(root).get("rows") or []
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "people", stamp)
+    (folder / "people").mkdir(exist_ok=True)
+    for p in picked:
+        (folder / "people" / f"{contacts.file_name(p['name'])}.md").write_text(contacts.evidence(root, p, rows), encoding="utf-8")
+    contacts.mark_tried(root, [p["name"] for p in picked], now())
+    names = "、".join(p["name"] for p in picked)
+    return {"id": f"people-{stamp}", "kind": "people", "title": f"认识 {names}", "folder": str(folder),
+            "ref": {"people": picked}, "output": ["people.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": promptfile.read(root, "people.md")}
+
+
+def _submit_people(root, job):
+    from . import activity, contacts
+    try:
+        written = json.loads((Path(job["folder"]) / "people.json").read_text(encoding="utf-8"))
+        assert isinstance(written, list)
+    except (OSError, ValueError, AssertionError):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "没有找到有效的 people.json（格式见说明里的例子）。"}
+    by_name = {}
+    for p in job["ref"]["people"]:
+        by_name[p["name"]] = by_name[contacts.file_name(p["name"])] = p
+    kept, problems = [], []
+    for w in written:
+        person = by_name.get(str(w.get("name") or "").removesuffix(".md")) if isinstance(w, dict) else None
+        if not person:
+            continue
+        problem = contacts.accept(root, person, w.get("text"), now())
+        if problem:
+            problems.append(f"{person['name']}：{problem}")
+        else:
+            kept.append(person["name"])
+    if problems and job["rounds"] < MAX_FIX_ROUNDS:
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "这几份要改：" + "；".join(problems)}
+    activity.log(root, "detect", f"认识了 {'、'.join(kept)}" if kept else "认识身边的人：材料还不够，这一轮没写")
+    _close(root, job, "done")
+    return {"ok": True, "status": "done", "people": kept}
 
 
 TRIAGE_OTHERS = 200
@@ -823,7 +942,8 @@ def _item_job(root, config, driver, item, client, rows, row, notes):
     history = _history_text(root, item.rid)
     from .eventbrief import build as brief
     told = brief(root, item.rid, rows)
-    base = (told + "\n---\n\n" if told else "") + first_prompt(root, row)   # the brief first: the AI need not dig for it
+    stage = _stage(root, item, rows, row)   # 交付规格 and 做事方式: what this round produces
+    base = (told + "\n---\n\n" if told else "") + first_prompt(root, row) + "\n\n" + stage   # the brief first: the AI need not dig for it
     extra = []
     if history:
         extra += ["", "## 这件事之前的对话（心响保存；可能是别的 AI 做的，接着往下，不要从头来）", history]
@@ -834,10 +954,27 @@ def _item_job(root, config, driver, item, client, rows, row, notes):
             "output": ["交付.md", "结果.json"], "lease_until": _lease(ITEM_LEASE_MINUTES),
             "instructions": base + "\n".join(extra),
             # the built-in GPT resumes its own conversation instead of re-reading everything
-            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
+            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) + "\n\n" + stage if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
 
 
-SORTING = ("triage", "meeting", "chat", "learn")   # 整理: judging new items, meetings, chats, learning rules
+def _stage(root, item, rows, row):
+    """Which kind of deliverable this is, how settled its spec is, and what this round does (specs.plan), kept in the
+    folder for the check after it and for the page."""
+    from . import specs
+    from .background import _one, parent_of
+    old = specs.read_plan(item.workdir) or {}
+    parent = parent_of(row, rows)
+    kind = old.get("kind") or specs.guess(_one(row.get("标题")), _one(row.get("下一步动作")), _one(parent.get("标题")) if parent else "")
+    p = specs.plan(root, item.rid, kind, outline_done=(item.workdir / "提纲.md").is_file())
+    p["workdir"] = str(item.workdir)
+    p["checklist"] = specs.checklist(specs.text(root, kind)) or specs.checklist(specs.expert(root, kind)) if kind else []
+    specs.keep_plan(item.workdir, p)
+    if p.get("review") or p.get("check"):
+        specs.writing_check(root, item.workdir)
+    return specs.work_text(root, p)
+
+
+SORTING = ("triage", "meeting", "chat", "learn", "donecheck", "people")   # 整理: judging new items, meetings, chats, learning rules, done yet, people
 
 
 def item_runner(root):
@@ -904,6 +1041,15 @@ def has_sorting_for(root, config):
             from .snapshot import _snapshot
             if _pending_new(_snapshot(root).get("rows") or [], conversation.judgments(root)):
                 return "triage"
+        if not _busy(root, "donecheck"):
+            from . import donecheck
+            from .snapshot import _snapshot
+            if donecheck.due(root, _snapshot(root).get("rows") or [], now()):
+                return "donecheck"
+        if not _busy(root, "people"):
+            from . import contacts
+            if contacts.due(root, contacts.directory(root, contacts.self_names(root)), now()):
+                return "people"
     except Exception as exc:
         activity.swallowed(root, "drive.has_sorting_for", exc)
     return None
@@ -943,8 +1089,8 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = _prepare_organize(root, config, driver)
         if job:
             return _open(root, job, driver)
-    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn)):
-        if kind not in wanted:
+    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn, _prepare_donecheck, None)):
+        if kind not in wanted or prepare is None:
             continue
         if kind in {"chat", "learn"}:
             from .state import exclusive_lock
@@ -959,7 +1105,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = prepare(root, config, driver)
         if job:
             return _open(root, job, driver)
-    tidy_now = lambda: (_open(root, job, driver) if "tidy" in wanted and (job := _prepare_tidy(root, config, driver)) else None)
+    def tidy_now():   # idle work: getting to know people, tidying the memory; after the owner's own work, never before it
+        if "people" in wanted and (job := _prepare_people(root, config, driver)):
+            return _open(root, job, driver)
+        return _open(root, job, driver) if "tidy" in wanted and (job := _prepare_tidy(root, config, driver)) else None
     if "item" not in wanted:
         return tidy_now()   # tidying the memory is for idle time: after the owner's own work, never before it
     tried = set(skip)
@@ -1010,7 +1159,26 @@ def _open(root, job, driver):
         job["instructions"] = cindy_header(root, job) + job["instructions"]
     job.update(driver=driver, status="open", rounds=0, step="领到了")
     _save(root, job)
+    keep_prompt(root, job)
     return job
+
+
+def prompt_path(root, record_id):
+    return Path(root) / "state" / "prompts" / f"{record_id}.md"
+
+
+def keep_prompt(root, job):
+    """The exact words this item's AI was given, kept so the owner can read them (事项详情 → 查看交给 AI 的说明).
+    The latest run only; the built-in GPT gets builtin_prompt, every other AI the instructions."""
+    rid = (job.get("ref") or {}).get("record_id")
+    if job.get("kind") != "item" or not rid:
+        return
+    try:
+        path = prompt_path(root, rid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(job.get("builtin_prompt") or job.get("instructions") or "", encoding="utf-8")
+    except OSError as exc:
+        activity.swallowed(root, "drive.keep_prompt", exc)
 
 
 def common_text(root):
@@ -1058,7 +1226,8 @@ def work_for(root, config, driver):
 
 
 WORK_WORDS = {"setup": "接入设置", "profile": "「认识你」", "organize": "整理项目和版本", "tidy": "整理记忆",
-              "item": "交给 AI 的事", "meeting": "整理会议", "chat": "整理聊天", "triage": "判断新进来的事"}
+              "item": "交给 AI 的事", "meeting": "整理会议", "chat": "整理聊天", "triage": "判断新进来的事",
+              "donecheck": "看你的事办完没有", "people": "认识身边的人"}
 
 
 def has_items_for(root, config, driver="Cindy"):
@@ -1133,6 +1302,12 @@ def fail(root, job, problem):
     if job["kind"] == "learn":
         activity.log(root, "learn", "学规矩已延后，后台会再试", detail=str(problem)[:300], status="deferred", ref=job["id"])
         return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
+    if job["kind"] == "people":   # nothing waits on it: the same people are tried again later, quietly
+        activity.log(root, "detect", "认识身边的人：这一轮没做成，过几个小时再试", detail=str(problem)[:300], status="deferred", ref=job["id"])
+        return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
+    if job["kind"] == "donecheck":   # nothing waits on it: the same items are looked at again next round, quietly
+        activity.log(root, "detect", "看你的事办完没有：这一轮没做成，下一轮再看", detail=str(problem)[:300], status="deferred", ref=job["id"])
+        return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
     activity.log(root, "error", f"{job.get('title') or job['kind']}：没做成", detail=str(problem)[:300], status="failed")
     try:
         key = f"job-failed:{job['id']}:{job.get('rounds', 0)}"
@@ -1171,6 +1346,10 @@ def submit(root, config, job_id, driver=None):
         return _submit_item(root, config, job)
     if kind == "triage":
         return _submit_triage(root, job)
+    if kind == "donecheck":
+        return _submit_donecheck(root, job)
+    if kind == "people":
+        return _submit_people(root, job)
     if kind == "learn":
         return _submit_learn(root, job)
     if kind == "setup":
@@ -1215,7 +1394,7 @@ def _submit_item(root, config, job):
         return closed
     if problem:
         job["rounds"] += 1
-        if job["rounds"] > MAX_FIX_ROUNDS:
+        if job["rounds"] > ITEM_FIX_ROUNDS:
             item.block(f"自检没通过：{problem}"[:28], {"note": problem}, 0)
             _close(root, job, "blocked")
             return {"ok": False, "status": "blocked", "problem": problem}
@@ -1231,9 +1410,30 @@ def _submit_item(root, config, job):
         return {"ok": True, "status": "blocked"}
     if result["outcome"] == "handled":
         return _handled(root, item, job, result)
+    _keep_spec(root, item)
+    if result["outcome"] == "outline":
+        item.keep_files()
+        question = str(result.get("question") or "按这个提纲写吗？").strip()
+        item.block(f"提纲好了：{question}"[:60], {"tried": "调研完，提纲写在 提纲.md", "note": str(result.get("summary") or "")}, 0)
+        _close(root, job, "blocked")
+        return {"ok": True, "status": "blocked", "outline": True}
     published = item.publish(result, 0)
     _close(root, job, "done")
     return {"ok": True, "status": "done", "url": published.get("url")}
+
+
+def _keep_spec(root, item):
+    """规格.md from the AI: the first spec of its kind is used from now on; under review it waits for the owner's 用."""
+    from . import specs
+    p = specs.read_plan(item.workdir) or {}
+    try:
+        body = (item.workdir / "规格.md").read_text(encoding="utf-8")
+    except OSError:
+        return
+    if p.get("form") and specs.form(root, p.get("kind"), body):
+        activity.log(root, "learn", f"#{item.n} 做事时形成了「{p['kind']}」的交付规格（草稿），在「记忆 → 交付规格」里能看能改")
+    elif p.get("revise") and specs.propose(root, p.get("kind"), body):
+        activity.log(root, "learn", f"「{p['kind']}」的交付规格有一份修订等你确认")
 
 
 def save_drafts(root, drafts, job_id):
@@ -1321,6 +1521,8 @@ def _submit_triage(root, job):
         return {"ok": False, "status": "fix", "problem": "没有找到有效的 triage.json（格式见说明里的例子）。"}
     by_n = {i["n"]: i for i in job["ref"]["items"]}
     applied = []
+    from . import specs
+    ask_first = specs.style(root)["start"] == "ask"   # 做事方式 → 开工：先问我
     for v in verdicts if isinstance(verdicts, list) else []:
         item = by_n.get(v.get("n") if isinstance(v, dict) else None)
         decision = (v or {}).get("decision")
@@ -1335,7 +1537,8 @@ def _submit_triage(root, job):
         url = str(v.get("url") or "") if str(v.get("url") or "").startswith("http") else ""
         n = item["n"]
         # from a meeting: talk, not a handoff. The AI only suggests; the item stays 待确认 until the owner says 「AI做」.
-        held = decision in {"ai", "prep"} and item.get("source") == "会议"
+        # the owner chose 「先问我」: the same, for everything
+        held = decision in {"ai", "prep"} and (item.get("source") == "会议" or ask_first)
         commands = [] if held else {"ai": [f"{n} AI做"], "prep": [f"{n} AI备"], "skip": [f"{n} 不做"],
                                     "done": [f"{n} 完成", f"{n} + {url}"] if url else [f"{n} 无交付"]}.get(decision, [])
         ok = all([_reply_command(root, c) for c in commands])
@@ -1349,8 +1552,9 @@ def _submit_triage(root, job):
             except Exception as exc:
                 activity.swallowed(root, "drive._submit_triage", exc)
         extra = "、".join(x for x in (f"串上了 {links} 件前后的事" if links else "", f"记下 {expected} 件这个版本预计会遇到的事" if expected else "") if x)
-        label = ("建议 AI 做，会议里提的事等你点「AI做」才开工" if decision == "ai" else
-                 "建议你来做、AI 先备材料，等你点「AI备」才开工") if held else TRIAGE_LABEL[decision]
+        why = "会议里提的事" if item.get("source") == "会议" else "你选了开工前先问你"
+        label = (f"建议 AI 做，{why}，等你点「交给 AI」才开工" if decision == "ai" else
+                 f"建议你来做、AI 先备材料，{why}，等你点「AI备」才开工") if held else TRIAGE_LABEL[decision]
         conversation.add(root, item["record_id"], "ai", "say", f"判断：{label}。{reason}" +
                          (f"\n依据：{evidence}" if evidence else "") + (f"\n{extra}。" if extra else ""), driver=job.get("driver"))
         applied.append({"n": item["n"], "decision": decision, **({"held": True} if held else {}), **({"links": links} if links else {}), **({"expected": expected} if expected else {})})
@@ -1490,7 +1694,7 @@ GUIDE = """# 接入心响：任何 AI 都可以驱动
 以后怎么来领活：
 {rounds}
 
-规则：飞书里的东西只读；建文档、改表格、通知本人都由心响做。对外发送、审批、付款、删除只准备材料，不执行。
+规则：飞书里的东西只读；建文档、改表格、通知本人都由心响做。删数据、停服、花钱、对外发消息（本人之外有人会收到的都算，包括 GitHub 等公开平台的评论）、提交审批、发布、改产品方向、新建或轮换密钥、修改权限只准备材料，不执行。
 每件事的对话历史由心响保存，next 会把它交给你：接着上一个 AI 往下做，不要从头来。
 """
 

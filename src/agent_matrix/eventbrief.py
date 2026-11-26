@@ -101,6 +101,48 @@ def _settled(root, meeting_id, around, topic=""):
     return [line for _, line in sorted(out)]
 
 
+EXPERIENCE_CAP, EARLIER_MAX = 4000, 6
+
+
+def _experience(root, topic):
+    """The owner's experience that bears on this work, in full, picked in code so it is not left to the AI to go and
+    look: every section of the general file (it is read before any work), and the sections of the other files whose
+    title or description is about the same thing. What does not fit stays in the index (记忆/目录.md)."""
+    from . import library
+    from .textmatch import similarity
+    picked = []
+    for e in library.entries(Path(root)):
+        general = e["name"] == library.GENERAL
+        for title, text in e["sections"]:
+            score = 2.0 if general else max(similarity(topic, f"{title} {e['description']}"), similarity(title, topic))
+            if general or score >= 0.3:
+                picked.append((score, e["name"], text))
+    by_file, used = {}, 0
+    for _, name, text in sorted(picked, key=lambda x: -x[0]):
+        if used + len(text) > EXPERIENCE_CAP:
+            break
+        by_file.setdefault(name, []).append(re.sub(r"^## ", "### ", text, flags=re.M))
+        used += len(text)
+    return [f"**{name}**\n\n" + "\n\n".join(texts) for name, texts in by_file.items()]
+
+
+def _earlier(root, meeting_id, topic):
+    """What earlier meetings settled about the same thing (this meeting's own is in 会上已经定下的): decisions,
+    requirements and what was left waiting, still standing, closest first."""
+    from . import memory
+    from .textmatch import similarity
+    found = []
+    for m in memory.moments(Path(root), limit=800):
+        if meeting_id and str(m.get("source_id")) == str(meeting_id):
+            continue
+        if m.get("status") == "stale" or m.get("kind") not in KINDS:
+            continue
+        score = max(similarity(topic, m["text"]), similarity(m["text"], topic))
+        if score >= 0.35:
+            found.append((score, f"- {KINDS[m['kind']]}：{m['text']}（{m.get('source_title') or '会议'} {str(m.get('at') or '')[5:10]}）"))
+    return [line for _, line in sorted(found, key=lambda x: -x[0])[:EARLIER_MAX]]
+
+
 def _later_words(row, messages):
     """The owner's words after the item came in, oldest first: notes, answers, change requests. These win."""
     out = []
@@ -152,13 +194,16 @@ def build(root, record_id, rows=None):
     row, rows = _row(root, record_id, rows)
     if not row:
         return ""
+    from .background import circular, parent_of, prep_means, with_parent_source
+    parent = parent_of(row, rows)
     n, title = _number(row), _one(row.get("标题")).strip()
+    src = with_parent_source(row, rows)   # a 备材料 works from its parent's meeting, chat and words
     history = conversation.history(Path(root), [record_id]).get(record_id, {"messages": [], "deliverables": []})
     owner = _owner(root)
-    link = _one(row.get("来源链接"))
+    link = _one(src.get("来源链接"))
     meeting = MEETING.search(link)
     meeting_id = meeting.group(1) if meeting else None
-    raw_quote = _one(row.get("原话引用"))
+    raw_quote = _one(src.get("原话引用"))
     around = _seconds(raw_quote)
     lines = [f"# 事件 #{n} {title}", "",
              f"心响整理好的简报：这件事要的东西都在下面，照它做，不用再去翻。「本人」指 {owner}，你替本人做这件事。", "",
@@ -166,12 +211,15 @@ def build(root, record_id, rows=None):
     lines.append(f"- {(_one(row.get('下一步动作')) or title).strip()}")
     for label, key in (("做到什么程度算完", "完成标准"), ("截止", "截止日")):
         value = _one(row.get(key)).strip()
+        if key == "完成标准" and circular(value):
+            continue
         if value:
             lines.append(f"- {label}：{value[:10] if key == '截止日' else value}")
-    parent = next((r for r in rows for p in (row.get("父事项") or []) if r.get("record_id") == (p.get("id") if isinstance(p, dict) else p)), None)
     if parent:
-        lines.append(f"- 这是为 #{_number(parent)}「{_one(parent.get('标题'))}」备的材料，做出来要能直接拿去用。")
-    source = _one(row.get("来源")) or "手动添加"
+        lines.append(f"- {prep_means(parent)}")
+        if _one(parent.get("下一步动作")).strip():
+            lines.append(f"- 那件事要做的：{_one(parent.get('下一步动作')).strip()}")
+    source = _one(src.get("来源")) or "手动添加"
     lines += ["", "## 来龙去脉", f"- 来源：{source}" + (f"（{_meeting_title(root, meeting_id)}）" if meeting_id and _meeting_title(root, meeting_id) else "")
               + (f"　{_url(link)}" if _url(link) else "")]
     created = _one(row.get("创建时间"))[:16].replace("T", " ")
@@ -180,18 +228,39 @@ def build(root, record_id, rows=None):
     settled = _settled(root, meeting_id, around, f"{title} {_one(row.get('下一步动作'))}")
     if settled:
         lines += ["", "## 会上已经定下的（以这些为准，不要另起炉灶）", *settled]
+    topic = f"{title} {_one(row.get('下一步动作'))} {_one(parent.get('标题')) if parent else ''}"
+    earlier = _earlier(root, meeting_id, topic)
+    if earlier:
+        lines += ["", "## 以前的会上定过的相关事（没被推翻，照用；和本次冲突时以本次为准）", *earlier]
     quote = said_lines(raw_quote)
     if quote:
         lines += ["", "## 原话（谁说的都保留）", quote]
     later = _later_words(row, history.get("messages", []))
     if later:
         lines += ["", "## 本人后来的要求（比上面都新，冲突时以这里为准）", *later]
+    who = _people(root, raw_quote, f"{topic} {raw_quote}")
+    if who:
+        lines += ["", "## 相关的人（心响对TA们的理解；「本人写的」为准。写给TA的东西照TA在意的写）", *who]
+    experience = _experience(root, topic)
+    if experience:
+        lines += ["", "## 你的经验里和这件事相关的（本人审过的做法，照着做；交付时在结果的 memory 里写用了哪几条）", *experience]
     state, nxt = _state(row, history)
     lines += ["", "## 做到哪了", *state, "", "## 接下来", f"- {nxt}"]
     lines += ["", "## 原始材料（只在需要核对时再看）",
               "- 任务单.md、背景.md：程序找的背景和相关事项"
               + ("；逐字稿.md：整场会的逐字稿" if meeting_id else "") + "；上一版.md：上一次交付（有的话）"]
     return "\n".join(lines) + "\n"
+
+
+def _people(root, quote, text):
+    """What 心响 understands about the people this item is about: who said it first, then who is named."""
+    from . import contacts
+    try:
+        speaker = re.match(r"^\[[^\]]*?\d{2}:\d{2}(?::\d{2})?\S*\s+([^\]]+)\]", str(quote or ""))
+        first = [speaker.group(1).strip()] if speaker else []
+        return contacts.about(root, contacts.mentioned(root, text, first))
+    except Exception:
+        return []
 
 
 def _url(text):
