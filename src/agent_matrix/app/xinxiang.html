@@ -456,7 +456,11 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .row .s.kid{white-space:normal}.row .s .src{color:var(--ink3)}
 .lnk{border:0;background:none;padding:0;color:var(--brand);font:inherit;font-size:12px;cursor:pointer}
 .seg2{display:flex;gap:4px;margin:0 0 10px}
-.msg-link{margin-left:auto;align-self:center;color:var(--ink2)}.msg-link b{color:var(--red)}
+.list-bar{display:flex;align-items:center;gap:12px;margin:0 0 14px}.list-bar .seg{margin:0}
+.list-bar .by{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink3)}
+.list-bar .by select{height:30px;padding:0 8px;font-size:12.5px}
+@media (max-width:600px){.sec-h .aside{display:none}}
+details.later>summary{cursor:pointer;list-style:none}details.later>summary::-webkit-details-marker{display:none}
 @media (max-width:600px){.grp-h{flex-wrap:wrap}.grp-h .acts{width:100%;margin-left:22px;justify-content:flex-start}}
 .sum.bad{background:var(--red-soft)}.sum.todo{background:var(--amber-soft)}.sum b{font-size:15px}.sum span{color:var(--ink2);font-size:12.5px}.sum .btn{margin-left:auto}
 .inner-list{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--field)}
@@ -1047,6 +1051,7 @@ function healthIssues(){
 function healthDot(you){
   if(!D) return "";
   const issues=healthIssues(); you=(you??setupProblems().length)+issues.filter(x=>x.you).length; const fix=issues.length;
+  if(!you&&!fix&&!S.health) return "";   // all well: nothing to look at
   const [c,label]=you?["red",`${you} 件要你来`]:fix?["amber","AI 在处理"]:["green","后台正常"];
   return `<button class="health ${c}" onclick="S.health=!S.health;render()" aria-expanded="${!!S.health}" title="心响后台的状态"><i></i>${label}</button>`;
 }
@@ -1062,20 +1067,17 @@ function healthPanel(){
 const projOf = id => (D.projects||[]).find(p=>p.id===id);
 const projDot = p => `<span class="pdot" style="background:${p&&p.color?esc(p.color):"var(--ink3)"}"></span>`;
 function allPage(){
-  const F={"今天":isToday,"全部":isOpen,"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
-  if(!F[S.all]&&S.all!=="以后要确认的") S.all="今天";
-  const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking;
-  const M=D.memory||{}, later=(M.waiting||[]).length+(M.recent||[]).filter(m=>m.label==="还没定").length;
-  const NOTES={"以后要确认的":[later,laterList]}, note=NOTES[S.all];
-  const n=k=>k==="今天"?D.items.filter(i=>!i.hidden&&topLevel(i)&&isToday(i)).length:0;
-  const msgs=unreadCount(), mlink=`<a class="aside msg-link" href="#" onclick="go('inbox');return false">消息${msgs?` <b>${msgs}</b>`:""} ›</a>`;
-  const chips=`<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}${n(k)?` ${n(k)}`:""}</button>`).join("")}<span style="width:1px;height:16px;background:var(--line);margin:0 6px;align-self:center"></span>${Object.entries(NOTES).map(([k,[n]])=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';S.picking=false;render()">${k}${n?` ${n}`:""}</button>`).join("")}${mlink}</div>`;
-  if(note) return `<div class="proj-head">${chips}</div>${note[1]()}`;   // not sorted into projects: they have no number of their own
-  const shown=D.items.filter(i=>!i.hidden&&topLevel(i)&&(F[S.all]||F["进行中"])(i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
-  const by=S.dim||"type", dim=`<div class="seg2" role="tablist" aria-label="怎么分">${[["type","按类型"],["proj","按项目"],["people","按人"]].map(([k,l])=>`<button class="chip ${by===k?"on":""}" role="tab" aria-selected="${by===k}" onclick="S.dim='${k}';render()">${l}</button>`).join("")}</div>`;
-  const top=S.all==="今天"?todayTop():"", bottom=S.all==="今天"?closedByAI():"";
+  const F={"今天":isToday,"全部":isOpen,"已结束":i=>!isOpen(i)};
+  if(!F[S.all]) S.all="今天";
+  const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking, by=S.dim||"type";
+  const bar=`<div class="list-bar"><div class="seg" role="tablist" aria-label="看哪些">${Object.keys(F).map(k=>`<button class="${k===S.all?"on":""}" role="tab" aria-selected="${k===S.all}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>
+    <label class="by">分组 <select aria-label="怎么分组" onchange="S.dim=this.value;S.who=null;render()">${[["type","按类型"],["proj","按项目"],["people","按人"]].map(([k,l])=>`<option value="${k}" ${by===k?"selected":""}>${l}</option>`).join("")}</select></label></div>`;
+  const chips="";
+  const shown=D.items.filter(i=>!i.hidden&&topLevel(i)&&F[S.all](i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
+  const dim=bar, top=S.all==="今天"?todayTop():"";
+  const bottom=S.all==="今天"?closedByAI():S.all==="全部"?laterBlock():"";
   if(by==="people") return top+dim+peopleView(shown,chips,pick)+bottom;
-  if(by==="type") return top+`<div class="proj-head">${chips}</div>`+dim+(remind(S.all))+(typeView(shown,false)||`<div class="list"><div class="empty">${S.all==="今天"?"今天没有要你动手的。":"没有"}</div></div>`)+bottom;
+  if(by==="type") return top+dim+(remind(S.all))+(typeView(shown,false)||`<div class="list"><div class="empty">${S.all==="今天"?"今天没有要你动手的。":"没有"}</div></div>`)+bottom;
   const count=k=>shown.filter(i=>inP(i,k)).length, need=k=>shown.filter(i=>inP(i,k)&&needsYou(i)).length;
   const drop=k=>`ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');moveItems([+event.dataTransfer.getData('text/plain')],${k})"`;
   const cell=(k,name,p)=>`<button class="cell ${cur===k?"on":""}" onclick="S.proj=${k==="all"?"'all'":k};S.renaming=false;render()" ${k==="all"?"":drop(k)}>${k==="all"?"":projDot(p)}<span class="lab">${esc(name)}</span><span class="val ${need(k)?"need":""}">${need(k)?`${need(k)} 件等你`:count(k)}</span></button>`;
@@ -1095,6 +1097,10 @@ function allPage(){
   return top+dim+`<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${cell(0,"未归类")}
       ${S.newProj?`<div class="cell new">${add}</div>`:`<button class="cell" style="color:var(--brand)" onclick="openNewProject()"><span class="lab">＋ 新建项目</span></button>`}</div></div>
     <div>${right}</div></div>`+bottom;
+}
+function laterBlock(){
+  const M=D.memory||{}, n=(M.waiting||[]).length+(M.recent||[]).filter(m=>m.label==="还没定").length;
+  return n?`<details class="later" ${S.laterOpen?"open":""} ontoggle="S.laterOpen=this.open"><summary class="sec-h">以后要确认的<span class="n">${n}</span><span class="aside">会上说了等条件再定、还没定的</span></summary>${laterList()}</details>`:"";
 }
 /* 今天的最上面：还没配好的（要你来），以及配置进行中 */
 function todayTop(){
@@ -1123,7 +1129,7 @@ function peopleView(shown,chips,pick){
   const left=PEOPLE_KINDS.map(kind=>{ const xs=people.map((x,k)=>[x,k]).filter(([x])=>x.kind===kind); return xs.length?`<div class="sec-h">${kind}<span class="n">${xs.length}</span></div><div class="list">${xs.map(([x,k])=>cell(x,k)).join("")}</div>`:""; }).join("");
   const rows=list=>list.sort(byDue).map(i=>row(i,{pick})).join("");
   const at=people.indexOf(cur), mark=cur&&cur.tag?`<button class="btn ghost" onclick="markPerson(${at},'${cur.kind==="客户"?"同事":"客户"}')">${cur.kind==="客户"?"不是客户":"标成客户"}</button>`:"";
-  const head=`<div class="proj-head">${chips}${cur?`<span class="hint" style="margin:0 0 0 auto">${esc(cur.key)} · ${cur.kind}</span>${mark}`:""}</div>`;
+  const head=cur?`<div class="proj-head"><span class="hint" style="margin:0">${esc(cur.key)} · ${cur.kind}</span>${mark}</div>`:"";
   const body=!shown.length?'<div class="list"><div class="empty">没有</div></div>'
     :cur?`<div class="list">${rows(cur.items)}</div>`
     :people.map(x=>`<div class="sec-h">${x.kind==="客户"?'<span class="pill amber">客户</span>':""}${esc(x.key)}<span class="n">${x.items.length}</span></div><div class="list">${rows(x.items)}</div>`).join("");
@@ -2388,7 +2394,7 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["all","事项",needCount(),"hot"],null,["mem","记忆",((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
+  const nav=[["all","事项",needCount(),"hot"],["inbox","消息",0,""],null,["mem","记忆",((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
@@ -2478,7 +2484,7 @@ function drawTranscript(scroll){
   const mb=box.querySelector(".mb"); if(mb&&(scroll&&atEnd||!old)) mb.scrollTop=mb.scrollHeight;
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
-const NAV_OF={inbox:"all"};   // pages that are reached from another one
+const NAV_OF={};   // pages that are reached from another one
 const TITLES={inbox:"全部消息",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
 /* 开发模式: steps the AI is waiting on you for, shown above every page */
@@ -2539,7 +2545,7 @@ function render(){
   $("#app").classList.toggle("with-detail",split);
   putHTML("#side",sideHTML());
   const title=solo?`#${item.n}`:S.q?`搜索：${S.q}`:TITLES[S.view];
-  const count={all:needCount(),inbox:unreadCount()}[S.view];
+  const count=0;
   putHTML("#ttl",esc(title)+(!S.q&&!solo&&count?`<span class="c">${count}</span>`:""));
   if(!["all","inbox","mem","sys"].includes(S.view)) S.view="all";   // 今天、新进来 and the rest became filters of 事项
   const page=S.q?searchPage:{inbox:inboxPage,all:allPage,mem:memPage,sys:sysPage}[S.view];

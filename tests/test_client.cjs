@@ -261,11 +261,11 @@ function reset(item) {
   assert.doesNotMatch(evaluate("sideHTML()"),/记忆<span class="c need">/);
   // 记忆 holds only the rules; what a meeting left waiting or decided is shown with the items
   assert.doesNotMatch(mem,/年卡要不要打折|在等的|会上的结论/);
-  evaluate('D.memory.recent=[{label:"还没定",text:"投流方案怎么定",source:"周会",at:"11-19"},{label:"定了",text:"先做周视图",source:"周会",at:"11-19"}]; S.all="以后要确认的"');
+  evaluate('D.memory.recent=[{label:"还没定",text:"投流方案怎么定",source:"周会",at:"11-19"},{label:"定了",text:"先做周视图",source:"周会",at:"11-19"}]; S.all="全部"; S.dim="type"; S.laterOpen=true');
   let later = evaluate("allPage()");
-  for (const label of ["年卡要不要打折","ruleOp({waiting_done:7})","投流方案怎么定","以后要确认的 2<"]) assert.ok(later.includes(label), label);
+  for (const label of ["年卡要不要打折","ruleOp({waiting_done:7})","投流方案怎么定","以后要确认的<span class=\"n\">2<"]) assert.ok(later.includes(label), label);
   assert.doesNotMatch(later,/先做周视图/, "what is decided is not something to confirm later");
-  evaluate('S.all="全部"'); assert.match(evaluate("allPage()"),/S\.all='以后要确认的';S\.picking=false;render\(\)">以后要确认的 2</);
+  assert.doesNotMatch(evaluate('S.all="今天"; allPage()'),/以后要确认的/, "a folded block at the bottom of 全部, not a filter of its own"); evaluate('S.all="全部"; S.laterOpen=false');
   assert.doesNotMatch(evaluate("allPage()"),/会上的结论/);
   evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
   // projects: the owner's own sorting; a guess is marked, and moving is one call
@@ -296,7 +296,7 @@ function reset(item) {
     D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"pending",title:"「投流方案」该定了",read:false}]; S.view=null; S.all="今天"; S.dim=null; S.openMsg=null; S.working=false; render()`);
   assert.equal(evaluate("S.view"),"all", "事项 opens first");
   const today = evaluate("allPage()");
-  for (const label of ["按类型","按项目","按人","今天 3","全部","已完成","不做的","要你看","等验收的事","问你的事","你来做","今天要交的事","提醒","投流方案","消息 <b>3</b>"]) assert.ok(today.includes(label), label);
+  for (const label of ["按类型","按项目","按人",">今天<",">全部<",">已结束<","要你看","等验收的事","问你的事","你来做","今天要交的事","提醒","投流方案"]) assert.ok(today.includes(label), label);
   assert.doesNotMatch(today,/别人的事|下周的事|排队的事|AI 自己判断能不能做/, "今天: only today's; the AI switch is in settings");
   assert.deepEqual([...today.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]),["提醒","要你看：验收、AI 问你","你来做"], "what waits on you first");
   const everything = evaluate('S.all="全部"; allPage()');
@@ -304,7 +304,9 @@ function reset(item) {
   assert.equal(evaluate("needCount()"),2);
   const side = evaluate("sideHTML()");
   assert.match(side,/事项<span class="c hot">2</); assert.doesNotMatch(side,/今天|新进来|收件箱|等我处理/);
-  evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('all'\)"/);
+  assert.doesNotMatch(today,/今天 \d|消息 <b>|以后要确认的/, "one row of controls, no numbers on it");
+  assert.match(side,/>消息</, "消息 has its own quiet place in the menu");
+  evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('inbox'\)"/);
   evaluate('S.view="today"; render()'); assert.equal(evaluate("S.view"),"all", "an old link to 今天 lands on 事项");
   // 等你定: grouped by where they came from, a group taken or dropped at once; 备材料 sits inside its item
   evaluate(`D.items=[
@@ -331,7 +333,7 @@ function reset(item) {
   assert.match(evaluate("healthDot()"),/件要你来/, "what only the owner can do comes first");
   assert.match(evaluate("healthDot(0)"),/AI 在处理/);
   assert.match(evaluate("S.health=true; healthPanel()"),/269 分钟没检查[\s\S]*不用你处理/); evaluate("S.health=false");
-  evaluate("D.inbox=[]"); assert.match(evaluate("healthDot(0)"),/后台正常/);
+  evaluate("D.inbox=[]"); assert.equal(evaluate("healthDot(0)"),"", "all well: no dot at all");
   // 事项 → 按人: clients apart, a person picked shows their items, and the guess can be corrected
   evaluate('S.view="all"; S.dim="people"; S.all="全部"; S.who=null');
   const people = evaluate("allPage()");
