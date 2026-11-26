@@ -409,6 +409,22 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .proj-list{position:sticky;top:70px}
 .pdot{width:9px;height:9px;border-radius:3px;flex:none;display:inline-block}
 .proj-list .cell{min-height:40px;padding:7px 12px}.proj-list .cell .val.need{color:var(--red);font-weight:650}
+.proj-list .cell .lab{overflow:hidden;text-overflow:ellipsis}
+.dim-seg{display:flex;margin:0 0 10px}.dim-seg button{flex:1;padding:5px 0}
+.cell.ent{display:block;padding:8px 12px}.cell.ent .t{display:flex;align-items:center;gap:6px}.cell.ent .t .pill{height:18px;padding:0 6px;font-size:11px}
+.cell.ent .s{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:12px;color:var(--ink3)}.cell.ent .sub{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell.ent .badge{min-width:18px;height:18px;border-radius:9px;background:var(--red);color:#fff;font-size:11px;font-weight:650;display:grid;place-items:center;padding:0 5px}.cell.ent .cnt{font-size:11.5px}
+.ent-head{display:flex;align-items:center;gap:8px;margin:0 2px 12px}.ent-head b{font-size:15px}
+.person-card .pc-one{margin-top:6px;font-size:13.5px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person-card .pc-people{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}.person-card .pc-people .btn,.person-card .chips .btn{height:26px;padding:0 9px;font-size:12.5px}
+.person-card .pc-note{display:flex;gap:8px;align-items:flex-start}.person-card .pc-note .btn{flex:none}
+.who-q{width:100%;box-sizing:border-box;margin:0 0 10px;padding:7px 11px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.person-card{background:var(--card);border:1px solid var(--line2);border-radius:14px;padding:12px 16px;margin-bottom:4px}
+.person-card .pc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.person-card .pc-h b{font-size:16px}
+.person-card .pc-sec{border-top:1px solid var(--line2);margin-top:12px;padding-top:10px}
+.person-card .pc-t{display:flex;align-items:center;font-weight:600;font-size:13px;margin-bottom:6px}
+.person-card .md{font-size:13.5px;line-height:1.65}.person-card .md h4,.person-card .md h3{font-size:13px;margin:8px 0 2px}
+.person-card textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:var(--bg);color:var(--ink);resize:vertical}
 .cell.drop{outline:2px dashed var(--brand);outline-offset:-2px}
 .cell.new{gap:6px}.cell.new input{flex:1;min-width:0;width:auto!important}
 .proj-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}.proj-head .chips{margin:0;flex:1}
@@ -1044,7 +1060,7 @@ function typeView(list,pick){
   }
   return TYPES.map(([title,f],k)=>{
     const xs=take(f); if(!xs.length) return "";
-    const h=extra=>`<div class="sec-h">${title}<span class="n">${xs.length}</span>${extra||""}</div>`;
+    const h=extra=>`<div class="sec-h" id="ts-${k}">${title}<span class="n">${xs.length}</span>${extra||""}</div>`;
     if(k===1) return h(`<span class="aside">按来源分组，可整组处理</span>`)+freshGroups(xs);
     if(k===2) return h(`<span class="aside">AI 在聊天和文档里找到了完成的依据</span>`)+`<div class="list">${xs.map(doneRow).join("")}</div>`;
     xs.sort(k===4?(a,b)=>isWorking(b)-isWorking(a)||byDue(a,b):byDue);
@@ -1131,16 +1147,17 @@ const projDot = p => `<span class="pdot" style="background:${p&&p.color?esc(p.co
 function allPage(){
   const F={"今天":isToday,"全部":isOpen,"已结束":i=>!isOpen(i)};
   if(!F[S.all]) S.all="今天";
-  const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking, by=S.dim||"type";
+  const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking, by=dimNow();
   const bar=`<div class="list-bar"><div class="seg" role="tablist" aria-label="看哪些">${Object.keys(F).map(k=>`<button class="${k===S.all?"on":""}" role="tab" aria-selected="${k===S.all}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>
     <label class="by mode-by">做事方式 ${modeSelect((D.settings||{}).work_mode||"auto","setGlobalMode(this.value)",false)}</label>
-    <label class="by">分组 <select aria-label="怎么分组" onchange="S.dim=this.value;S.who=null;render()">${[["type","按类型"],["proj","按项目"],["people","按人"]].map(([k,l])=>`<option value="${k}" ${by===k?"selected":""}>${l}</option>`).join("")}</select></label></div>`;
+</div>`;
   const chips="";
   const shown=D.items.filter(i=>!i.hidden&&topLevel(i)&&F[S.all](i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
   const dim=bar, top=S.all==="今天"?todayTop():"";
   const bottom=S.all==="今天"?closedByAI():S.all==="全部"?laterBlock():"";
-  if(by==="people") return top+dim+peopleView(shown,chips,pick)+bottom;
-  if(by==="type") return top+dim+(remind(S.all))+(typeView(shown,false)||`<div class="list"><div class="empty">${S.all==="今天"?"今天没有要你动手的。":"没有"}</div></div>`)+bottom;
+  if(by==="recent") return top+dim+recentView(shown,pick)+bottom;
+  if(by==="people") return top+dim+peopleView(shown,pick)+bottom;
+  if(by==="type") return top+dim+split(typeLeft(shown),remind(S.all)+(typeView(shown,false)||emptyList(S.all==="今天"?"今天没有要你动手的。":"没有")))+bottom;
   const count=k=>shown.filter(i=>inP(i,k)).length, need=k=>shown.filter(i=>inP(i,k)&&needsYou(i)).length;
   const drop=k=>`ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');moveItems([+event.dataTransfer.getData('text/plain')],${k})"`;
   const cell=(k,name,p)=>`<button class="cell ${cur===k?"on":""}" onclick="S.proj=${k==="all"?"'all'":k};S.renaming=false;render()" ${k==="all"?"":drop(k)}>${k==="all"?"":projDot(p)}<span class="lab">${esc(name)}</span><span class="val ${need(k)?"need":""}">${need(k)?`${need(k)} 件等你`:count(k)}</span></button>`;
@@ -1154,10 +1171,9 @@ function allPage(){
     :`<button class="btn ghost" onclick="S.renaming=true;render()">改名</button><button class="btn ghost" onclick="toast('删除后，里面的事回到未归类','删除项目',()=>removeProject(${here.id}))">删除项目</button>`;
   const add=S.newProj?`<input id="proj-name" data-draft="proj-name" maxlength="20" placeholder="项目名" aria-label="新项目的名字" style="height:30px;width:150px" onkeydown="if(event.key==='Enter')newProject(null,'proj-name');if(event.key==='Escape'){S.newProj=false;render()}"><button class="btn pri" onclick="newProject(null,'proj-name')">建好</button>`:"";
   const head=`<div class="proj-head">${chips}${manage}
-        ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:add||`<button class="btn" onclick="openNewProject()">＋ 新建项目</button>`}</div>`;
+        ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:""}</div>`;
   const right=`${head}${body}${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}`;
-  if(!P.length) return top+dim+right+bottom;   // no projects yet: just the list, and one button to make the first project
-  return top+dim+`<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${cell(0,"未归类")}
+  return top+dim+`<div class="proj-grid"><div class="proj-list">${dimSeg("proj")}<div class="list">${P.length?cell("all","全部项目")+P.map(p=>cell(p.id,p.name,p)).join("")+cell(0,"未归类"):""}
       ${S.newProj?`<div class="cell new">${add}</div>`:`<button class="cell" style="color:var(--brand)" onclick="openNewProject()"><span class="lab">＋ 新建项目</span></button>`}</div></div>
     <div>${right}</div></div>`+bottom;
 }
@@ -1172,39 +1188,138 @@ function todayTop(){
   return left.length?`<div class="sum bad" style="cursor:pointer" onclick="S.setTab='ai';go('sys')"><div><b>还差 ${left.length} 步才能用</b><br><span>${left.map(x=>esc(x.title.split("：")[0])).join("、")}没配好</span></div><button class="btn pri">去看看</button></div>`:"";
 }
 const remind = all => { if(all!=="今天") return ""; const r=remindRows(); return r.length?`<div class="sec-h">${TERM.sec.remind}<span class="n">${r.length}</span></div><div class="list">${r.join("")}</div>`:""; };
-/* ---------- 事项 → 按人：聊天里的人和群、会议，客户单独一组。心响先猜，本人在那一页点一下改 ---------- */
-function personOf(i){
+/* ---------- 事项页左栏：最近 / 通讯录 / 分类 / 项目，在左栏顶上直接切 ----------
+   最近：有事的会议、同事、客户、群聊、任务列表混在一起，等你的排前面（像聊天软件的会话列表）
+   通讯录：打过交道的所有人，客户、同事分开；点一个人，右边是TA（理解默认收起）和TA的事 */
+const DIMS=[["recent","最近"],["people","通讯录"],["type","分类"],["proj","项目"]];
+const dimNow = () => DIMS.some(([k])=>k===S.dim)?S.dim:"recent";
+const dimSeg = by => `<div class="seg dim-seg" role="tablist" aria-label="怎么看">${DIMS.map(([k,l])=>`<button class="${k===by?"on":""}" role="tab" aria-selected="${k===by}" onclick="setDim('${k}')">${l}</button>`).join("")}</div>`;
+function setDim(k){ S.dim=k; S.who=null; S.ent=null; S.whoQ=""; drafts.delete("who-q"); render(); }
+const split = (left,right) => `<div class="proj-grid"><div class="proj-list">${left}</div><div>${right}</div></div>`;
+const PEOPLE_KINDS=["客户","同事"];
+const personInfo = name => (D.people||[]).find(p=>p.name===name);
+const whoKind = (name,client) => { const p=personInfo(name), t=((D.settings||{}).people||{})[name]; return PEOPLE_KINDS.includes(t)?t:p?p.kind:client?"客户":"同事"; };
+const shortAt = at => { const s=String(at||"").replace("T"," "); return s.startsWith(D.today||"~")?s.slice(11,16):s.slice(5,10).replace("-","/"); };
+const hideCell = name => { const q=String(S.whoQ||"").trim(); return q&&!String(name).includes(q)?' style="display:none"':""; };
+function filterCells(q){ S.whoQ=q; q=String(q||"").trim(); document.querySelectorAll(".proj-list [data-name]").forEach(e=>{ e.style.display=!q||e.dataset.name.includes(q)?"":"none"; }); }
+const findBox = ph => `<input class="who-q" data-draft="who-q" value="${esc(S.whoQ||"")}" placeholder="${ph}" aria-label="${ph}" oninput="filterCells(this.value)">`;
+const rowsOf = (list,pick) => `<div class="list">${list.slice().sort(byDue).map(i=>row(i,{pick})).join("")}</div>`;
+const emptyList = t => `<div class="list"><div class="empty">${t||"没有"}</div></div>`;
+/* 一件事属于谁：说这句话的人；没有人就是那场会、那个群、那个任务列表 */
+function entityOf(i){
   const o=originOf(i);
-  if(o.kind==="聊天") return {key:o.person||o.group, kind:o.client?"客户":"同事", tag:true};
-  if(o.kind==="会议") return {key:o.group!=="会议"?o.group:"其他会议", kind:o.client?"客户":"会议", tag:o.group!=="会议"};
-  return {key:o.kind==="手动"?"你自己加的":o.group, kind:"其他", tag:false};
+  if(o.person) return {key:"p:"+o.person, name:o.person, kind:whoKind(o.person,o.client), person:o.person};
+  if(o.kind==="会议"){ const m=(D.meetings||[]).find(x=>x.id===o.meeting); return {key:"m:"+(o.meeting||o.group), name:o.group!=="会议"?o.group:"会议", kind:"会议", meeting:m||null, at:m?m.at:o.at}; }
+  if(o.kind==="聊天") return {key:"g:"+o.group, name:o.group, kind:o.client?"客户":"群聊"};
+  if(o.kind==="手动") return {key:"s:手动", name:"你自己加的", kind:"自己"};
+  return {key:"s:"+o.group, name:o.group, kind:o.kind};
 }
-const PEOPLE_KINDS=["客户","同事","会议","其他"];
-function peopleOf(list){
+function entitiesOf(list){
   const m=new Map();
-  for(const i of list){ const p=personOf(i); if(!m.has(p.key)) m.set(p.key,{...p,items:[]}); m.get(p.key).items.push(i); }
-  const need=x=>x.items.filter(needsYou).length;
-  return [...m.values()].sort((a,b)=>PEOPLE_KINDS.indexOf(a.kind)-PEOPLE_KINDS.indexOf(b.kind)||need(b)-need(a)||b.items.length-a.items.length||(a.key>b.key?1:-1));
+  for(const i of list){ const e=entityOf(i); if(!m.has(e.key)) m.set(e.key,{...e,items:[]}); m.get(e.key).items.push(i); }
+  const need=e=>e.items.filter(needsYou).length, last=e=>e.items.reduce((t,i)=>{ const x=String(i.updated||i.created||""); return x>t?x:t; },String(e.at||""));
+  return [...m.values()].map(e=>({...e,need:need(e),last:last(e)})).sort((a,b)=>(b.need>0)-(a.need>0)||(b.last>a.last?1:b.last<a.last?-1:0));
 }
-function peopleView(shown,chips,pick){
-  const people=PEOPLE_SHOWN=peopleOf(shown), cur=people.find(x=>x.key===S.who)||null;
-  const cell=(x,k)=>{ const n=x.items.filter(needsYou).length; return `<button class="cell ${cur===x?"on":""}" onclick="pickPerson(${k})"><span class="lab">${esc(x.key)}</span><span class="val ${n?"need":""}">${n?`${n} 件等你`:x.items.length}</span></button>`; };
-  const left=PEOPLE_KINDS.map(kind=>{ const xs=people.map((x,k)=>[x,k]).filter(([x])=>x.kind===kind); return xs.length?`<div class="sec-h">${kind}<span class="n">${xs.length}</span></div><div class="list">${xs.map(([x,k])=>cell(x,k)).join("")}</div>`:""; }).join("");
-  const rows=list=>list.sort(byDue).map(i=>row(i,{pick})).join("");
-  const at=people.indexOf(cur), mark=cur&&cur.tag?`<button class="btn ghost" onclick="markPerson(${at},'${cur.kind==="客户"?"同事":"客户"}')">${cur.kind==="客户"?"不是客户":"标成客户"}</button>`:"";
-  const head=cur?`<div class="proj-head"><span class="hint" style="margin:0">${esc(cur.key)} · ${cur.kind}</span>${mark}</div>`:"";
-  const body=!shown.length?'<div class="list"><div class="empty">没有</div></div>'
-    :cur?`<div class="list">${rows(cur.items)}</div>`
-    :people.map(x=>`<div class="sec-h">${x.kind==="客户"?'<span class="pill amber">客户</span>':""}${esc(x.key)}<span class="n">${x.items.length}</span></div><div class="list">${rows(x.items)}</div>`).join("");
-  return `<div class="proj-grid"><div class="proj-list"><div class="list"><button class="cell ${cur?"":"on"}" onclick="S.who=null;render()"><span class="lab">全部的人</span><span class="val">${shown.length}</span></button></div>${left}</div><div>${head}${body}</div></div>`;
+const TAG_CLS={"客户":"amber","会议":"blue"};
+const entTag = e => e.kind===e.name||e.kind==="自己"?"":`<span class="pill ${TAG_CLS[e.kind]||""}">${esc(e.kind)}</span>`;
+let ENTS=[];   // the entries as last drawn: a click names one by its place in this list
+function recentView(shown,pick){
+  const ents=ENTS=entitiesOf(shown), cur=ents.find(e=>e.key===S.ent)||(S.ent?entityFromKey(S.ent):null);
+  const cell=(e,k)=>{ const top=e.items.slice().sort(byDue)[0];
+    return `<button class="cell ent ${cur&&cur.key===e.key?"on":""}" data-name="${esc(e.name)}"${hideCell(e.name)} onclick="S.ent=ENTS[${k}].key;render()">
+      <span class="t">${entTag(e)}<span class="lab">${esc(e.name)}</span><span class="val">${shortAt(e.last)}</span></span>
+      <span class="s"><span class="sub">${esc(top?top.title:"")}</span>${e.need?`<span class="badge">${e.need}</span>`:`<span class="cnt">${e.items.length}</span>`}</span></button>`; };
+  const left=dimSeg("recent")+findBox("找人、会议、群")+`<div class="list"><button class="cell ${cur?"":"on"}" onclick="S.ent=null;render()"><span class="lab">全部</span><span class="val">${shown.length}</span></button></div>`
+    +(ents.length?`<div class="list" style="margin-top:10px">${ents.map(cell).join("")}</div>`:"");
+  let right;
+  if(cur&&cur.person) right=personPage(cur.person,cur.items,pick,cur.kind);
+  else if(cur&&cur.kind==="会议") right=meetingPage(cur,cur.items,pick);
+  else if(cur) right=`<div class="ent-head">${entTag(cur)}<b>${esc(cur.name)}</b></div>`+(cur.items.length?rowsOf(cur.items,pick):emptyList());
+  else right=remind(S.all)+(ents.length?ents.map(e=>`<div class="sec-h">${entTag(e)}${esc(e.name)}<span class="n">${e.items.length}</span></div>${rowsOf(e.items,pick)}`).join("")
+    :emptyList(S.all==="今天"?"今天没有要你动手的。":"没有"));
+  return split(left,right);
+}
+function entityFromKey(key){   // an entry with nothing in this tab (a meeting opened from a person's page)
+  if(key.startsWith("m:")){ const m=(D.meetings||[]).find(x=>x.id===key.slice(2)); return m?{key,name:m.topic,kind:"会议",meeting:m,items:[]}:null; }
+  if(key.startsWith("p:")) return {key,name:key.slice(2),kind:whoKind(key.slice(2)),person:key.slice(2),items:[]};
+  return null;
+}
+/* 通讯录 */
+function contactsOf(shown){
+  const by=new Map((D.people||[]).map(p=>[p.name,{...p,items:[]}])), loose=[];
+  for(const i of shown){
+    const names=new Set(), o=originOf(i);
+    if(o.person) names.add(o.person);
+    for(const name of by.keys()) if(name.length>=2&&String(i.title||"").includes(name)) names.add(name);
+    if(!names.size){ loose.push(i); continue; }
+    for(const name of names){
+      if(!by.has(name)) by.set(name,{name,kind:whoKind(name,o.client),guessed:true,messages:0,meetings:[],chats:[],last:"",text:"",note:"",items:[]});
+      by.get(name).items.push(i);
+    }
+  }
+  const need=x=>x.items.filter(needsYou).length;
+  return {people:[...by.values()].sort((a,b)=>need(b)-need(a)||(b.last>a.last?1:b.last<a.last?-1:0)||b.items.length-a.items.length),loose};
 }
 let PEOPLE_SHOWN=[];   // the people as last drawn: a click names one by its place in this list
-function pickPerson(k){ const x=PEOPLE_SHOWN[k]; S.who=x?x.key:null; render(); }
-async function markPerson(k,kind){
-  const x=PEOPLE_SHOWN[k]; if(!x) return;
+function peopleView(shown,pick){
+  const {people}=contactsOf(shown); PEOPLE_SHOWN=people;
+  const cur=people.find(x=>x.name===S.who)||null;
+  const cell=(x,k)=>{ const n=x.items.filter(needsYou).length; return `<button class="cell ${cur===x?"on":""}" data-name="${esc(x.name)}"${hideCell(x.name)} onclick="pickPerson(${k})"><span class="lab">${esc(x.name)}</span><span class="val ${n?"need":""}">${n?`${n} 件等你`:x.items.length?`${x.items.length} 件`:(x.last?shortAt(x.last):"")}</span></button>`; };
+  const groups=PEOPLE_KINDS.map(kind=>{ const xs=people.map((x,k)=>[x,k]).filter(([x])=>x.kind===kind); return xs.length?`<div class="sec-h">${kind}<span class="n">${xs.length}</span></div><div class="list">${xs.map(([x,k])=>cell(x,k)).join("")}</div>`:""; }).join("");
+  const left=dimSeg("people")+findBox("找人")+(groups||emptyList("还没有打过交道的人"));
+  const right=cur?personPage(cur.name,cur.items,pick,cur.kind)
+    :people.some(x=>x.items.length)?people.filter(x=>x.items.length).map(x=>`<div class="sec-h">${x.kind==="客户"?'<span class="pill amber">客户</span>':""}${esc(x.name)}<span class="n">${x.items.length}</span></div>${rowsOf(x.items,pick)}`).join("")
+    :emptyList("左边点一个人，看TA是谁、和TA有关的事");
+  return split(left,right);
+}
+/* 一个人：一行说清是谁，理解、你写的、一起开过的会都收在「展开」里 */
+function oneLine(p){
+  const t=String(p.text||"").split("\n").map(s=>s.replace(/^\s*[-*]\s*/,"").trim()).filter(s=>s&&!s.startsWith("#"));
+  return p.note||t[0]||"";
+}
+function personPage(name,items,pick,kind){
+  const p={name,guessed:true,messages:0,meetings:[],chats:[],last:"",text:"",note:"",...(personInfo(name)||{})};
+  p.kind=kind||whoKind(name);
+  const open=S.pcOpen===name, other=p.kind==="客户"?"同事":"客户", q=esc(JSON.stringify(name));
+  const facts=[p.messages?`聊天 ${p.messages} 条`:"",p.meetings.length?`一起开会 ${p.meetings.length} 场`:"",p.last?`最近 ${shortAt(p.last)}`:""].filter(Boolean).join(" · ");
+  const when=p.understood?`更新于 ${shortAt(p.understood)}`:"";
+  const empty=p.asked?"已排队，AI 空闲时写。":p.enough===false?"打过的交道还不多，多了 AI 会写一份。":"AI 空闲时会写一份。";
+  const ms=(D.meetings||[]).filter(m=>p.meetings.includes(m.id));
+  const line=oneLine(p);
+  const more=!open?"":`<div class="pc-sec"><div class="pc-t">心响对TA的理解${when?`<span class="hint" style="margin:0 0 0 8px">${when}</span>`:""}<span style="flex:1"></span>${p.asked?"":`<button class="btn ghost" onclick="askPerson(${q})">${p.text?"重新理解":"现在写一份"}</button>`}</div>
+      ${p.text?`<div class="md">${mdLite(p.text)}</div>`:`<div class="hint" style="margin:0">${empty}</div>`}</div>
+    <div class="pc-sec"><div class="pc-t">你写的<span class="hint" style="margin:0 0 0 8px">AI 做和TA有关的事时以这里为准</span></div>
+      <div class="pc-note"><textarea id="pnote" data-draft="pnote:${esc(name)}" rows="2" maxlength="1000" placeholder="比如：产品负责人，要结论先行；对外报价先问过我">${esc(p.note||"")}</textarea><button class="btn" onclick="savePersonNote(${q})">保存</button></div></div>
+    ${ms.length?`<div class="pc-sec"><div class="pc-t">一起开过的会<span class="hint" style="margin:0 0 0 8px">${ms.length} 场</span></div><div class="chips">${ms.slice(0,12).map(m=>`<button class="btn ghost" onclick="openMeeting('${esc(m.id)}')">${shortAt(m.at)} ${esc(m.topic)}</button>`).join("")}</div></div>`:""}`;
+  return `<div class="person-card ${open?"open":""}">
+    <div class="pc-h"><b>${esc(name)}</b><span class="pill ${p.kind==="客户"?"amber":""}">${p.kind}</span>${facts?`<span class="hint" style="margin:0">${facts}</span>`:""}<span style="flex:1"></span>
+      <button class="btn ghost" onclick="markPerson(${q},'${other}')">${p.kind==="客户"?"不是客户":"标成客户"}</button><button class="btn ghost" onclick="S.pcOpen=S.pcOpen===${q}?null:${q};render()">${open?"收起":"展开"}</button></div>
+    ${open?"":`<div class="pc-one">${line?esc(line):`<span class="hint" style="margin:0">${empty}</span>`}</div>`}${more}</div>`
+    +`<div class="sec-h">和TA有关的事项<span class="n">${items.length}</span></div>`+(items.length?rowsOf(items,pick):emptyList(S.all==="全部"?"没有":`「${esc(S.all)}」里没有，换到「全部」看看`));
+}
+function meetingPage(e,items,pick){
+  const m=e.meeting||{people:[],topic:e.name,at:e.at||""};
+  const who=(m.people||[]).map(n=>`<button class="btn ghost" onclick="openPerson(${esc(JSON.stringify(n))})">${esc(n)}</button>`).join("");
+  return `<div class="person-card"><div class="pc-h"><span class="pill blue">会议</span><b>${esc(m.topic||e.name)}</b><span class="hint" style="margin:0">${esc(String(m.at||"").slice(0,16))}</span><span style="flex:1"></span>${m.url?`<a class="doc-link" href="${esc(m.url)}" target="_blank" rel="noopener">会议记录 ↗</a>`:""}</div>
+    ${who?`<div class="pc-people"><span class="hint" style="margin:0">参会</span>${who}</div>`:""}</div>`
+    +`<div class="sec-h">这场会收进来的事<span class="n">${items.length}</span></div>`+(items.length?rowsOf(items,pick):emptyList());
+}
+function pickPerson(k){ const x=PEOPLE_SHOWN[k]; S.who=x?x.name:null; render(); }
+function openPerson(name){ S.dim="people"; S.who=name; render(); }
+function openMeeting(id){ S.dim="recent"; S.ent="m:"+id; render(); }
+async function personApi(body,done){
   if(!LIVE) return toast("原型里不能改");
-  try{ await api("/api/person",{name:x.key,kind}); await load(); toast(kind==="客户"?`已把「${x.key}」放进客户`:`「${x.key}」不再算客户`); }
+  try{ await api("/api/person",body); await load(); toast(done); }
   catch(e){ toast(e.message||"没保存成功"); }
+}
+const markPerson = (name,kind) => personApi({name,kind},kind==="客户"?`已把「${name}」放进客户`:`「${name}」不再算客户`);
+const askPerson = name => personApi({name,ask:true},`AI 空闲时会写「${name}」`);
+function savePersonNote(name){ const v=($("#pnote")||{}).value||""; drafts.delete("pnote:"+name); return personApi({name,note:v},"记下了"); }
+/* 分类：左栏是各个分区，点一下跳过去 */
+function typeLeft(shown){
+  const left=new Set(shown), secs=TYPES.map(([title,f],k)=>{ const xs=[...left].filter(f); xs.forEach(i=>left.delete(i)); return [title,xs,k]; }).filter(([,xs])=>xs.length);
+  const done=shown.length&&shown.every(i=>!isOpen(i));
+  return dimSeg("type")+(done||!secs.length?"":`<div class="list">${secs.map(([title,xs,k])=>`<button class="cell" onclick="document.getElementById('ts-${k}')?.scrollIntoView({behavior:'smooth',block:'start'})"><span class="lab">${title}</span><span class="val ${k===0&&xs.length?"need":""}">${xs.length}</span></button>`).join("")}</div>`);
 }
 function openNewProject(){ S.newProj=true; render(); setTimeout(()=>$("#proj-name")?.focus(),30); }
 function togglePick(n){ S.pick.has(n)?S.pick.delete(n):S.pick.add(n); render(); }

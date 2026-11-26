@@ -287,18 +287,19 @@ function reset(item) {
   await evaluate("removeProject(2)");
   assert.deepEqual(plain("[D.projects.length,byN(3).project,S.proj]"),[1,null,"all"]);
   evaluate(`D.items=${keep}; D.projects=[]; S.proj="all"`);
-  assert.doesNotMatch(evaluate("allPage()"),/未归类|多选|全部项目|proj-grid/, "no projects yet: a plain list, nothing standing alone beside it");
-  assert.match(evaluate("allPage()"),/openNewProject\(\)">＋ 新建项目/);
+  { const none=evaluate("allPage()"); assert.doesNotMatch(none,/未归类|多选|全部项目/, "no projects yet: nothing to pick from");
+    assert.equal((none.match(/＋ 新建项目/g)||[]).length, 1, "one place to make the first project"); }
+  assert.match(evaluate("allPage()"),/openNewProject\(\)"><span class="lab">＋ 新建项目/);
   evaluate("S.newProj=true"); assert.match(evaluate("allPage()"),/id="proj-name"/); evaluate("S.newProj=false");
   // 事项 is the one page: 今天 is a filter, and by type: 要你看, 等你定 (grouped by where it came from), 看起来已经办完, 你来做, AI 做, 别人做
   const keepAll = evaluate("JSON.stringify([D.items,D.inbox])");
   evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"},{n:6,title:"下周的事",status:"进行中",who:"我",due:"2099-01-01"}];
-    D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"pending",title:"「投流方案」该定了",read:false}]; S.view=null; S.all="今天"; S.dim=null; S.openMsg=null; S.working=false; render()`);
+    D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"pending",title:"「投流方案」该定了",read:false}]; S.view=null; S.all="今天"; S.dim="type"; S.openMsg=null; S.working=false; render()`);
   assert.equal(evaluate("S.view"),"all", "事项 opens first");
   const today = evaluate("allPage()");
-  for (const label of ["按类型","按项目","按人",">今天<",">全部<",">已结束<","待我处理","等验收的事","问你的事","我负责","今天要交的事","提醒","投流方案"]) assert.ok(today.includes(label), label);
+  for (const label of [">最近<",">通讯录<",">分类<",">项目<",">今天<",">全部<",">已结束<","待我处理","等验收的事","问你的事","我负责","今天要交的事","提醒","投流方案"]) assert.ok(today.includes(label), label);
   assert.doesNotMatch(today,/别人的事|下周的事|排队的事|AI 自己判断能不能做/, "今天: only today's; the AI switch is in settings");
-  assert.deepEqual([...today.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]),["提醒","待我处理","我负责"], "what waits on you first");
+  assert.deepEqual([...today.matchAll(/class="sec-h"[^>]*>([^<]+)</g)].map(m=>m[1]),["提醒","待我处理","我负责"], "what waits on you first");
   const everything = evaluate('S.all="全部"; allPage()');
   for (const label of ["AI 负责","排队的事","他人负责","别人的事","下周的事"]) assert.ok(everything.includes(label), label);
   assert.equal(evaluate("needCount()"),2);
@@ -322,7 +323,7 @@ function reset(item) {
   assert.deepEqual(groups,[["王客户","客户",[14]],["陈娈娇","聊天",[13]],["观己日常运营沟通","会议",[11,12]]]);
   const t2 = evaluate("allPage()");
   for (const label of ["待分配","全部我负责","全部交给 AI","全部取消","观己日常运营沟通","2 件"]) assert.ok(t2.includes(label), label);
-  const heads = [...t2.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]);
+  const heads = [...t2.matchAll(/class="sec-h"[^>]*>([^<]+)</g)].map(m=>m[1]);
   assert.deepEqual(heads,["待我处理","待分配","疑似已完成"], "the sections in order; an item sits in the first one it fits");
   assert.ok(t2.includes("告诉实习生安排") && t2.includes("AI 已备好材料，待验收"), "the 备材料 shows inside its item");
   assert.doesNotMatch(t2,/备材料：告诉实习生安排/, "not as a row of its own");
@@ -334,13 +335,31 @@ function reset(item) {
   assert.match(evaluate("healthDot(0)"),/自动修复中/);
   assert.match(evaluate("S.health=true; healthPanel()"),/269 分钟没检查[\s\S]*无需处理/); evaluate("S.health=false");
   evaluate("D.inbox=[]"); assert.equal(evaluate("healthDot(0)"),"", "all well: no dot at all");
-  // 事项 → 按人: clients apart, a person picked shows their items, and the guess can be corrected
-  evaluate('S.view="all"; S.dim="people"; S.all="全部"; S.who=null');
-  const people = evaluate("allPage()");
-  for (const label of ["按类型","按项目","按人","客户","同事","会议","王客户","陈娈娇","观己日常运营沟通"]) assert.ok(people.includes(label), label);
-  assert.ok(people.indexOf(">客户<") < people.indexOf(">同事<"), "clients first");
-  evaluate('S.who="王客户"'); assert.match(evaluate("allPage()"),/不是客户/);
-  evaluate('S.who="陈娈娇"'); assert.match(evaluate("allPage()"),/标成客户/);
+  // 事项: the left column switches how to look (最近 / 通讯录 / 分类 / 项目), no switch at the top right.
+  // 最近: the people, meetings, groups with something on, mixed, what waits on you first. 通讯录: everyone dealt with.
+  evaluate(`S.view="all"; S.dim=null; S.all="全部"; S.who=null; S.ent=null; S.pcOpen=null; D.people=[{name:"许佳婷",kind:"同事",guessed:true,messages:7,meetings:["m1"],chats:[],last:"2026-11-26 14:06",
+    text:"## 是谁\\n- 测试，负责走查（11-24 例会）",note:"",understood:"2026-11-26T14:52:00",enough:true}];
+    D.meetings=[{id:"m1",topic:"AI项目例会",at:"2026-11-24 09:15",url:"https://x.test/m",people:["许佳婷","陈娈娇"]}]`);
+  const recent = evaluate("allPage()");
+  for (const label of [">最近<",">通讯录<",">分类<",">项目<","王客户","陈娈娇","找人、会议、群"]) assert.ok(recent.includes(label), label);
+  assert.doesNotMatch(recent, /怎么分组|按类型/, "the way to look is switched on the left");
+  evaluate('S.ent="p:王客户"'); assert.match(evaluate("allPage()"),/不是客户/);
+  evaluate('setDim("people")'); const book = evaluate("allPage()");
+  for (const label of ["找人","许佳婷","陈娈娇","王客户"]) assert.ok(book.includes(label), label);
+  assert.ok(book.indexOf(">客户<") < book.indexOf(">同事<"), "clients first");
+  evaluate('S.who="陈娈娇"'); const chen = evaluate("allPage()");
+  assert.match(chen,/标成客户/); assert.match(chen,/AI 空闲时会写一份/, "nobody written about yet says so");
+  evaluate('S.who="许佳婷"'); const folded = evaluate("allPage()");
+  assert.ok(folded.includes("测试，负责走查") && folded.includes(">展开<"), "one line on who they are");
+  assert.doesNotMatch(folded, /你写的|心响对TA的理解/, "the rest is folded away");
+  evaluate('S.pcOpen="许佳婷"'); const xu = evaluate("allPage()");
+  for (const label of ["心响对TA的理解","重新理解","你写的","以这里为准","一起开过的会","AI项目例会","聊天 7 条",">收起<"]) assert.ok(xu.includes(label), label);
+  evaluate('openMeeting("m1")'); assert.equal(plain("[S.dim,S.ent]").join(), "recent,m:m1");
+  const meet = evaluate("allPage()");
+  for (const label of ["AI项目例会","参会","许佳婷","陈娈娇","会议记录 ↗","这场会收进来的事"]) assert.ok(meet.includes(label), label);
+  evaluate('openPerson("陈娈娇")'); assert.equal(plain("[S.dim,S.who]").join(), "people,陈娈娇", "an attendee opens their page");
+  evaluate('setDim("type")'); assert.match(evaluate("allPage()"),/scrollIntoView/, "分类: the sections on the left");
+  evaluate("D.people=[]; D.meetings=[]; S.pcOpen=null");
   evaluate('S.dim="proj"; S.who=null');
   evaluate(`[D.items,D.inbox]=${keepAll}; S.view="all"; S.all="今天"; S.dim="type"`);
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");

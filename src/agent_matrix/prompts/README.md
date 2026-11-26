@@ -24,6 +24,7 @@
 | `worker.md` | 做一件事：怎么做、工作方式、改全与核实、改代码时、网页与调研、怎么交 | `交付.md` + `结果.json` | `itemwork` |
 | `learn.md` | 从评审和反馈里学经验，只提草稿 | `learned.json` | `drive._submit_learn` |
 | `donecheck.md` | 看本人手上开着的事是不是已经办完（只认抄得出原话或给得出链接的） | `donecheck.json` | `donecheck` |
+| `people.md` | 给本人身边的同事、客户各写一份理解（是谁、在意什么、怎么打交道），只写材料里有的 | `people.json` | `contacts` |
 | `organize.md` | 把事归到项目和版本 | `organize.json` | `versions` |
 | `tidy.md` | 每天整理记忆，只提议 | `tidy.json` | `tidy` |
 | `profile_scan.md` | 第一次认识本人，写「关于你」草稿 | `画像.md` | `memory` |

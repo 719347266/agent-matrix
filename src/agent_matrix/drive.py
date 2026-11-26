@@ -222,6 +222,60 @@ def _submit_donecheck(root, job):
     return {"ok": True, "status": "done", "done": found}
 
 
+def _prepare_people(root, config, driver):
+    """A few people the owner deals with, with what was said with them: who are they, what do they care about (contacts)."""
+    from . import contacts
+    from .workenv import scratch
+    if _busy(root, "people"):
+        return None
+    picked = contacts.due(root, contacts.directory(root, contacts.self_names(root)), now())
+    if not picked:
+        return None
+    from .snapshot import _snapshot
+    rows = _snapshot(root).get("rows") or []
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    folder = scratch(root, "people", stamp)
+    (folder / "people").mkdir(exist_ok=True)
+    for p in picked:
+        (folder / "people" / f"{contacts.file_name(p['name'])}.md").write_text(contacts.evidence(root, p, rows), encoding="utf-8")
+    contacts.mark_tried(root, [p["name"] for p in picked], now())
+    names = "、".join(p["name"] for p in picked)
+    return {"id": f"people-{stamp}", "kind": "people", "title": f"认识 {names}", "folder": str(folder),
+            "ref": {"people": picked}, "output": ["people.json"], "lease_until": _lease(OTHER_LEASE_MINUTES),
+            "instructions": promptfile.read(root, "people.md")}
+
+
+def _submit_people(root, job):
+    from . import activity, contacts
+    try:
+        written = json.loads((Path(job["folder"]) / "people.json").read_text(encoding="utf-8"))
+        assert isinstance(written, list)
+    except (OSError, ValueError, AssertionError):
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "没有找到有效的 people.json（格式见说明里的例子）。"}
+    by_name = {}
+    for p in job["ref"]["people"]:
+        by_name[p["name"]] = by_name[contacts.file_name(p["name"])] = p
+    kept, problems = [], []
+    for w in written:
+        person = by_name.get(str(w.get("name") or "").removesuffix(".md")) if isinstance(w, dict) else None
+        if not person:
+            continue
+        problem = contacts.accept(root, person, w.get("text"), now())
+        if problem:
+            problems.append(f"{person['name']}：{problem}")
+        else:
+            kept.append(person["name"])
+    if problems and job["rounds"] < MAX_FIX_ROUNDS:
+        job["rounds"] += 1
+        _save(root, job)
+        return {"ok": False, "status": "fix", "problem": "这几份要改：" + "；".join(problems)}
+    activity.log(root, "detect", f"认识了 {'、'.join(kept)}" if kept else "认识身边的人：材料还不够，这一轮没写")
+    _close(root, job, "done")
+    return {"ok": True, "status": "done", "people": kept}
+
+
 TRIAGE_OTHERS = 200
 
 
@@ -922,7 +976,7 @@ def _stage(root, item, rows, row):
     return specs.work_text(root, p)
 
 
-SORTING = ("triage", "meeting", "chat", "learn", "donecheck")   # 整理: judging new items, meetings, chats, learning rules, done yet
+SORTING = ("triage", "meeting", "chat", "learn", "donecheck", "people")   # 整理: judging new items, meetings, chats, learning rules, done yet, people
 
 
 def item_runner(root):
@@ -994,6 +1048,10 @@ def has_sorting_for(root, config):
             from .snapshot import _snapshot
             if donecheck.due(root, _snapshot(root).get("rows") or [], now()):
                 return "donecheck"
+        if not _busy(root, "people"):
+            from . import contacts
+            if contacts.due(root, contacts.directory(root, contacts.self_names(root)), now()):
+                return "people"
     except Exception as exc:
         activity.swallowed(root, "drive.has_sorting_for", exc)
     return None
@@ -1033,8 +1091,8 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = _prepare_organize(root, config, driver)
         if job:
             return _open(root, job, driver)
-    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn, _prepare_donecheck)):
-        if kind not in wanted:
+    for kind, prepare in zip(SORTING, (_prepare_triage, _prepare_meeting, _prepare_chat, _prepare_learn, _prepare_donecheck, None)):
+        if kind not in wanted or prepare is None:
             continue
         if kind in {"chat", "learn"}:
             from .state import exclusive_lock
@@ -1049,7 +1107,10 @@ def next_job(root, config, driver, *, skip=(), kinds=None, builtin=False, only=N
         job = prepare(root, config, driver)
         if job:
             return _open(root, job, driver)
-    tidy_now = lambda: (_open(root, job, driver) if "tidy" in wanted and (job := _prepare_tidy(root, config, driver)) else None)
+    def tidy_now():   # idle work: getting to know people, tidying the memory; after the owner's own work, never before it
+        if "people" in wanted and (job := _prepare_people(root, config, driver)):
+            return _open(root, job, driver)
+        return _open(root, job, driver) if "tidy" in wanted and (job := _prepare_tidy(root, config, driver)) else None
     if "item" not in wanted:
         return tidy_now()   # tidying the memory is for idle time: after the owner's own work, never before it
     tried = set(skip)
@@ -1168,7 +1229,7 @@ def work_for(root, config, driver):
 
 WORK_WORDS = {"setup": "接入设置", "profile": "「认识你」", "organize": "整理项目和版本", "tidy": "整理记忆",
               "item": "交给 AI 的事", "meeting": "整理会议", "chat": "整理聊天", "triage": "判断新进来的事",
-              "donecheck": "看你的事办完没有"}
+              "donecheck": "看你的事办完没有", "people": "认识身边的人"}
 
 
 def has_items_for(root, config, driver="Cindy"):
@@ -1243,6 +1304,9 @@ def fail(root, job, problem):
     if job["kind"] == "learn":
         activity.log(root, "learn", "学规矩已延后，后台会再试", detail=str(problem)[:300], status="deferred", ref=job["id"])
         return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
+    if job["kind"] == "people":   # nothing waits on it: the same people are tried again later, quietly
+        activity.log(root, "detect", "认识身边的人：这一轮没做成，过几个小时再试", detail=str(problem)[:300], status="deferred", ref=job["id"])
+        return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
     if job["kind"] == "donecheck":   # nothing waits on it: the same items are looked at again next round, quietly
         activity.log(root, "detect", "看你的事办完没有：这一轮没做成，下一轮再看", detail=str(problem)[:300], status="deferred", ref=job["id"])
         return {"ok": False, "status": "failed", "problem": str(problem)[:300]}
@@ -1286,6 +1350,8 @@ def submit(root, config, job_id, driver=None):
         return _submit_triage(root, job)
     if kind == "donecheck":
         return _submit_donecheck(root, job)
+    if kind == "people":
+        return _submit_people(root, job)
     if kind == "learn":
         return _submit_learn(root, job)
     if kind == "setup":

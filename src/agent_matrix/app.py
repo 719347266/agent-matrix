@@ -298,6 +298,7 @@ def build_state(root):
             "settings": settings, "judgments": judged, "reply_timing_summary": timing_summary,
             "guide": part("接入说明", lambda: drive.guide_text(str(drive.shim_path())), ""),
             **part("记忆", lambda: memory_view(root, items), {}),
+            **part("通讯录", lambda: _contacts_view(root, items), {"people": [], "meetings": []}),
             "snapshot_at": str(snap.get("at") or "")[11:16], "items": items, "projects": project_list, "threads": threads, "deliverables": deliverables,
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
             "system": {**part("系统状态", lambda: system_info(root), {}), "store": part("存储", lambda: store_info(root), {}),
@@ -337,6 +338,20 @@ def _specs_module():
     return specs
 
 
+def _contacts_view(root, items):
+    """D.people: everyone the owner deals with (contacts.directory), with what 心响 understands about each; D.meetings:
+    the meetings with a transcript and who spoke. Items know their chat partner even when the chat was not kept."""
+    from . import contacts
+    extra = [(i.get("origin") or {}).get("person") for i in items]
+    asked = contacts._get(root, contacts.ASKED)
+    people = contacts.directory(root, contacts.self_names(root), [x for x in extra if x])
+    for p in people:
+        p["text"] = re.sub(r"^#\s+.*\n+", "", contacts.understanding(root, p["name"]).strip())
+        p["asked"] = p["name"] in asked
+        p["enough"] = contacts.dealings(p) >= contacts.MIN_DEALINGS
+    return {"people": people, "meetings": contacts.meetings(root)[:80]}
+
+
 def _people_tags(root):
     from . import people
     return people.tags(root)
@@ -352,8 +367,13 @@ def _origins(root, rows, items):
     meetings, chats = people.known(root)
     tags = people.tags(root)
     by_rid, by_n = {r.get("record_id"): r for r in rows}, {i["n"]: i for i in items}
+    from . import contacts
     for item in items:
-        item["origin"] = people.origin(by_rid.get(item["rid"]) or {}, item.get("source_url"), meetings, chats, self_names, tags)
+        o = item["origin"] = people.origin(by_rid.get(item["rid"]) or {}, item.get("source_url"), meetings, chats, self_names, tags)
+        if o["kind"] == "会议":   # which meeting, and who said the words it came from (not the owner)
+            o["meeting"] = people._param(item.get("source_url"), "meetingId")
+            who = contacts.speaker_at(root, o["meeting"], item.get("quote"))
+            o["person"] = who if who and who not in self_names else None
     for item in items:
         parent = by_n.get(item.get("parent"))
         if parent and item["origin"]["kind"] == "手动":
@@ -915,9 +935,14 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     specs.save(root, kind, str(body.get("text") or ""))
                 return self._send(200, {"ok": True})
-            if path == "/api/person":  # the owner says who this is: 客户 or 同事 ("" = back to the guess)
-                from . import people
+            if path == "/api/person":  # the owner says who this is (客户 / 同事, "" = back to the guess), writes about them, or asks 心响 to (re)write its understanding
+                from . import contacts, people
                 try:
+                    if "note" in body:
+                        return self._send(200, {"ok": True, "note": contacts.set_note(root, body.get("name"), body.get("note"))})
+                    if body.get("ask"):
+                        contacts.ask(root, body.get("name"), datetime.now(TZ))
+                        return self._send(200, {"ok": True})
                     tags = people.set_kind(root, body.get("name"), body.get("kind") or "")
                 except ValueError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})

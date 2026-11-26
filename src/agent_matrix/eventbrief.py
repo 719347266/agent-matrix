@@ -238,6 +238,9 @@ def build(root, record_id, rows=None):
     later = _later_words(row, history.get("messages", []))
     if later:
         lines += ["", "## 本人后来的要求（比上面都新，冲突时以这里为准）", *later]
+    who = _people(root, raw_quote, f"{topic} {raw_quote}")
+    if who:
+        lines += ["", "## 相关的人（心响对TA们的理解；「本人写的」为准。写给TA的东西照TA在意的写）", *who]
     experience = _experience(root, topic)
     if experience:
         lines += ["", "## 你的经验里和这件事相关的（本人审过的做法，照着做；交付时在结果的 memory 里写用了哪几条）", *experience]
@@ -247,6 +250,17 @@ def build(root, record_id, rows=None):
               "- 任务单.md、背景.md：程序找的背景和相关事项"
               + ("；逐字稿.md：整场会的逐字稿" if meeting_id else "") + "；上一版.md：上一次交付（有的话）"]
     return "\n".join(lines) + "\n"
+
+
+def _people(root, quote, text):
+    """What 心响 understands about the people this item is about: who said it first, then who is named."""
+    from . import contacts
+    try:
+        speaker = re.match(r"^\[[^\]]*?\d{2}:\d{2}(?::\d{2})?\S*\s+([^\]]+)\]", str(quote or ""))
+        first = [speaker.group(1).strip()] if speaker else []
+        return contacts.about(root, contacts.mentioned(root, text, first))
+    except Exception:
+        return []
 
 
 def _url(text):
