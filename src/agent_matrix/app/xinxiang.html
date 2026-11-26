@@ -451,9 +451,12 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .grp-h .fold{color:var(--ink3);width:12px;flex:none}.grp-h .t{font-weight:600;overflow-wrap:anywhere}.grp-h .s{font-size:12px;color:var(--ink3)}
 .grp-h .acts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .grp>.list{border:0;border-radius:0;border-top:1px solid var(--line2);background:none}
+.grp .row .meta{display:none}   /* every row in a group waits for you to decide: the tag says nothing new */
+.grp .row .judge{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .s.kid{white-space:normal}.row .s .src{color:var(--ink3)}
 .lnk{border:0;background:none;padding:0;color:var(--brand);font:inherit;font-size:12px;cursor:pointer}
 .seg2{display:flex;gap:4px;margin:0 0 10px}
+.msg-link{margin-left:auto;align-self:center;color:var(--ink2)}.msg-link b{color:var(--red)}
 @media (max-width:600px){.grp-h{flex-wrap:wrap}.grp-h .acts{width:100%;margin-left:22px;justify-content:flex-start}}
 .sum.bad{background:var(--red-soft)}.sum.todo{background:var(--amber-soft)}.sum b{font-size:15px}.sum span{color:var(--ink2);font-size:12.5px}.sum .btn{margin-left:auto}
 .inner-list{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--field)}
@@ -574,12 +577,12 @@ function announce(){
   const top=Math.max(0,...D.inbox.map(m=>m.id));
   if(newestSeen && top>newestSeen){
     const fresh=D.inbox.filter(m=>m.id>newestSeen&&!m.read);
-    if(fresh.length) toast(fresh.length===1?`新动态：${eventTitle(fresh[0])}`:`${fresh.length} 条新动态`,"查看",()=>{ S.view="today"; S.q=""; $("#q").value=""; if(!wide()) S.item=null; render(); });
+    if(fresh.length) toast(fresh.length===1?`新动态：${eventTitle(fresh[0])}`:`${fresh.length} 条新动态`,"查看",()=>{ S.view="inbox"; S.q=""; $("#q").value=""; if(!wide()) S.item=null; render(); });
   }
   newestSeen=top;
   const n=unreadCount(); document.title=n?`(${n}) 心响`:"心响";
 }
-const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"进行中", proj:"all", pick:new Set(), picking:false, moving:null, doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
+const S = {view:null, item:null, inline:null, q:"", tab:"talk", mode:"ai", all:"今天", proj:"all", pick:new Set(), picking:false, moving:null, doneTab:"已完成", inboxTab:null, openMsg:null, working:false, step:0, blocked:null};
 // Requests stay visible across refreshes; an ambiguous transport error keeps the
 // same ID for reconciliation instead of creating another write.
 const localCommands = new Map();
@@ -860,9 +863,9 @@ function inboxPage(){
   }
   const sec=(title,rows,empty)=>rows.length||empty?`<div class="sec-h">${title}<span class="n">${rows.length||""}</span></div><div class="list">${rows.join("")||`<div class="empty">${empty}</div>`}</div>`:"";
   const tabs=[["","最近"],["全部","全部"],["system","系统"]].map(([k,l])=>`<button class="chip ${(S.inboxTab||"")===k?"on":""}" onclick="S.inboxTab='${k}';render()">${l}</button>`).join("");
-  if(sys) return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('today')">‹ 今天</button>${tabs}</div>
+  if(sys) return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('all')">‹ 事项</button>${tabs}</div>
     <p class="hint">心响自己的运行记录：出错会自动重试、换 AI 顶上，不用你处理。要你本人做的（登录、授权）会在右上角的状态点里说。</p>${sec("系统消息",groups.today,"没有系统消息。")}`;
-  return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('today')">‹ 今天</button>${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
+  return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('all')">‹ 事项</button>${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
     ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天发生的",groups.today,all?"":"今天还没有新动态。")}
     ${all?sec("更早",groups.old,""):groups.old.length?`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxTab='全部';render();return false">查看更早的 ${groups.old.length} 条</a></p>`:""}`;
 }
@@ -940,26 +943,15 @@ function msgBody(m){
   return `<div class="msg-open" data-msg="${m.id}">${parts.join("")||`<p class="b-p quiet">没有更多内容</p>`}</div>`;
 }
 function readAll(){ D.inbox.forEach(m=>m.read=true); if(LIVE) api("/api/read",{all:true}).catch(()=>{}); announce(); render(); }
-/* ---------- 今天：只放今天要你动手的，每行写为什么。新进来的在「新进来」，报错在右上角的状态点 ---------- */
-function todayParts(){
-  const v=D.items.filter(i=>live(i)&&topLevel(i)), q=(D.worker&&D.worker.queue)||[], pos=i=>q.indexOf(i.n)<0?99:q.indexOf(i.n);
-  const kidNeeds=i=>kidsOf(i).some(needsYou), hinted=i=>!!i.done_hint&&!["完成","取消"].includes(i.status);
-  const ask=[...v.filter(blockedAI),...v.filter(i=>!blockedAI(i)&&((i.status==="待验收"&&!isWorking(i))||kidNeeds(i))).sort(byDue)];
-  const doneish=v.filter(hinted);
-  const mine=v.filter(i=>i.who==="我"&&!["完成","取消","待确认","待验收"].includes(i.status)&&i.due&&i.due<=TODAY&&!hinted(i)&&!ask.includes(i)).sort(byDue);
-  const working=v.filter(isWorking), queued=v.filter(i=>i.who==="AI"&&active(i)&&!blockedAI(i)&&!isWorking(i)).sort((a,b)=>pos(a)-pos(b));
-  // messages: not the ones about an item listed above, not new items (「新进来」), not the system's own notices (status dot)
-  const listed=new Set([...ask,...doneish,...mine,...working,...queued].map(i=>i.n)), seen=new Set(), msgs={need:[],today:[],old:[]};
-  for(const m of D.inbox||[]){
-    if(isNotice(m)||m.kind==="new") continue;
-    const one=itemOf(m), key=one?"n"+one.n:"m"+m.id;
-    if(seen.has(key)) continue; seen.add(key);
-    if(one&&(listed.has(one.n)||childOf(one))) continue;
-    msgs[m.kind==="pending"&&!m.read?"need":inboxBucket(m)].push(m);
-  }
-  return {ask,doneish,mine,working,queued,msgs,fresh:newItems()};
-}
-const todayCount = () => { const t=todayParts(); return t.ask.length+t.mine.length+t.doneish.length+t.msgs.need.length; };
+/* ---------- 事项：唯一的一页。上面筛选（今天 / 全部 / 已完成 / 不做的），下面按类型、项目或人分。
+   报错不在这里，在右上角的状态点；「AI 先判断能不能做」在设置里 ---------- */
+const hinted = i => !!i.done_hint&&!["完成","取消"].includes(i.status);
+const kidNeeds = i => kidsOf(i).some(needsYou);
+const waitsOnYou = i => live(i)&&topLevel(i)&&(needsYou(i)||kidNeeds(i)||hinted(i));
+const isOpen = i => !["完成","取消"].includes(i.status);
+// 今天: what waits on you now, your own work due today or late, what the AI is doing, and what came in today
+const isToday = i => isOpen(i)&&(needsYou(i)||kidNeeds(i)||hinted(i)||(i.who==="我"&&i.due&&i.due<=TODAY)||isWorking(i)||String(i.created||"").slice(0,10)===TODAY);
+const needCount = () => D.items.filter(waitsOnYou).length;
 function doneRow(i){
   return `<div class="row" onclick="openItem(${i.n})"><span class="ud"></span><span class="no">#${i.n}</span><div style="min-width:0"><div class="t">${esc(i.title)}</div>${sub(i)}</div>
     <div class="meta"></div><div class="acts">${i.done_hint.url?`<a class="btn link" href="${esc(i.done_hint.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">看依据</a>`:""}${btn(i,["关掉","done","pri"])}<button class="btn ghost" onclick="event.stopPropagation();notDone(${i.n})">没办完</button></div></div>`;
@@ -969,29 +961,33 @@ async function notDone(n){
   if(!LIVE) return toast("好的，留着这件事。原型，不改数据");
   try{ await api("/api/donehint",{rid:i.rid}); toast("好的，留着这件事，这句话不会再拿来说"); }catch(e){ i.done_hint=was; render(); toast(e.message||"没保存成功"); }
 }
-function todayPage(){
-  const {ask,doneish,mine,working,queued,msgs,fresh}=todayParts(), box=D.inbox||[];
-  const d=new Date(TODAY), date=`${d.getMonth()+1} 月 ${d.getDate()} 日 周${"日一二三四五六"[d.getDay()]}`;
-  const left=setupProblems();
-  const prog=setupBusy()?`<div class="pg-card" onclick="S.ob={step:OB.length-1,started:true};render()">${progressBoard(setupSteps())}</div>`:"";
-  const askRows=ask.map(i=>row(i)).join("")+msgs.need.map(m=>inboxRow(m,box)).join("");
-  const groups=newGroups();
-  const freshCard=fresh.length?`<button class="sum go" onclick="go('new')"><div><b>新进来 ${fresh.length} 件，等你过一遍</b><br><span>${esc(groups.slice(0,3).map(g=>g.label).join("、"))}${groups.length>3?` 等 ${groups.length} 处`:""}　按会议和人收好了</span></div><span class="chev">›</span></button>`:"";
-  const ai=working.length||queued.length?`<button class="sum go quiet" onclick="go('doing')"><div><b>AI 在做 ${working.length} 件${queued.length?`，排队 ${queued.length} 件`:""}</b>${working[0]?`<br><span>#${working[0].n} ${esc(working[0].title)}</span>`:""}</div><span class="chev">›</span></button>`:"";
-  const empty=!ask.length&&!msgs.need.length&&!mine.length&&!doneish.length;
-  return `<p class="hint" style="margin:-4px 2px 14px">${date}</p>${prog}${!prog&&left.length?`<div class="sum bad" style="cursor:pointer" onclick="S.setTab='ai';go('sys')"><div><b>还差 ${left.length} 步才能用</b><br><span>${left.map(x=>esc(x.title.split("：")[0])).join("、")}没配好</span></div><button class="btn pri">去看看</button></div>`:""}
-    ${askRows?`<div class="sec-h">要你定<span class="n">${ask.length+msgs.need.length}</span></div><div class="list">${askRows}</div>`:""}`
-   +section("今天要做的：今天到期或已逾期",mine)
-   +(doneish.length?`<div class="sec-h">看起来已经办完<span class="n">${doneish.length}</span><span class="aside">AI 在聊天和文档里找到了依据，点「关掉」就行</span></div><div class="list">${doneish.map(doneRow).join("")}</div>`:"")
-   +(empty?`<div class="list"><div class="empty">今天没有要你动手的。</div></div>`:"")
-   +`<div class="cards">${freshCard}${ai}</div>`
-   +(msgs.today.length?`<p class="hint today-msgs"><a href="#" onclick="go('inbox');return false">今天还有 ${msgs.today.length} 条消息（${esc([...new Set(msgs.today.map(m=>inboxText(m,itemOf(m))[0]))].slice(0,3).join("、"))}）›</a></p>`:"")
-   +closedByAI();
+/* 按类型：每件事只进第一块对得上的 */
+const TYPES=[
+  ["要你看：验收、AI 问你", i=>blockedAI(i)||(i.status==="待验收"&&!isWorking(i))||kidNeeds(i)],
+  ["等你定：新进来的", i=>i.status==="待确认"&&i.who!=="别人"],
+  ["看起来已经办完", hinted],
+  ["你来做", i=>i.who==="我"],
+  ["AI 做", i=>i.who==="AI"],
+  ["别人做", ()=>true]];
+function typeView(list,pick){
+  const left=new Set(list), take=f=>{ const out=[...left].filter(f); out.forEach(i=>left.delete(i)); return out; };
+  const done=list.length&&list.every(i=>!isOpen(i));
+  if(done){   // 已完成 / 不做的: newest first, no sections
+    const when=i=>i.finished||String(i.updated||"").slice(0,10);
+    return `<div class="list">${[...list].sort((a,b)=>when(b)>when(a)?1:when(b)<when(a)?-1:b.n-a.n).map(i=>row(i,{pick})).join("")}</div>`;
+  }
+  return TYPES.map(([title,f],k)=>{
+    const xs=take(f); if(!xs.length) return "";
+    const h=extra=>`<div class="sec-h">${title}<span class="n">${xs.length}</span>${extra||""}</div>`;
+    if(k===1) return h(`<span class="aside">按从哪来的收好了，整组定或点开一条条定</span>`)+freshGroups(xs);
+    if(k===2) return h(`<span class="aside">AI 在聊天和文档里找到了依据</span>`)+`<div class="list">${xs.map(doneRow).join("")}</div>`;
+    xs.sort(k===4?(a,b)=>isWorking(b)-isWorking(a)||byDue(a,b):byDue);
+    return h()+`<div class="list">${xs.map(i=>row(i,{pick})).join("")}</div>`;
+  }).join("");
 }
-/* ---------- 新进来：还没定谁来做的事，按从哪来的收成一组一组：哪场会、谁、飞书任务 ---------- */
+/* 等你定：按从哪来的收成组（哪场会、谁、飞书任务），可整组定 */
 const ORIGIN_NONE={kind:"手动",group:"手动",person:null,client:false,at:""};
 const originOf = i => i.origin||{...ORIGIN_NONE,kind:i.source||"手动",group:i.source||"手动"};
-const newItems = () => D.items.filter(i=>live(i)&&topLevel(i)&&i.status==="待确认"&&i.who!=="别人");
 function groupOf(i){
   const o=originOf(i), at=String(o.at||"");
   if(o.kind==="会议") return {key:"会议|"+o.group, label:o.group!=="会议"?o.group:"会议", tag:"会议", when:at.slice(5,10).replace("-","/")};
@@ -999,31 +995,41 @@ function groupOf(i){
   if(o.kind==="手动") return {key:"手动", label:"你自己加的", tag:"", when:""};
   return {key:o.kind+"|"+o.group, label:o.group, tag:"", when:""};
 }
-function newGroups(){
+function freshGroupsOf(list){
   const g=new Map();
-  for(const i of newItems()){ const x=groupOf(i); if(!g.has(x.key)) g.set(x.key,{...x,items:[]}); g.get(x.key).items.push(i); }
+  for(const i of list){ const x=groupOf(i); if(!g.has(x.key)) g.set(x.key,{...x,items:[]}); g.get(x.key).items.push(i); }
   const last=x=>x.items.reduce((m,i)=>(i.created||"")>m?(i.created||""):m,"");
   return [...g.values()].sort((a,b)=>last(b)>last(a)?1:last(b)<last(a)?-1:0);
 }
-function newPage(){
-  const groups=newGroups(), open=S.grpOpen||(S.grpOpen=new Set());
-  if(!groups.length) return `<div class="list"><div class="empty">没有新进来的事。</div></div>${autoSwitch()}`;
-  const auto=groups.length<=3;   // a few groups: all open; many: the newest open, the rest folded
-  return `<p class="hint" style="margin:-4px 2px 14px">按从哪来的收好了：整组收下、整组不要，或点开一条条定。</p>`+groups.map((g,k)=>{
+let FRESH_SHOWN=[];   // the groups as last drawn: a click names one by its place in this list
+function freshGroups(list){
+  const groups=FRESH_SHOWN=freshGroupsOf(list), open=S.grpOpen||(S.grpOpen=new Set()), auto=groups.length<=3;
+  return groups.map((g,k)=>{
     const shown=open.has(g.key)!==(auto||k===0), ns=g.items.map(i=>i.n);
     return `<div class="grp"><div class="grp-h" onclick="toggleGroup(${k})" role="button" aria-expanded="${shown}">
       <span class="fold">${shown?"▾":"▸"}</span><div style="min-width:0"><div class="t">${g.tag?`<span class="pill ${g.tag==="客户"?"amber":g.tag==="会议"?"blue":""}">${esc(g.tag)}</span> `:""}${esc(g.label)}</div>
       <div class="s">${g.items.length} 件${g.when?` · ${esc(g.when)}`:""}</div></div>
       <div class="acts" onclick="event.stopPropagation()"><button class="btn" onclick="groupDo([${ns}],'me')">都我来</button><button class="btn" onclick="groupDo([${ns}],'ai')">都交给 AI</button><button class="btn ghost" onclick="groupDo([${ns}],'cancel')">都不要</button></div></div>
       ${shown?`<div class="list">${g.items.map(i=>row(i)).join("")}</div>`:""}</div>`;
-  }).join("")+autoSwitch();
+  }).join("");
 }
-function toggleGroup(k){ const g=newGroups()[k]; if(!g) return; const o=S.grpOpen||(S.grpOpen=new Set()); o.has(g.key)?o.delete(g.key):o.add(g.key); render(); }
+function toggleGroup(k){ const g=FRESH_SHOWN[k]; if(!g) return; const o=S.grpOpen||(S.grpOpen=new Set()); o.has(g.key)?o.delete(g.key):o.add(g.key); render(); }
 async function groupDo(ns,k){
   ns=ns.filter(n=>byN(n)&&!pendingFor(n)); if(!ns.length) return;
   for(const n of ns) await apply(n,k,null);
   const said={me:"都归你了",ai:"都交给 AI 了",cancel:"都放下了"}[k];
   toast(`${ns.length} 件${said}`, "撤销", ()=>ns.forEach(n=>apply(n,"restore",null)));
+}
+/* 今天才有：会快开了、等的条件到了（消息，不是事项） */
+function remindRows(){
+  const box=D.inbox||[], seen=new Set(), out=[];
+  for(const m of box){
+    if(isNotice(m)) continue;
+    const soon=m.kind==="prep"&&meetingSoon(m), due=m.kind==="pending"&&!m.read;
+    if(!soon&&!due) continue;
+    const key=m.kind+"|"+m.title; if(seen.has(key)) continue; seen.add(key); out.push(inboxRow(m,box));
+  }
+  return out;
 }
 /* ---------- 状态点：心响自己的报错不进列表。它自己重试、顶上；只有要你本人做的（登录、授权）才叫你 ---------- */
 function healthIssues(){
@@ -1052,43 +1058,24 @@ function healthPanel(){
   return `<div class="health-panel">${rows.join("")||`<div class="hl"><b>后台正常</b><span>收消息、整理、AI 做事都在照常运行。</span></div>`}
     <div class="hl-foot">${you.length?`<button class="btn pri" onclick="S.health=false;S.setTab='ai';go('sys')">去配好</button>`:""}<button class="btn ghost" onclick="S.health=false;S.inboxTab='system';go('inbox')">全部系统消息</button><button class="btn ghost" onclick="S.health=false;render()">收起</button></div></div>`;
 }
-function todoPage(){
-  const v=D.items.filter(live);
-  const blocked=v.filter(blockedAI), review=v.filter(i=>i.status==="待验收"&&!isWorking(i)).sort(byDue), fresh=v.filter(i=>i.status==="待确认"&&i.who!=="别人");
-  const mine=v.filter(i=>i.who==="我"&&!["完成","取消","待确认","待验收"].includes(i.status)&&i.due&&i.due<=TODAY).sort(byDue);
-  const freshBlock=`<div class="sec-h">新进来，等你定谁来做<span class="n">${fresh.length}</span></div>${autoSwitch()}`+(fresh.length?`<div class="list">${fresh.map(i=>row(i)).join("")}</div>`:`<div class="list"><div class="empty">没有新进来的事</div></div>`);
-  return section("AI 问你，等你一句话",blocked)+section("等你验收",review)+freshBlock+section("你的事：今天到期或已逾期",mine)+closedByAI();
-}
-function doingPage(){
-  const v=D.items.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i));
-  const q=(D.worker&&D.worker.queue)||[], pos=i=>q.indexOf(i.n)<0?99:q.indexOf(i.n);
-  const working=v.filter(isWorking), ai=v.filter(i=>i.who==="AI"&&!isWorking(i)).sort((a,b)=>pos(a)-pos(b));
-  const me=v.filter(i=>i.who==="我"&&!isWorking(i)).sort(byDue), others=v.filter(i=>i.who==="别人"&&!isWorking(i)).sort(byDue);
-  return (section("AI 正在做",working,`<span class="aside">最多同时 10 件</span>`)+section("AI 排队",ai)+section("你来做",me)+section("别人在做",others))
-    ||`<div class="list"><div class="empty">没有进行中的事</div></div>`;
-}
-function donePage(){
-  const tab=S.doneTab, when=i=>i.finished||String(i.updated||"").slice(0,10);
-  const list=D.items.filter(i=>!i.hidden&&i.status===(tab==="不做的"?"取消":"完成")).sort((a,b)=>when(b)>when(a)?1:when(b)<when(a)?-1:b.n-a.n);
-  const week=addDays(TODAY,-7);
-  const groups=[["今天",list.filter(i=>when(i)===TODAY)],["最近 7 天",list.filter(i=>when(i)&&when(i)<TODAY&&when(i)>=week)],["更早",list.filter(i=>!when(i)||when(i)<week)]];
-  const tabs=["已完成","不做的"].map(k=>`<button class="chip ${k===tab?"on":""}" onclick="S.doneTab='${k}';render()">${k}</button>`).join("");
-  return `<div class="chips">${tabs}</div><p class="hint">点开任何一件都能看到当时和 AI 的对话。要改，直接在对话里说，AI 会接着原来的对话改出新版本。</p>`+
-    (groups.map(([t,g])=>section(t,g)).join("")||`<div class="list"><div class="empty">没有</div></div>`);
-}
 /* ---------- 事项：按项目看。项目是本人自己分的；没分的由系统猜，猜的会标出来 ---------- */
 const projOf = id => (D.projects||[]).find(p=>p.id===id);
 const projDot = p => `<span class="pdot" style="background:${p&&p.color?esc(p.color):"var(--ink3)"}"></span>`;
 function allPage(){
-  const F={"进行中":i=>!["完成","取消"].includes(i.status),"你来做":i=>i.who==="我"&&!["完成","取消"].includes(i.status),"AI 做":i=>i.who==="AI"&&!["完成","取消"].includes(i.status),"别人做":i=>i.who==="别人"&&!["完成","取消"].includes(i.status),"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
+  const F={"今天":isToday,"全部":isOpen,"已完成":i=>i.status==="完成","不做的":i=>i.status==="取消"};
+  if(!F[S.all]&&S.all!=="以后要确认的") S.all="今天";
   const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking;
   const M=D.memory||{}, later=(M.waiting||[]).length+(M.recent||[]).filter(m=>m.label==="还没定").length;
   const NOTES={"以后要确认的":[later,laterList]}, note=NOTES[S.all];
-  const chips=`<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}</button>`).join("")}<span style="width:1px;height:16px;background:var(--line);margin:0 6px;align-self:center"></span>${Object.entries(NOTES).map(([k,[n]])=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';S.picking=false;render()">${k}${n?` ${n}`:""}</button>`).join("")}</div>`;
+  const n=k=>k==="今天"?D.items.filter(i=>!i.hidden&&topLevel(i)&&isToday(i)).length:0;
+  const msgs=unreadCount(), mlink=`<a class="aside msg-link" href="#" onclick="go('inbox');return false">消息${msgs?` <b>${msgs}</b>`:""} ›</a>`;
+  const chips=`<div class="chips">${Object.keys(F).map(k=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';render()">${k}${n(k)?` ${n(k)}`:""}</button>`).join("")}<span style="width:1px;height:16px;background:var(--line);margin:0 6px;align-self:center"></span>${Object.entries(NOTES).map(([k,[n]])=>`<button class="chip ${k===S.all?"on":""}" onclick="S.all='${k}';S.picking=false;render()">${k}${n?` ${n}`:""}</button>`).join("")}${mlink}</div>`;
   if(note) return `<div class="proj-head">${chips}</div>${note[1]()}`;   // not sorted into projects: they have no number of their own
   const shown=D.items.filter(i=>!i.hidden&&topLevel(i)&&(F[S.all]||F["进行中"])(i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
-  const dim=`<div class="seg2" role="tablist" aria-label="怎么分">${[["proj","按项目"],["people","按人"]].map(([k,l])=>`<button class="chip ${(S.dim||"proj")===k?"on":""}" role="tab" aria-selected="${(S.dim||"proj")===k}" onclick="S.dim='${k}';render()">${l}</button>`).join("")}</div>`;
-  if(S.dim==="people") return dim+peopleView(shown,chips,pick);
+  const by=S.dim||"type", dim=`<div class="seg2" role="tablist" aria-label="怎么分">${[["type","按类型"],["proj","按项目"],["people","按人"]].map(([k,l])=>`<button class="chip ${by===k?"on":""}" role="tab" aria-selected="${by===k}" onclick="S.dim='${k}';render()">${l}</button>`).join("")}</div>`;
+  const top=S.all==="今天"?todayTop():"", bottom=S.all==="今天"?closedByAI():"";
+  if(by==="people") return top+dim+peopleView(shown,chips,pick)+bottom;
+  if(by==="type") return top+`<div class="proj-head">${chips}</div>`+dim+(remind(S.all))+(typeView(shown,false)||`<div class="list"><div class="empty">${S.all==="今天"?"今天没有要你动手的。":"没有"}</div></div>`)+bottom;
   const count=k=>shown.filter(i=>inP(i,k)).length, need=k=>shown.filter(i=>inP(i,k)&&needsYou(i)).length;
   const drop=k=>`ondragover="event.preventDefault();this.classList.add('drop')" ondragleave="this.classList.remove('drop')" ondrop="event.preventDefault();this.classList.remove('drop');moveItems([+event.dataTransfer.getData('text/plain')],${k})"`;
   const cell=(k,name,p)=>`<button class="cell ${cur===k?"on":""}" onclick="S.proj=${k==="all"?"'all'":k};S.renaming=false;render()" ${k==="all"?"":drop(k)}>${k==="all"?"":projDot(p)}<span class="lab">${esc(name)}</span><span class="val ${need(k)?"need":""}">${need(k)?`${need(k)} 件等你`:count(k)}</span></button>`;
@@ -1104,11 +1091,18 @@ function allPage(){
   const head=`<div class="proj-head">${chips}${manage}
         ${P.length?`<button class="btn" onclick="S.picking=!S.picking;S.pick=new Set();render()">${pick?"完成":"多选"}</button>`:add||`<button class="btn" onclick="openNewProject()">＋ 新建项目</button>`}</div>`;
   const right=`${head}${body}${pick?`<div class="batch">已选 ${S.pick.size} 件<button class="btn pri" ${S.pick.size?"":"disabled"} onclick="S.moving=[...S.pick];render()">移到…</button></div>`:""}`;
-  if(!P.length) return dim+right;   // no projects yet: just the list, and one button to make the first project
-  return dim+`<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${cell(0,"未归类")}
+  if(!P.length) return top+dim+right+bottom;   // no projects yet: just the list, and one button to make the first project
+  return top+dim+`<div class="proj-grid"><div class="proj-list"><div class="list">${cell("all","全部项目")}${P.map(p=>cell(p.id,p.name,p)).join("")}${cell(0,"未归类")}
       ${S.newProj?`<div class="cell new">${add}</div>`:`<button class="cell" style="color:var(--brand)" onclick="openNewProject()"><span class="lab">＋ 新建项目</span></button>`}</div></div>
-    <div>${right}</div></div>`;
+    <div>${right}</div></div>`+bottom;
 }
+/* 今天的最上面：还没配好的（要你来），以及配置进行中 */
+function todayTop(){
+  const left=setupProblems();
+  if(setupBusy()) return `<div class="pg-card" onclick="S.ob={step:OB.length-1,started:true};render()">${progressBoard(setupSteps())}</div>`;
+  return left.length?`<div class="sum bad" style="cursor:pointer" onclick="S.setTab='ai';go('sys')"><div><b>还差 ${left.length} 步才能用</b><br><span>${left.map(x=>esc(x.title.split("：")[0])).join("、")}没配好</span></div><button class="btn pri">去看看</button></div>`:"";
+}
+const remind = all => { if(all!=="今天") return ""; const r=remindRows(); return r.length?`<div class="sec-h">提醒<span class="n">${r.length}</span></div><div class="list">${r.join("")}</div>`:""; };
 /* ---------- 事项 → 按人：聊天里的人和群、会议，客户单独一组。心响先猜，本人在那一页点一下改 ---------- */
 function personOf(i){
   const o=originOf(i);
@@ -1191,12 +1185,6 @@ function closedByAI(){
   if(!list.length) return "";
   return `<div class="sec-h">AI 放下或关掉的<span class="n">${list.length}</span><span class="aside">放错了点「恢复」</span></div><div class="list">${list.map(i=>`<div class="row" onclick="openItem(${i.n})"><span class="ud"></span><span class="no">#${i.n}</span><div style="min-width:0"><div class="t">${esc(i.title)}</div>
     <div class="judge"><b>${J[i.n].decision==="done"?"已经办完":"不用做"}</b>　${esc(J[i.n].reason||"")}</div></div><div class="meta">${pill(i)}</div><div class="acts">${btn(i,["恢复","restore",""])}</div></div>`).join("")}</div>`;
-}
-function autoSwitch(){
-  const on = !!(D.settings && D.settings.auto_assign);
-  return `<div class="switch ${on?"on":""}" role="switch" aria-checked="${on}" tabindex="0" onclick="toggleAuto(${!on})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAuto(${!on})}"><div class="tr"></div><div><b>AI 自己判断能不能做</b><br><span>${on
-    ? "已开启：AI 先看这件事之后的聊天，你已经办完的直接关掉、不用做的放下，能独立做的接手，要你拍板的先备材料，只能你做的留在这里。"
-    : "开启后，新进来的事先让 AI 看上下文再判断：办完的关掉、不用做的放下、能做的接手、要你来的先备材料。对外发送、审批、付款这类事 AI 不会接手。"}</span></div></div>`;
 }
 /* settings the server keeps as they are sent */
 const SOURCE_KEY={meeting_watch_enabled:"meetings",chat_watch_enabled:"chats",feishu_tasks_enabled:"tasks"};
@@ -2400,7 +2388,7 @@ function sessCard(s){
 }
 function sideHTML(){
   const v=D.items.filter(live), todo=v.filter(needsYou).length, doing=v.filter(i=>(active(i)&&!blockedAI(i))||isWorking(i)).length, unread=unreadCount();
-  const nav=[["today","今天",todayCount(),"hot"],["new","新进来",newItems().length,"need"],["all","事项",0,""],null,["mem","记忆",((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
+  const nav=[["all","事项",needCount(),"hot"],null,["mem","记忆",((D.memory||{}).updates||[]).length+(D.memory?.profile?.draft&&!D.memory.profile.text?1:0),"need"],["sys","设置",0,""]];
   const w=D.worker||{}, run=LIVE?[...(Array.isArray(D.running)?D.running:[]),...(D.local_sessions||[])]:doingList().map(d=>({...d,engine:"gpt",driver:"本机 GPT",job:"demo",can_open:false,status:"open"}));
   const now=run.filter(replyingNow), replying=now.length;  // finished conversations leave the list; they stay on their item
   const idle=w.last&&w.last.n?`<button class="l" onclick="openItem(${w.last.n})">上一件 #${w.last.n} ${esc(w.last.outcome||"")}</button>`:`<div class="l">有新的事会自动开始</div>`;
@@ -2490,8 +2478,8 @@ function drawTranscript(scroll){
   const mb=box.querySelector(".mb"); if(mb&&(scroll&&atEnd||!old)) mb.scrollTop=mb.scrollHeight;
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
-const NAV_OF={inbox:"today",todo:"today",doing:"today",done:"all"};   // pages that are reached from another one
-const TITLES={today:"今天",new:"新进来",inbox:"全部消息",todo:"等我处理",doing:"进行中",done:"已完成",all:"事项",mem:"记忆",sys:"设置"};
+const NAV_OF={inbox:"all"};   // pages that are reached from another one
+const TITLES={inbox:"全部消息",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
 /* 开发模式: steps the AI is waiting on you for, shown above every page */
 function approvalView(){
@@ -2544,16 +2532,17 @@ function render(){
   for(const b of document.querySelectorAll("[data-n]")) b.disabled=!!pendingFor(Number(b.dataset.n));
   if(!D){ $("#demo").className="demo"; $("#demo").innerHTML=failing?demoBar():"读取中…"; return; }
   $("#demo").className=(D.demo||failing||brokenText())?"demo":""; $("#demo").innerHTML=demoBar();
-  if(!S.view) S.view="today";
+  if(!S.view) S.view="all";
   if(S.ob===undefined&&D.settings){ const g=guideFor(D.settings,(D.memory||{}).profile); S.ob=LIVE&&g.ob?{step:0,again:!!D.settings.onboarded}:null; S.news=LIVE&&g.news; }   // decided once the settings are read
   if(S.item&&!byN(S.item)) S.item=null;
   const item=S.item&&byN(S.item), split=!!item&&wide(), solo=!!item&&!split;
   $("#app").classList.toggle("with-detail",split);
   putHTML("#side",sideHTML());
   const title=solo?`#${item.n}`:S.q?`搜索：${S.q}`:TITLES[S.view];
-  const count={today:todayCount(),new:newItems().length,inbox:unreadCount(),todo:D.items.filter(needsYou).length}[S.view];
+  const count={all:needCount(),inbox:unreadCount()}[S.view];
   putHTML("#ttl",esc(title)+(!S.q&&!solo&&count?`<span class="c">${count}</span>`:""));
-  const page=S.q?searchPage:{today:todayPage,new:newPage,inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
+  if(!["all","inbox","mem","sys"].includes(S.view)) S.view="all";   // 今天、新进来 and the rest became filters of 事项
+  const page=S.q?searchPage:{inbox:inboxPage,all:allPage,mem:memPage,sys:sysPage}[S.view];
   putHTML("#health",healthDot());
   let changed=putHTML("#main",healthPanel()+approvalView()+(solo?`<div class="solo">${itemView(item)}</div>`:page()));
   changed=putHTML("#detail",split?itemView(item):"")||changed;
@@ -2577,7 +2566,7 @@ function openFromHash(){
   const m=h.match(/^#item-(\d+)$/);
   if(!m||!D||!byN(+m[1])) return false;
   history.replaceState(null,"",location.pathname+location.search);
-  if(!S.view) S.view="today";
+  if(!S.view) S.view="all";
   openItem(+m[1]);
   return true;
 }
