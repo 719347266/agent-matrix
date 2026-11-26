@@ -152,13 +152,16 @@ def build(root, record_id, rows=None):
     row, rows = _row(root, record_id, rows)
     if not row:
         return ""
+    from .background import circular, parent_of, prep_means, with_parent_source
+    parent = parent_of(row, rows)
     n, title = _number(row), _one(row.get("标题")).strip()
+    src = with_parent_source(row, rows)   # a 备材料 works from its parent's meeting, chat and words
     history = conversation.history(Path(root), [record_id]).get(record_id, {"messages": [], "deliverables": []})
     owner = _owner(root)
-    link = _one(row.get("来源链接"))
+    link = _one(src.get("来源链接"))
     meeting = MEETING.search(link)
     meeting_id = meeting.group(1) if meeting else None
-    raw_quote = _one(row.get("原话引用"))
+    raw_quote = _one(src.get("原话引用"))
     around = _seconds(raw_quote)
     lines = [f"# 事件 #{n} {title}", "",
              f"心响整理好的简报：这件事要的东西都在下面，照它做，不用再去翻。「本人」指 {owner}，你替本人做这件事。", "",
@@ -166,12 +169,15 @@ def build(root, record_id, rows=None):
     lines.append(f"- {(_one(row.get('下一步动作')) or title).strip()}")
     for label, key in (("做到什么程度算完", "完成标准"), ("截止", "截止日")):
         value = _one(row.get(key)).strip()
+        if key == "完成标准" and circular(value):
+            continue
         if value:
             lines.append(f"- {label}：{value[:10] if key == '截止日' else value}")
-    parent = next((r for r in rows for p in (row.get("父事项") or []) if r.get("record_id") == (p.get("id") if isinstance(p, dict) else p)), None)
     if parent:
-        lines.append(f"- 这是为 #{_number(parent)}「{_one(parent.get('标题'))}」备的材料，做出来要能直接拿去用。")
-    source = _one(row.get("来源")) or "手动添加"
+        lines.append(f"- {prep_means(parent)}")
+        if _one(parent.get("下一步动作")).strip():
+            lines.append(f"- 那件事要做的：{_one(parent.get('下一步动作')).strip()}")
+    source = _one(src.get("来源")) or "手动添加"
     lines += ["", "## 来龙去脉", f"- 来源：{source}" + (f"（{_meeting_title(root, meeting_id)}）" if meeting_id and _meeting_title(root, meeting_id) else "")
               + (f"　{_url(link)}" if _url(link) else "")]
     created = _one(row.get("创建时间"))[:16].replace("T", " ")

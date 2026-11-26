@@ -472,6 +472,12 @@ function reset(item) {
   assert.match(evaluate('S.inboxTab="system"; inboxPage()'),/和录音对不上，没有采用/); evaluate('S.inboxTab=""');
   assert.doesNotMatch(page,/校验拦掉|展开 74 看原话|13:00 复盘会/);
   assert.match(evaluate('S.inboxTab="全部"; inboxPage()'),/更早[\s\S]*13:00 复盘会/);
+  // 交给 AI 的说明: the item detail shows the words the AI got, as they were
+  evaluate('D.items=[{n:61,rid:"rec61",title:"写需求",status:"待验收",who:"AI"}]; PROMPTS.rec61={text:"## 共同规矩\\n读者没参加那场会",at:"11-26 15:00"}; S.tab="prompt"');
+  const sent = evaluate("itemView(byN(61))");
+  assert.match(sent, /交给 AI 的说明/); assert.match(sent, /class="prompt-text">## 共同规矩/); assert.match(sent, /11-26 15:00 交给 AI 的完整说明/);
+  evaluate('PROMPTS.rec61={text:"",at:""}'); assert.match(evaluate("itemView(byN(61))"), /还没交给过 AI/);
+  evaluate('S.tab="talk"');
   // 术语：状态、分区、按钮只用 TERM 里的说法；这些口语和旧叫法在页面上一处都不许出现
   const BANNED = /卡住|要你来|看起来|都不要|都我来|我自己来|办完|AI 问你|等你定|你来做|别人在做|AI 排队|AI 正在做|等你验收|关掉|没办完|恢复（标错了）|先做这件|要你看|等你看|等你确认接不接|AI 问：/;
   evaluate(`D.items=[{n:1,title:"甲",status:"待确认",who:"我"},{n:2,title:"乙",status:"未开始",who:"我",due:TODAY},{n:3,title:"丙",status:"进行中",who:"AI"},

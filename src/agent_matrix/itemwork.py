@@ -27,7 +27,7 @@ from .workenv import _check, now, project, read_status, scratch, write_status
 MAX_FIX_ROUNDS = 2
 
 SECTIONS_ALWAYS = ["用到的资料", "我做的假设"]
-TEMPLATE_HINT = {"周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
+TEMPLATE_HINT = {"需求文档": "要解决什么问题 / 需求（按功能分节，每条规则写清条件和结果） / 待确认", "周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
                  "方案": "推荐 / 选项对比 / 需要你拍板", "会议材料": "议程 / 需要决策 / 背景数据",
                  "回复草稿": "草稿 / 需要你确认", "其他": "按完成标准逐条覆盖"}
 TRIAGE_LABEL = {"ai": "AI 能独立做，已接手", "prep": "需要你来做，AI 先备材料", "me": "需要你自己来",
@@ -98,7 +98,7 @@ def check_result(workdir, row, root=None):
     body = re.split(r"^#{1,6}\s*用到的资料", doc, flags=re.M)[0]
     length = len(_plain(body))
     if length > cap:
-        return result, f"正文 {length} 字，「{template}」上限 {cap} 字。先给结论，删掉铺垫和重复。"
+        return result, f"正文 {length} 字，「{template}」上限 {cap} 字。删掉重复和铺垫，不要压缩成看不懂的短语。"
     if length < 80:
         return result, "交付.md 正文太短，像没做完。"
     return result, None
@@ -257,7 +257,7 @@ class Item:
         (self.workdir / "任务单.md").write_text(background.task_sheet(row, rows), encoding="utf-8")
         self.show("找背景", "程序在拉背景")
         own_base = "/base/" + self.config.base_token if self.config.base_token else ""
-        (self.workdir / "背景.md").write_text(background.build(self.root, client, rows, row, now(), notes=notes, previous=previous,
+        (self.workdir / "背景.md").write_text(background.build(self.root, client, rows, background.with_parent_source(row, rows), now(), notes=notes, previous=previous,
                                                              skip_urls=[own_base], copy_to=self.workdir), encoding="utf-8")
 
     def on_tick(self):
