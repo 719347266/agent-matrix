@@ -29,3 +29,4 @@ launchd/*.plist
 
 # Call log of the fake lark-cli used by tools/e2e (written to wherever it runs)
 fake-lark-calls.jsonl
+.gstack/
