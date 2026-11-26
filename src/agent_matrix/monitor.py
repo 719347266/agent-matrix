@@ -426,7 +426,9 @@ def build(root, now=None):
 
 
 def alert_if_cindy_stalled(root, client, state, now):
-    """Called by the listener every minute: tell the owner once when Cindy stops checking."""
+    """Called by the listener every minute: note it once (in 2 hours) when Cindy stops checking. It goes to the page's
+    status dot, not to the owner's chat: the menu-bar app and the tray restart the listener by themselves, and the
+    built-in GPT stands in for an AI that cannot be woken; there is nothing the owner could do with the message."""
     _, beats = activity.recent(root, since=now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(), limit=1)
     beat = _age((beats.get("会议检查") or {}).get("at"), now)
     working = now.weekday() < 5 and 8 <= now.hour < 22
@@ -436,8 +438,9 @@ def alert_if_cindy_stalled(root, client, state, now):
     if last and now - datetime.fromisoformat(last) < timedelta(hours=2):
         return "already_alerted"
     minutes = f"{int(beat)} 分钟" if beat else "很久"
-    client.send_self(f"⚠ AI 员工已经 {minutes}没检查会议和事项了，会后待办和 AI 代做在等它。\n请在菜单栏「事项中心」的 ⋯ 里点「重启监听」。",
-                     "cindy-stalled-" + now.strftime("%Y%m%d%H%M"))
+    from . import inbox
+    inbox.add(root, "cindy-stalled-" + now.strftime("%Y%m%d%H%M"),
+              f"⚠ AI 员工已经 {minutes}没检查会议和事项了。心响正在自动重启后台，本机 GPT 会先顶上。", kind="system")
     state.set("monitor:cindy-alert", now.isoformat())
     return "alerted"
 

@@ -200,6 +200,8 @@ def build_state(root):
         item["cindy_pickup"] = pickups.get(item["rid"])
         item["ai_for"] = handed.get(item["rid"])   # handed to one AI on its own; None = the AI chosen in settings
         item["sessions"] = sessions_of.get(item["rid"], [])
+    part("来源和人", lambda: _origins(root, rows, items), None)
+    part("看起来办完了", lambda: _done_hints(root, items), None)
     from . import drive
     ws, running = part("AI 员工状态", lambda: (read_status(root), is_running(root)), ({}, False))
     jobs = part("正在做的活", lambda: drive.open_jobs(root), [])
@@ -234,6 +236,7 @@ def build_state(root):
     settings["cindy_project"] = thread.setting(root, "cindy_project", "")
     from . import approvals
     settings["dev_mode"] = approvals.mode(root)
+    settings["people"] = part("人的分组", lambda: _people_tags(root), {})   # who the owner marked as 客户 / 同事
     waiting = [{**a, "n": n_of.get(a.get("record_id"))} for a in approvals.pending(root)]
     try:
         from . import local_sessions
@@ -295,6 +298,39 @@ def build_state(root):
             "worker": worker, "approvals": waiting, "inbox": box, "running": running_sessions, "local_sessions": external,
             "system": {**part("系统状态", lambda: system_info(root), {}), "store": part("存储", lambda: store_info(root), {}),
                        "update": part("版本更新", lambda: _update_status(root), {})}, "bugs": _bugs(root), "broken": broken}
+
+
+def _people_tags(root):
+    from . import people
+    return people.tags(root)
+
+
+def _origins(root, rows, items):
+    """item["origin"]: the meeting, chat or task list it came from and who it is about (people.origin). A 备材料 made
+    from another item has no source of its own: it takes its parent's."""
+    from . import people
+    from .config import load
+    cfg = load(Path(root) / "config.yaml")
+    self_names = {"我", "本人", cfg.owner_name, *cfg.owner_aliases} - {"", None}
+    meetings, chats = people.known(root)
+    tags = people.tags(root)
+    by_rid, by_n = {r.get("record_id"): r for r in rows}, {i["n"]: i for i in items}
+    for item in items:
+        item["origin"] = people.origin(by_rid.get(item["rid"]) or {}, item.get("source_url"), meetings, chats, self_names, tags)
+    for item in items:
+        parent = by_n.get(item.get("parent"))
+        if parent and item["origin"]["kind"] == "手动":
+            item["origin"] = parent["origin"]
+
+
+def _done_hints(root, items):
+    """item["done_hint"]: the AI found the owner's open item already done somewhere (donecheck), with the words."""
+    from . import donecheck
+    hints = donecheck.hints(root)
+    for item in items:
+        h = hints.get(item["rid"])
+        if h and not h.get("dismissed") and item.get("status") not in ("完成", "取消"):
+            item["done_hint"] = {k: h.get(k) for k in ("evidence", "where", "url", "at")}
 
 
 def _draft_notice(root, row):
@@ -823,6 +859,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "reply": "后台正忙，过几秒再点一次。"})
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
+            if path == "/api/person":  # the owner says who this is: 客户 or 同事 ("" = back to the guess)
+                from . import people
+                try:
+                    tags = people.set_kind(root, body.get("name"), body.get("kind") or "")
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "reply": str(exc)})
+                return self._send(200, {"ok": True, "people": tags})
+            if path == "/api/donehint":  # 「看起来办完了」 was wrong: not suggested again for the same words
+                from . import donecheck
+                if not donecheck.dismiss(root, str(body.get("rid") or "")):
+                    return self._send(400, {"ok": False, "reply": "这件事没有待确认的「看起来办完了」。"})
+                return self._send(200, {"ok": True})
             if path == "/api/projects":  # the owner's projects: add one, rename one, take one away
                 from . import projects
                 from .models import MatrixError
