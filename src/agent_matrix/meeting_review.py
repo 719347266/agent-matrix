@@ -381,7 +381,7 @@ def publish(config, client, state, review):
         task_ids.extend(ids)
         if handed:
             from .thread import judge
-            judge(client.root,ids[0],"ask","别人在会上交给你的，等你确认接不接")
+            judge(client.root,ids[0],"ask","他人在会上交给你")
         if rows is not None:
             from . import itemlinks
             itemlinks.link_by_number(client.root, rows, ids[0], action.follows)
