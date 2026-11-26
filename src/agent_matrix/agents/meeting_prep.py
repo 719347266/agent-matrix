@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 
+from .. import activity
 from ..brief_migration import number, single
 from ..meeting_watch import MeetingQueue, parse_time
 
@@ -72,7 +73,7 @@ def build(config, rows, event, queue, root, now):
             head, hint, color, url = brief_v1.describe(r, now.date(), {})
             status = single(r.get("状态"))
             hint = f"{who} · {status}" + (f" · {hint}" if hint and status != "待验收" else "")
-            items.append(brief_v1._row_item((head, hint, color, None), url))
+            items.append(brief_v1._read_row((head, hint, color, None), url))
             listed.add(r["record_id"])
         if done:
             items.append({"tag": "markdown", "content": f"<font color='green'>已完成 {len(done)} 件</font>", "text_size": "notation"})
@@ -92,8 +93,8 @@ def build(config, rows, event, queue, root, now):
                  for m in sorted(past, key=lambda m: {"waiting": 0, "open_question": 1, "decision": 2}.get(m["kind"], 3))[:5]]
         if lines:
             blocks.append(brief_v1._block("上次讨论到这里", "purple", lines))
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "agents.meeting_prep.build", exc)
 
     # Brand or company words that appear in many titles are configured locally (config.topic_stopwords).
     keys = {k for k in _keywords(topic) if not any(w in k for w in config.topic_stopwords)}
@@ -101,8 +102,8 @@ def build(config, rows, event, queue, root, now):
                and single(r.get("状态")) not in {"完成", "取消"} and _related(r.get("标题"), keys)]
     if related:
         related.sort(key=lambda r: (single(r.get("状态")) != "待验收", number(r["编号"])))
-        items = [brief_v1._row_item(brief_v1.describe(r, now.date(), {}), brief_v1.describe(r, now.date(), {})[3])
-                 for r in related[:4]]
+        lines = [brief_v1.describe(r, now.date(), {}) for r in related[:4]]
+        items = [brief_v1._read_row(line, line[3]) for line in lines]
         blocks.append(brief_v1._block("和这个会相关、还没完成的事", "blue", items, max(0, len(related) - 4)))
 
     if not blocks:
@@ -113,10 +114,8 @@ def build(config, rows, event, queue, root, now):
     card = brief_v1.card(f"{start:%H:%M} {topic}", f"{minutes} 分钟后开始", "wathet", blocks, footer, None,
                          summary=f"{start:%H:%M} {topic}：会前看一眼")
     card["header"]["icon"] = {"tag": "standard_icon", "token": "calendar_colorful"}
-    if link:
-        card["body"]["elements"].append({"tag": "button", "text": {"tag": "plain_text", "content": "进入会议"},
-                                         "type": "primary_filled", "width": "fill",
-                                         "behaviors": [{"type": "open_url", "default_url": link}]})
+    if link:  # read-only card: the join link is a plain link, not a button
+        card["body"]["elements"].insert(len(blocks), {"tag": "markdown", "content": f"[进入会议]({link})"})
     return card
 
 
@@ -152,8 +151,8 @@ def run(config, client, state, now, *, preview_event=None, horizon=45, lead=5):
         try:
             detail = client._exec(["calendar", "+get", "--event-id", event["event_id"], "--as", "user", "--format", "json"])
             event = {**event, **(detail.get("event", detail) if isinstance(detail, dict) else {})}
-        except Exception:
-            pass  # the card still works without the join link
+        except Exception as exc:
+            activity.swallowed(client.root, "agents.meeting_prep.run", exc)
         card = build(config, rows, event, queue, client.root, now)
         if card is None:
             if not preview_event:

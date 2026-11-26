@@ -7,22 +7,33 @@
 设计原则：
 
 - **能用代码做的不用模型。** 接收推送、过滤、同步、生成简报、处理回复，全是代码。模型只在三件事上被唤醒：读会议逐字稿、读筛过的聊天、代做文档。
-- **AI 像员工一样接单。** 本机"AI 员工"默认最多同时做 10 件事，每件事有自己的文件夹和自己的 GPT 对话：先由代码备好背景（会议原话前后文、来源聊天、相关文档、做过的同类事项、你给过的链接），不够它自己去扒，扒够了再写；做完代码自检、建文档、发卡片。你后来补的要求追加进同一个对话，接着上次往下改。
-- **宁缺毋滥。** 一条待办必须有原话里承接的字眼，负责人要么是说话的人，要么在原话里被点了名，日期必须写明。没有待办的会议不发任何消息。
+- **AI 像员工一样接单。** 本机"AI 员工"默认最多同时做 10 件事，每件事有自己的文件夹和自己的 GPT 对话；做完代码自检、建文档、发卡片。你后来补的要求追加进同一个对话，接着上次往下改。
+- **上下文自己去取，不靠程序猜。** 文件夹里只放一个指向来源的 `来源.json`，AI 用 `xinxiang context` 自己把来源会话取回来（会议原话、来源聊天、之后的相关聊天，一直取到**现在**），不够就把时间窗翻倍再取。程序按标题找的背景（相关文档、同类事项、你给过的链接）只是兜底，和取回的对不上时以取回的为准。能核实的去现场核实：本机命令、已连上的 MCP（只读）、你的 skill 都能用。
+- **动手前先看还要不要做。** 动手前、交付或起草回复前各取一次最新会话：你或同事已经办完、对方说不用了，AI 就不再做一遍，交 `handled` 并原样抄出那一句，心响据此关掉这件事。「我看看」「我处理下」是承接不是办完，照做。
+- **宁缺毋滥。** 一条待办必须有原话里承接的字眼，负责人要么是说话的人，要么在原话里被点了名，日期必须写明。没有待办的会议不发任何消息。会上说的是讨论不是交办：从会议里提取、要 AI 做的事一律先进「待确认」，AI 只给建议，你点「AI做」才开工。
 - **你是最后一关。** AI 做的事只有你回"过"才算完成。每次写表都会读回核对，结果不确定时不会自动重试。
+
+## 查看事项和 AI 原对话
+
+- 事项详情里的「写备注」只留在本机；「备注并完成」同时记录完成人和时间。旧事项没有操作人记录时会如实显示。
+- 左栏同时显示心响已领取的工作，以及本机 Cindy、Codex 和 Claude 有近期运行信号的会话。已有会话编号能对应事项时直接显示事项号；其余可点「关联事项」选择，关联保存在这台电脑，结束后可从详情返回原对话。没有运行信号不算在做；没有向心响登记的外部 AI 不会被当成领了任务。
+- 「发给 AI」区分记录、排队、接手和等待补充。设置里可以管理 Slack、事项存放位置、本机 AI 和聊天整理频率。
 
 ## 心响：本机客户端
 
 所有消息和操作都在本机的"心响"里，事项也存在本机（点了立刻生效），飞书多维表格在后台做备份；飞书消息只收早报和晚报。架构见 [心响架构.md](心响架构.md)。
 
 - **打开方式**：Mac 菜单栏点"打开心响"，或者在聚焦搜索里搜"心响"；Windows 托盘双击。界面地址是 `http://127.0.0.1:47865/`，只对本机开放。
-- **首页**：一条流程"新进来 → 在做 → 等你验收 → 完成"，下面是选中那一段的列表，每行一个主按钮。
-- **点开一件事**：一条故事线，依次是从哪来、AI 对话和每一版交付、现在等你做什么。可以接着和 AI 说，AI 会在同一个对话里往下做。
-- **"新进来"开关"AI 自己判断能不能做"**：打开后，AI 先看后续聊天：有完成证据的直接关掉，不用做的放下，能做的接手，要你拍板的先备材料。
+- **今天**：打开就是这一页。要你处理的（AI 问你的、等你验收的、新进来等你定的）、你自己今天要做的、AI 正在做的、今天的消息，从上到下排好，每行一个主按钮。
+- **事项**：全部事项，可以按项目看。项目自己建，把一行拖到项目上、多选后一起移、或在详情里点项目名都能挪；还没分的事按标题和前后串联关系自动猜，猜的会标出来，点一下确认。
+- **点开一件事**：从哪来、AI 对话和每一版交付、现在等你做什么。可以接着和 AI 说，AI 会在同一个对话里往下做。
+- **记忆（经验库）**：照数字分身的记忆库。一个主题一份 Markdown（`state/memory/<名字>.md`），开头 `name` / `description`，description 写的是**做哪些动作时打开**，不是话题；正文按 `## 主题` 分节，每节写做法、**Why**、**How to apply**。只存经验，不存事实（事实去现场查）。每件事派给 AI 时只给目录（`名字 — 什么时候打开`），正文复制进工作文件夹的 `记忆/`；AI 先列这一轮要做的动作，拿动作比目录，比中哪份读哪份，做到一半才决定的动作再比一次，拿不准用业务词搜兜底。交付时在结果里写明读了哪几份（`memory`），留作事后查哪份管用、哪份该读没读。AI 不能直接改经验库：学经验、每天整理记忆、做事时发现值得补的，都只能提草稿（新建、追加、修改、删除、改描述、挪一节），你在「记忆更新」里看过原文点「用」才写进去；修改和删除要逐字抄原文，并在点「用」的那一刻重新核对，你中途手改过就套不上。你在「记忆」页直接改的不用审。旧的一句话规矩第一次启动时自动转成经验文件（没确认过的变成草稿）。会上说了“等条件再定”的事和会上的结论是具体的事，在「事项」里的“在等的 / 会上的结论”两栏看。
+- **设置 → 配置检查**：后台程序、做事的 AI、整理消息的 AI、你的称呼、办公工具、事项存在哪，每一项通没通一眼能看到。没通的不用自己敲命令：点「复制给 AI 的话」，粘贴到你常用的 AI（Cindy、Claude Code、Codex、Cursor、Gemini…）里发送，它会运行 `xinxiang-setup doctor`，照着逐项装好、配好，只在需要你登录或点同意时来找你；配好一项页面就变绿一项。
+- **设置 → 版本与更新**：有新版本时点一下「更新」，自己下载、安装、重新打开，数据不动（Windows 安装包和从发布分支 git clone 的都支持；开发中的拷贝不自动更新）。
 - **停止与恢复**：新进来、正在做的事项都能点「不做」或「已完成」。本机驱动会停止当前运行及其命令；外部驱动下次调用会收到 `cancelled`，必须停止。点「恢复」回到新进来，历史对话和交付继续保留。
 - **数据存放**：对话、交付版本、判断记录存在本机 `state/xinxiang.db`，消息存在 `state/inbox.db`，都不进 Git。
 - **改回飞书通知**：在 `config.yaml` 里写 `notify_channel: feishu`。
-- **谁来驱动，不限**：任何 AI 都能接入。用 `~/.agent-matrix/bin/xinxiang next --driver "名字"` 领活，在交回的文件夹里干活，再用 `xinxiang submit --job ID` 交活；完整说明运行 `xinxiang guide` 查看，或在心响系统页一键复制。本机 GPT 是内置的驱动，也可以在系统页关掉。
+- **谁来驱动，不限**：任何 AI 都能接入。用 `~/.agent-matrix/bin/xinxiang next --driver "名字"` 领活，在交回的文件夹里干活（来源会话用 `xinxiang context --source 来源.json --hours 3` 取，只读、不拿锁，沙箱里也能跑），再用 `xinxiang submit --job ID` 交活；完整说明运行 `xinxiang guide` 查看，或在心响系统页一键复制。本机 GPT 是内置的驱动，也可以在系统页关掉。
 
 ## 架构
 
@@ -30,8 +41,8 @@
 飞书推送（实时）                  定时（兜底）              AI 员工（worker.py，只在有活时）
 ├ 私聊回复  ─┐                   ├ 08:30 早报 / 21:00 晚报   最多同时十件，一件一个 GPT 对话：
 ├ 会议结束   ├→ listen（常驻）    ├ 06:00 周期事项           ├ 逐字稿 → 待办
-├ 逐字稿生成 │   纯代码 ──叫醒──→ ├ 聊天每 10 分钟读一次  ───→├ 聊天候选 → 待办
-├ 卡片按钮   │                   └ 每 2 分钟看一次队列       └ 代做：找背景 → 写 → 自检 → 交付
+├ 逐字稿生成 │   纯代码 ──叫醒──→ ├ 聊天每 2 分钟读一次   ───→├ 聊天候选 → 待办
+├ 卡片按钮   │                   └ 每 2 分钟看一次队列       └ 代做：取来源 → 核对要不要做 → 查 → 写 → 再取最新 → 自检 → 交付
 └ 任务变化  ─┘
                  ↓
         飞书多维表格（事项表）  →  卡片：简报 / 会前准备 / 做完了 / 周五复盘（点「✓ 通过」卡片原地变成已完成）
@@ -48,7 +59,7 @@
 | `sources/chats.py`、`chat_review.py` | 聊天读取、代码过滤；定时批量提取 |
 | `sources/feishu_tasks.py` | 飞书任务同步进事项表（只读飞书任务，不回写） |
 | `worker.py` | AI 员工：最多并发十件、每件一个 GPT 对话（`codex exec`）；自检交付、建文档、回写表格、发卡片 |
-| `background.py` | 背景包：纯代码先拉会议原话、来源聊天、相关文档、同类事项、你给过的链接 |
+| `background.py` | 来源会话（`xinxiang context`：按时间窗取到现在，AI 自己调用）；兜底背景包：相关文档、同类事项、你给过的链接 |
 | `prework.py` | 代做队列与交付校验：模板栏目、占位文字、篇幅；文档读回核对 |
 | `cards.py` | 卡片原地更新：点了按钮，那一行变成"✓ 已完成 14:52" |
 | `agents/meeting_prep.py`、`agents/weekly_review.py` | 会前准备卡、周五复盘卡（纯代码） |
@@ -77,11 +88,25 @@
 | `44 先做` | 插队，AI 员工下一件就做它 |
 | `展开 12` | 看详情和原话 |
 
+## 按自己的情况配置
+
+每一项都是可选的，在首次打开的引导或「设置」里配，不用改文件：
+
+| 配什么 | 可以选 |
+|---|---|
+| 办公工具 | 飞书（会议、聊天、飞书任务可以分别开关）、Slack、微信，或者都不接，事项在心响里自己新建 |
+| 别人找你的事怎么处理 | 全能模式（都接进来，AI 直接做）、全自动模式（你答应了才接）、手动模式（都不接） |
+| 谁来做事 | Cindy、本机 GPT、本机 Claude、本机 Gemini，或者接入别的能运行命令的 AI；「做事」和「整理」可以分别交给不同的 AI（都交给 Cindy 也行） |
+| 事项存在哪 | 本机 + 飞书多维表格备份、本机 + Notion 同步、只存本机 |
+| 通知 | 都在心响里；接了飞书的可以让早晚简报同时发到飞书 |
+
+不接任何办公工具时，把 `config.yaml` 里的 `item_store` 设为 `device` 即可，不需要飞书账号。
+
 ## 安装
 
 需要 Python 3.11+、已登录的 `lark-cli`（npm 包 `@larksuite/cli`）、已登录的 GPT 命令行 `codex`（AI 员工用它干活；找不到时在 `config.yaml` 写 `worker_codex: <路径>`），以及一个能跑定时脚本的宿主（launchd、Windows 计划任务或任何 AI 宿主都行）。
 
-AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
+AI 员工启动 GPT 时不加载你的插件、MCP 和钩子（`--ignore-user-config`），只沿用你 codex 配置里的服务商设置；工作文件夹在纯英文路径下（项目路径含中文时放在 `~/.agent-matrix/`）。本机 AI 可以在心响「系统」页切换成 Claude（用本机的 `claude` 命令行，只能写工作文件夹，可以联网）。Claude 默认带上你已连上的 MCP 和 skill（`worker_mcp_tools: ["*"]`，写 `[]` 则什么都不加载，连 CLAUDE.md 也不读）；钩子一律关掉，发送、发布、合并、删除、执行流水线这类写操作的 MCP 工具一律禁止，要放行的写进 `worker_mcp_send`。GPT 不加载 MCP：它没法按工具名逐个禁掉写操作。对应可调项 `worker_claude`（命令路径，默认从 PATH 找）、`worker_claude_model`（如 opus、sonnet，默认用账号默认模型）。GPT 的可调项：`worker_model`（默认 gpt-6-astra）、`worker_effort`（默认 high）、`extract_effort`（默认 medium）、`worker_timeout_minutes`（默认 30）、`worker_concurrency`（默认 10）、`worker_enabled`。
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e .
@@ -93,6 +118,12 @@ cp config.example.yaml config.yaml
 ```
 
 实时推送要在飞书开放平台订阅这几种事件：`vc.meeting.participant_meeting_ended_v1`、`vc.note.generated_v1`、`task.task.update_user_access_v2`；卡片按钮要在"事件与回调 → 回调配置"里开启 `card.action.trigger`。未订阅时，`lark-cli event consume` 的报错里会直接给出订阅链接。没订阅也能用，只是退回成定时检查。
+
+**事项记在哪**：心响「系统 → 事项记在哪」可选飞书多维表格、Notion 或只存本机（`item_store: local / notion / device`）。选 Notion 或本机时完全不需要飞书：飞书会议、群聊、任务这几个来源随之关闭，Slack 照常。Notion 要一个 Internal integration 的 Secret 和一个共享给它的页面，心响在页面下建「心响事项」数据库并单向同步，在 Notion 里改的内容会被下一次同步覆盖。
+
+**微信（可选）**：靠本机的 `wechat-cli`（npm 包 `@canghe_ai/wechat-cli`，先运行一次 `wechat-cli init` 提取读取钥匙）读你自己电脑上的微信，只在本机读、不上传；在「设置 → 办公工具」打开「读微信」，或在 `config.yaml` 写 `wechat_enabled: true`。和飞书聊天、Slack 用同一套规则过滤，筛中的话才交给模型。这个命令比较慢（列会话约 20 秒、读一个聊天约 30 秒），所以每两分钟一轮、一轮最多读 4 个有新消息的聊天；读不到聊天记录时（钥匙比微信最新的消息库旧）只看每个聊天的最后一条，并在配置检查里提示重新提取。试跑：`python -m agent_matrix.sources.wechat --hours 24`（只打印数量，加 `--show` 才打印筛中的话）。
+
+**Slack（可选）**：在 `config.yaml` 写 `slack_token: xoxp-...`（或设环境变量 `SLACK_USER_TOKEN`），常驻监听每分钟用搜索拉一次新的 Slack 消息，按和飞书聊天一样的规则过滤，到整理时间一起提取，来源链接直接跳回那条 Slack 消息。用户 token 需要这些权限：`search:read`（一次搜出所有新消息；没有它就退回逐个会话读，只读前 25 个）`channels:history` `groups:history` `im:history` `mpim:history` `channels:read` `groups:read` `im:read` `mpim:read` `users:read`。
 
 宿主需要配置的定时任务：
 
@@ -111,6 +142,7 @@ cp config.example.yaml config.yaml
 .venv/bin/python -m agent_matrix.worker status                  # AI 员工正在做哪件、做到哪、排队顺序
 .venv/bin/python -m agent_matrix health                         # 授权与表格自检
 .venv/bin/python -m unittest discover -s tests                  # 测试
+tools/e2e/run.sh                                                # 端到端演练：复制线上数据到临时目录，模拟推送跑全部链路，不碰线上
 node tests/test_client.cjs && node tests/test_client_live.cjs    # 页面交互与断线重试
 ```
 
@@ -120,7 +152,15 @@ node tests/test_client.cjs && node tests/test_client_live.cjs    # 页面交互�
 
 ## Windows
 
-需要 Windows 10/11、Python 3.11+、Node.js，以及已登录的 `lark-cli`（`npm install -g @larksuite/cli`，再运行 `lark-cli auth login`）。
+**安装包（推荐）**：到 [Releases](https://github.com/MILESMAKMAK/agent-matrix/releases/latest) 下载 `Xinxiang-Setup-<版本>.exe`，双击安装，不需要另外装 Python，也不用开终端。装完心响会自己打开，并待在任务栏右下角的托盘里；数据放在 `%LOCALAPPDATA%\Xinxiang`，卸载不会删。
+
+- 刚装好就能用：事项存在本机，在心响里点「＋ 新建事项」自己加。
+- 要让 AI 做事、要接飞书：打开「设置 → 配置检查」，点「复制给 AI 的话」，发给你常用的 AI，它会把剩下的配好。
+- 以后有新版本，在「设置 → 版本与更新」点一下就行，不用再下载安装包。
+- 安装包没有代码签名，Windows 可能提示“已保护你的电脑”，点“更多信息 → 仍要运行”。
+- 自己构建：在 Windows 上运行 `powershell -ExecutionPolicy Bypass -File windows\build.ps1`（装了 Inno Setup 6 会顺带生成安装包），`windows\smoke.ps1` 会用全新的数据目录试运行一遍。
+
+**从源码安装（开发用）**：需要 Windows 10/11、Python 3.11+、Node.js，以及已登录的 `lark-cli`（`npm install -g @larksuite/cli`，再运行 `lark-cli auth login`）。
 
 ```powershell
 git clone https://github.com/MILESMAKMAK/agent-matrix.git

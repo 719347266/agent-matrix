@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from agent_matrix import bitable
 from agent_matrix.cli import main
-from agent_matrix.feishu import Feishu, FeishuError
+from agent_matrix.feishu import Feishu, FeishuError, why_not
 from agent_matrix.models import Config, MatrixError
 from agent_matrix.schema import TABLES, SEEDS
 from agent_matrix.state import State, exclusive_lock
@@ -135,6 +135,14 @@ class Stage0Tests(unittest.TestCase):
         with self.assertRaises(FeishuError) as e: client.call("+table-list")
         self.assertTrue(e.exception.authorization)
         self.assertNotIn("SECRET", str(e.exception))
+
+    def test_a_failed_batch_with_progress_on_stderr_says_what_failed_not_unreadable(self):
+        out = '{"ok":false,"data":{"minutes":[{"minute_token":"m1","error":"No read permission for minute m1."}]}}'
+        runner = Mock(return_value=SimpleNamespace(returncode=1, stdout=out, stderr="[minutes +detail] querying 1 minute_token(s)\n"))
+        client = Feishu(Config(), Path.cwd(), runner)
+        with self.assertRaises(FeishuError) as e: client._exec(["minutes", "+detail", "--minute-tokens", "m1"])
+        self.assertEqual(e.exception.code, "no_permission")
+        self.assertIn("没有查看权限", why_not(e.exception))
 
     def test_ndjson_has_a_manifest_not_a_normal_api_envelope(self):
         manifest = {"manifest_version": "v1", "format": "ndjson", "records_count": 0, "has_more": False}

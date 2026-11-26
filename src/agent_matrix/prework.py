@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 from pydantic import BaseModel, ConfigDict, Field
+from . import activity
+from .values import draft_url as _draft_url
 from .agents.pre_worker import FIELDS, assess, fingerprint
 from .bitable import items, js, require_owned
 from .config import load
@@ -32,14 +34,14 @@ EXTRA_FIELDS = [select("预做策略", ["自动判断", "仅备草稿", "不代�
 OUTPUT_FIELDS = ["AI草稿链接", "预做结果摘要", "预做凭据"]
 
 
-# Each deliverable type has required sections and a length cap (FIX 2.2 / 3.1).
+# Each deliverable type has required sections. No hard length cap: the prompt asks for brevity (a cap blocked real work).
 TEMPLATES = {
-    "周报": (["本周完成", "进行中", "下周计划", "风险"], 800),
-    "数据汇总": (["结论", "口径"], 2000),
-    "方案": (["推荐", "对比", "拍板"], 1200),
-    "会议材料": (["议程", "决策", "背景"], 800),
-    "回复草稿": (["草稿", "确认"], 800),
-    "其他": ([], 1500),
+    "周报": ["本周完成", "进行中", "下周计划", "风险"],
+    "数据汇总": ["结论", "口径"],
+    "方案": ["推荐", "对比", "拍板"],
+    "会议材料": ["议程", "决策", "背景"],
+    "回复草稿": ["草稿", "确认"],
+    "其他": [],
 }
 PLACEHOLDERS = ["TODO", "待补充", "XX", "（略）", "(略)", "此处填写", "待完善"]
 
@@ -94,30 +96,6 @@ def _saved_url(config, state, key):
     return None
 
 
-def _draft_url(value):
-    """Read one actual hyperlink, never the Markdown label or an ambiguous list."""
-    if isinstance(value, dict):
-        value = value.get("url")
-    if isinstance(value, list):
-        return _draft_url(value[0]) if len(value) == 1 else None
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if value.startswith("["):
-        link = re.fullmatch(r"\[(?:\\.|[^\]\\\r\n])*\]\((https?://[^\s<>()]+)\)", value)
-        if not link:
-            return None
-        value = link.group(1)
-    if not value or any(ord(char) <= 32 or ord(char) == 127 for char in value):
-        return None
-    try:
-        parsed = urlparse(value)
-        if parsed.scheme not in {"https", "http"} or not parsed.hostname or parsed.username or parsed.password:
-            return None
-        parsed.port  # Validate a malformed port instead of accepting it as a URL.
-    except ValueError:
-        return None
-    return value
 
 
 def _our_draft(row, version, url):
@@ -280,8 +258,8 @@ def add_note(root, record_id, text):
     try:  # the same line goes into the item's conversation in 心响
         from .thread import from_note
         from_note(root, record_id, body, stamp=stamp)
-    except Exception:
-        pass
+    except Exception as exc:
+        activity.swallowed(root, "prework.add_note", exc)
     return line
 
 
@@ -370,15 +348,13 @@ def stage(config, client, state, result_path):
     text = _xml_text(data.decode())
     if not text.strip():
         raise MatrixError("结果文档为空。")
-    sections, cap = TEMPLATES[result.template]
+    sections = TEMPLATES[result.template]
     missing = [name for name in sections if name not in text]
     if missing:
         raise MatrixError("没做完：模板必备栏目缺少「" + "、".join(missing) + "」，补齐后再交付。")
     found = [word for word in PLACEHOLDERS if word in text]
     if found:
         raise MatrixError("没做完：文档里还有占位文字「" + "、".join(found) + "」。")
-    if len(text) > cap:
-        raise MatrixError(f"写太长了：{len(text)} 字，{result.template}上限 {cap} 字；先给结论，删掉铺垫。")
     if _v1(state) and result.template == "其他" and not (fresh.get("完成标准") or "").strip():
         raise MatrixError("事项没有完成标准，不能按「其他」交付；先在卡点里问本人做到什么程度算完。")
     check_result = client._exec(["docs", "+script", "--command", "parse", "--content", "@./"+artifact.relative_to(client.root).as_posix(), "--format", "json"])
@@ -483,10 +459,14 @@ def publish_markdown(config, client, state, record_id, version, path, result, *,
     queue = WorkQueue(state)
     if not queue.get(record_id, version):
         raise MatrixError("该事项没有在 AI 员工的队列里。")
-    current(config, client, state, record_id, version, published=_saved_url(config, state, key))
     path = Path(path).resolve()
     rel = path.relative_to(client.root.resolve()).as_posix()
     data = path.read_bytes()
+    if client.feishu_free():  # no document service: the deliverable stays on this computer and opens in 心响
+        from . import localdoc
+        url = localdoc.save(client.root, record_id, data, config.app_port)
+        return _hand_over(config, client, state, record_id, version, url, rel, data, result, title)
+    current(config, client, state, record_id, version, published=_saved_url(config, state, key))
     argv = ["docs", "+create", "--content", "@./" + rel, "--doc-format", "markdown", "--title", str(title)[:60],
             "--parent-position", "my_library", "--as", "user"]
     def create():
@@ -508,6 +488,13 @@ def publish_markdown(config, client, state, record_id, version, path, result, *,
     probes = [x for x in lines if len(x) >= 6][:3]
     if not probes or not all(p in remote for p in probes):
         raise MatrixError("文档正文读回不一致，暂不标记待验收。")
+    return _hand_over(config, client, state, record_id, version, url, rel, data, result, title)
+
+
+def _hand_over(config, client, state, record_id, version, url, rel, data, result, title):
+    """The item says 待验收 and points at the deliverable; the write is confirmed by reading it back."""
+    from .workflow import Gateway
+    key, queue = key_for(record_id, version), WorkQueue(state)
     row = current(config, client, state, record_id, version, published=url)
     queue.prepared(record_id, version, rel, sha256(data).hexdigest(), datetime.now(TZ))
     gateway = Gateway(client, state)

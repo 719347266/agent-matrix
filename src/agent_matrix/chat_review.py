@@ -5,11 +5,12 @@
     python -m agent_matrix.chat_review validate --review <batch>/review.json
     python -m agent_matrix.chat_review publish  --review <batch>/review.json
 
-Same strict rules as meetings: a task needs the exact words of commitment, the owner must
-be the sender or be named in the line, dates only when written. No task → no message.
+Quotes must be the message's own words, the owner must be the sender, named, or the one written to
+privately, dates only when written. A candidate the model does not take goes in `skipped` with a kind;
+a private message is never left out silently (see _every_private_line_decided). No task → no message.
 """
 import argparse
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from hashlib import sha1, sha256
 import json
 from pathlib import Path
@@ -42,12 +43,29 @@ class ChatAction(BaseModel):
     ai_can_prep: bool = False
     done_when: str | None = Field(default=None, max_length=60)
     confidence: float = Field(ge=0, le=1)
+    # Number of an item this one continues (the next step after it); see related_items.json. Not the same thing.
+    follows: int | None = None
+    # The owner's own words agreeing to take it ("好的", "我来"), copied from the message's `after` lines.
+    accepted_quote: str | None = Field(default=None, max_length=80)
+
+
+# Why a candidate is not an item. Not taking a line means saying which of these it is; a private message that
+# fits none of them is someone asking the owner for something, so it becomes an item.
+SKIP_KINDS = ("闲聊", "表态", "无关通知", "已办完", "点了别人", "同事的活", "并入另一条")
+
+
+class ChatSkip(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message_id: str
+    kind: Literal[SKIP_KINDS]
+    why: str = Field(min_length=1, max_length=40)
 
 
 class ChatReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     batch_id: str
     actions: list[ChatAction] = Field(default_factory=list)
+    skipped: list[ChatSkip] = Field(default_factory=list)
 
 
 def _times(config):
@@ -55,12 +73,50 @@ def _times(config):
 
 
 def due_slot(config, state, now):
-    """The latest review time already passed today that has no batch yet."""
+    """The latest review time already passed today that has no batch yet; or, every N minutes, "every"."""
+    every = getattr(config, "chat_review_every_minutes", 0)
+    if every:
+        last = state.get("chat-review:last")
+        return None if last and now - datetime.fromisoformat(last) < timedelta(minutes=every) else "every"
     passed = [t for t in _times(config) if now.time() >= time.fromisoformat(t)]
     if not passed:
         return None
     slot = f"{now.date().isoformat()}T{passed[-1]}"
     return None if state.get("chat-review:slot:" + slot) else slot
+
+
+URGENT = re.compile(r"今天|今晚|马上|立刻|立即|尽快|赶紧|抓紧|急|现在|等下|一会|待会|asap|ASAP|\d{1,2}[:：点]")
+
+
+def _sent(message, now):
+    try:
+        at = datetime.fromisoformat(str(message.get("sent_at") or "").replace(" ", "T"))
+        return at if at.tzinfo else at.replace(tzinfo=TZ)
+    except ValueError:
+        return now
+
+
+def ready(config, waiting, now, slot=None):
+    """When the waiting chat lines go to the AI. Chats are read every few minutes; each extraction costs a model
+    call, so it runs only when there is something worth it:
+        @you, a private ask, or someone asks you with a time or a push (今天 / 尽快 / 3点)  → at once
+        otherwise at the pace chosen on the 系统 page: every N minutes (chat_review_every_minutes), or the fixed times
+        late at night only the urgent ones run; the rest wait for the morning
+    Returns why it should run now, or None."""
+    if not waiting:
+        return None
+    urgent = [m for m in waiting if m.get("kind") == "@你" or (m.get("kind") == "找你的" and (
+        m.get("chat_mode") == "p2p" or URGENT.search(m.get("text") or "")))]  # a private ask is someone waiting on you
+    if urgent:
+        return f"有 {len(urgent)} 条私聊、@你、带时间或催办，马上提取"
+    hour = now.strftime("%H:%M")
+    if hour < config.chat_extract_from or hour >= config.chat_extract_until:
+        return None
+    if slot == "every":
+        return f"离上一轮满 {config.chat_review_every_minutes} 分钟"
+    if slot:
+        return f"到了整理时间 {slot[-5:]}"
+    return None
 
 
 def check(config, state, now):
@@ -69,12 +125,13 @@ def check(config, state, now):
         return {"ok": True, "run_model": True, "reason": "batch_open", "batch": open_batch}
     waiting = chats.pending(state)
     slot = due_slot(config, state, now)
-    if waiting and slot:
-        return {"ok": True, "run_model": True, "reason": "batch_due", "candidates": len(waiting), "slot": slot,
+    why = ready(config, waiting, now, slot)
+    if why:
+        return {"ok": True, "run_model": True, "reason": "batch_due", "why": why, "candidates": len(waiting), "slot": slot,
                 "instruction": "按 prompts/chat_extract.md 处理：先 chat_review prepare，再写 review.json，validate 后 publish。"}
-    if slot and not waiting:
+    if slot and slot != "every" and not waiting:
         state.set("chat-review:slot:" + slot, "empty")
-    return {"ok": True, "run_model": False, "reason": "idle", "candidates": len(waiting)}
+    return {"ok": True, "run_model": False, "reason": "waiting" if waiting else "idle", "candidates": len(waiting)}
 
 
 def prepare(config, state, root, now):
@@ -97,13 +154,31 @@ def prepare(config, state, root, now):
               "review_path": str(folder / "review.json"), "messages": len(waiting)}
     state.set("chat-review:open", result)
     slot = due_slot(config, state, now)
-    if slot:
+    if getattr(config, "chat_review_every_minutes", 0):
+        state.set("chat-review:last", now.isoformat())  # an urgent round also restarts the regular pace
+    elif slot:
         state.set("chat-review:slot:" + slot, batch)
     return result
 
 
 def _batch(root, batch_id):
     return json.loads((Path(root) / "state/chat-batches" / batch_id / "candidates.json").read_text())
+
+
+def owner_accepted(config, a, m):
+    """Did the owner agree to take this? Their own message is a yes; otherwise one of the lines they wrote
+    after it must contain the words the model quoted. Checked in code: the model cannot invent a "好的"."""
+    if m.get("sender_name") == "我":
+        return True
+    quote = (a.accepted_quote or "").strip()
+    if not quote:
+        return False
+    names = {config.owner_name, "我", *getattr(config, "owner_aliases", [])} - {""}
+    for line in m.get("after") or []:
+        head, _, said = str(line).partition("] ")
+        if quote in said and any(head.endswith(" " + name) for name in names):
+            return True
+    return False
 
 
 def validate(config, review, root):
@@ -130,20 +205,58 @@ def validate(config, review, root):
             sender = config.owner_name if m["sender_name"] == "我" else m["sender_name"]
             extra = config.owner_aliases if a.owner_name == config.owner_name else ()
             named = any(x in m["text"] for x in aliases(a.owner_name, extra))
-            private_to_owner = m["chat_mode"] == "p2p" and a.owner_name == config.owner_name
-            if a.owner_name != sender and not named and not private_to_owner:
+            # The owner may take any line: a customer's unaddressed question in a group is for whoever sees it.
+            # Someone else is the owner only when they said it themselves or were named.
+            for_owner = a.owner_name == config.owner_name
+            if a.owner_name != sender and not named and not for_owner:
                 raise MatrixError(f"「{a.title}」的负责人{a.owner_name}既不是发消息的人，也没被点名；改为 null。")
         if a.due_date:
-            if not a.due_phrase or a.due_phrase not in m["text"]:
-                raise MatrixError(f"「{a.title}」的截止日缺少原话。")
+            # "下周", "月底": no exact day can be worked out from the words. The date is left empty (the item
+            # then waits for the owner to set one) instead of sending the whole batch back to the model.
             sent = datetime.fromisoformat(m["sent_at"].replace(" ", "T")) if m.get("sent_at") else datetime.now(TZ)
-            from .reply import parse_date
-            found = parse_date(a.due_phrase.rstrip("前之"), sent.date())
+            from .timeutil import parse_date
+            found = parse_date(a.due_phrase.rstrip("前之"), sent.date()) if a.due_phrase and a.due_phrase in m["text"] else None
             if not found or found.isoformat() != a.due_date:
-                raise MatrixError(f"「{a.title}」的截止日和原话换算不一致。")
-        if a.confidence >= MIN_CONFIDENCE:
+                a.due_date = a.due_phrase = None
+        if (getattr(config, "intake_mode", "all") == "accepted" and a.owner_name == config.owner_name
+                and not owner_accepted(config, a, m)):
+            if not private(m):
+                continue  # 全自动: asked of the owner in a group but not taken on by them, so it is not an item
+            # someone asked the owner directly: never dropped in silence, it waits for the owner's yes (待确认 + ask)
+            m["handed"] = True
+        # A private message is someone talking to the owner: no "宁可漏" there, any confidence is kept.
+        if a.confidence >= MIN_CONFIDENCE or private(m):
             kept.append((a, m))
+    _every_private_line_decided(review, batch, by_id)
     return kept
+
+
+def private(m):
+    return m.get("chat_mode") == "p2p" and m.get("sender_name") != "我"
+
+
+def _every_private_line_decided(review, batch, by_id):
+    """Someone wrote to the owner directly: such a line is never dropped in silence. Each one is an item or is
+    in `skipped` with a reason kind; "并入另一条" needs an item from the same chat in this batch to go into."""
+    for s in review.skipped:
+        if s.message_id not in by_id:
+            raise MatrixError(f"skipped 里的 {s.message_id} 不在本批里。")
+    acted = {a.message_id for a in review.actions}
+    chats_with_item = {by_id[i]["chat_id"] for i in acted if i in by_id}
+    for s in review.skipped:
+        m = by_id[s.message_id]
+        if s.kind == "并入另一条" and private(m) and m["chat_id"] not in chats_with_item:
+            raise MatrixError(f"私聊「{m['text'][:30]}」写了并入另一条，但这个私聊在本批里没有提取任何待办；"
+                              "它说的事要么提取成待办，要么换成别的类别。")
+    decided = acted | {s.message_id for s in review.skipped}
+    missing = [m for m in batch["messages"] if private(m) and m["message_id"] not in decided]
+    if missing:
+        lines = "；".join(f"{m['message_id']}（{m['sender_name']}：{m['text'][:30]}）" for m in missing[:5])
+        raise MatrixError(f"这几条私聊没有结论：{lines}。私聊的每一条要么提取成待办，要么写进 skipped 并选一个类别。")
+
+
+def applink(config):
+    return "applink.larksuite.com" if getattr(config, "lark_brand", "feishu") == "lark" else "applink.feishu.cn"
 
 
 def task_fields(config, a, m):
@@ -154,7 +267,9 @@ def task_fields(config, a, m):
     fields = {"标题": a.title, "类型": ["临时"], "状态": [status], "执行方": [executor],
               "进度": {"未开始": "0/1 等对方" if executor == "别人" else "0/1 未开始", "待确认": "0/1 待确认"}[status],
               "下一步动作": a.title, "来源": ["聊天"],
-              "来源链接": f"https://applink.feishu.cn/client/chat/open?openChatId={m['chat_id']}",
+              "来源链接": m["message_id"] if m["message_id"].startswith("https://")  # Slack permalink
+                          else None if m["message_id"].startswith("wechat:")       # WeChat has no link to a message
+                          else f"https://{applink(config)}/client/chat/open?openChatId={m['chat_id']}",
               "原话引用": f"[{m['chat_name']} {m.get('sent_at') or ''} {m['sender_name']}] {m['text'][:300]}"}
     if executor == "别人" and m["kind"] != "找你的":
         fields["排除本人提醒"] = True
@@ -177,8 +292,12 @@ def publish(config, client, state, review):
     kept = validate(config, review, client.root)
     gateway = Gateway(client, state)
     created = []
+    from . import itemlinks
     from .merge import find_same, merge_into
     rows, merged = gateway.rows(), []
+    # what became of each line, for the 聊天判断 page; a line the model took but code then dropped is said so too
+    outcome = {s.message_id: f"skip:{s.kind}：{s.why}" for s in review.skipped}
+    outcome.update({a.message_id: "drop:AI 拿不准，或是群里问你但你没接" for a in review.actions})
     for a, m in kept:
         key = "chat:" + a.message_id + ":" + sha1(re.sub(r"\s+", "", a.title).encode()).hexdigest()[:10]
         target, _, _ = find_same(rows, a.title)
@@ -186,9 +305,20 @@ def publish(config, client, state, review):
             merge_into(gateway, target, title=a.title, source="聊天「" + m["chat_name"][:10] + "」",
                        detail=f"{m['sender_name']}：{m['text'][:120]}", key=key + ":merge", now=datetime.now(TZ))
             merged.append(target.get("编号"))
+            outcome[a.message_id] = "merged:" + target["record_id"]
             continue
-        created.append(gateway.create(task_fields(config, a, m), key, "chat-review")["record_id_list"][0])
-    state.db.execute("UPDATE chat_candidates SET status='done' WHERE batch=?", (review.batch_id,))
+        fields = task_fields(config, a, m)
+        if m.get("handed"):
+            fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
+        created.append(gateway.create(fields, key, "chat-review")["record_id_list"][0])
+        outcome[a.message_id] = "item:" + created[-1]
+        if m.get("handed"):
+            from .thread import judge
+            judge(client.root, created[-1], "ask", f"{m['sender_name']} 私聊找你的，等你确认接不接")
+        itemlinks.link_by_number(client.root, rows, created[-1], a.follows)
+    state.db.executemany("UPDATE chat_candidates SET status=? WHERE message_id=?", [(v, k) for k, v in outcome.items()])
+    state.db.execute("UPDATE chat_candidates SET status='skip:AI 看过，不是要你做的事' WHERE batch=? AND status='pending'",
+                     (review.batch_id,))
     state.db.commit()
     state.set("chat-review:open", None)
     message_id = None
@@ -220,8 +350,12 @@ def main(argv=None):
     args = p.parse_args(argv)
     path = args.config.resolve(); root = path.parent
     try:
-        config = load(path)
         with exclusive_lock(root / "state", wait=0 if args.command == "check" else 90):
+            config = load(path)
+            if args.command != "validate" and not (config.chat_watch_enabled or config.wechat_enabled):
+                print(js({"ok": args.command == "check", "run_model": False, "reason": "paused",
+                          "note": "聊天待办提取已暂停。"}))
+                return 2
             state = State(root / "state/state.db")
             try:
                 now = datetime.now(TZ)
@@ -235,7 +369,8 @@ def main(argv=None):
                 review = ChatReview.model_validate_json(args.review.read_text())
                 if args.command == "validate":
                     kept = validate(config, review, root)
-                    print(js({"ok": True, "actions": len(kept), "dropped_low_confidence": len(review.actions) - len(kept)})); return 0
+                    print(js({"ok": True, "actions": len(kept), "skipped": len(review.skipped),
+                              "dropped_low_confidence": len(review.actions) - len(kept)})); return 0
                 client = Feishu(config, root); client.verify_owner(client.auth())
                 print(js(publish(config, client, state, review))); return 0
             finally:

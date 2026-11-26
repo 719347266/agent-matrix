@@ -14,6 +14,7 @@ import threading
 import time
 from uuid import uuid4
 
+from . import db as database
 from .models import MatrixBusy, MatrixError
 from .timeutil import TZ
 
@@ -29,17 +30,13 @@ class Commands:
         self.guard = threading.Lock()
         self.working = False
         with self.db() as db:
-            db.execute("""CREATE TABLE IF NOT EXISTS commands (
-                id TEXT PRIMARY KEY, payload TEXT NOT NULL, numbers TEXT NOT NULL,
-                status TEXT NOT NULL, message TEXT NOT NULL, created REAL NOT NULL,
-                updated REAL NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0)""")
             db.execute("UPDATE commands SET status='failed', message=?, updated=? WHERE status='running'",
                        ("服务重启了，结果需要核对；点「核对并重试」会先检查上次是否已保存。", time.time()))
         self.start()
 
     @contextmanager
     def db(self):
-        db = sqlite3.connect(self.path, timeout=10)
+        db = database.connect(self.path, "commands", timeout=10)
         db.row_factory = sqlite3.Row
         try:
             with db:
@@ -65,10 +62,10 @@ class Commands:
         if not text:
             raise ValueError("没有内容。")
         kind = body.get("kind", "cmd")
-        if kind not in {"cmd", "say"}:
+        if kind not in {"cmd", "say", "note"}:
             raise ValueError("不支持这个操作。")
-        n = int(body.get("n") or 0) if kind == "say" else None
-        if kind == "say":
+        n = int(body.get("n") or 0) if kind in {"say", "note"} else None
+        if kind in {"say", "note"}:
             if n < 1:
                 raise ValueError("缺少事项编号。")
             numbers = [n]
@@ -80,7 +77,10 @@ class Commands:
         request_id = str(body.get("request_id") or uuid4().hex)
         if not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", request_id):
             raise ValueError("请求编号无效。")
-        payload = json.dumps({"kind": kind, "text": text, "n": n}, ensure_ascii=False, sort_keys=True)
+        payload = {"kind": kind, "text": text, "n": n}
+        if kind == "note" and body.get("complete"):
+            payload["complete"] = True
+        payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute("SELECT * FROM commands WHERE id=?", (request_id,)).fetchone()
@@ -162,7 +162,7 @@ def run_action(root, payload, request_id, progress):
     from .bitable import require_owned
     from .config import load
     from .feishu import Feishu
-    from .monitor import _snapshot
+    from .snapshot import _snapshot
     from .reply import Applier, parse, WAKE_WORKER
     from .state import State, exclusive_lock
     from . import activity, thread
@@ -181,29 +181,61 @@ def run_action(root, payload, request_id, progress):
         try:
             require_owned(config, state)
             text = payload["text"]
+            note = None
+            if payload["kind"] == "note":
+                # A note is for the owner's own record: it never goes to the AI. "备注并完成" closes the item with it.
+                row = next((r for r in _snapshot(root).get("rows", []) if int(r.get("编号") or 0) == payload["n"]), None)
+                if not row:
+                    return {"ok": False, "reply": f"#{payload['n']} 找不到这件事"}
+                status = (row.get("状态") or [None])[0] if isinstance(row.get("状态"), list) else row.get("状态")
+                closing = bool(payload.get("complete")) and status not in {"完成", "取消"}
+                key = "app-note:" + request_id
+                if not state.get(key):
+                    thread.add(root, row["record_id"], "me", "note", text, dedupe=key)
+                    state.set(key, True)
+                if not closing:
+                    extra = f"（这件事已经{status}）" if payload.get("complete") else "，没有发给 AI"
+                    return {"ok": True, "reply": f"#{payload['n']} 备注已记下 ✓{extra}"}
+                text, note = f"{payload['n']} 完成", text
             if payload["kind"] == "say":
                 row = next((r for r in _snapshot(root).get("rows", []) if int(r.get("编号") or 0) == payload["n"]), None)
-                if row and row.get("状态") in {"完成", "取消"}:
+                status = (row.get("状态") or [None])[0] if row and isinstance(row.get("状态"), list) else (row or {}).get("状态")
+                if row and status == "取消":
                     key = "app-say:" + request_id
                     if not state.get(key):
                         thread.add(root, row["record_id"], "me", "feedback", text)
                         state.set(key, True)
-                    return {"ok": True, "reply": f"#{payload['n']} 已记进对话，事项保持关闭"}
-                text = f"{payload['n']} + {text}"
+                    return {"ok": True, "reply": f"#{payload['n']} 已记进对话；这件事标为不做，要接着做先点「恢复」"}
+                # A short action ("完成了", "周五", "不做") runs as that action. Other words go to the AI:
+                # on a finished item they reopen it, and the AI picks up the same conversation.
+                text = say_text(payload["n"], text)
+                if status in {"完成", "待验收"} and " + " in text:
+                    text = f"{payload['n']} 改 {payload['text'].strip()}"
             ops, problems = parse(text, datetime.now(TZ).date())
             applier = Applier(config, client, state, source="cindy", message_ref="app-" + request_id,
-                              immediate=True, progress=progress)
+                              immediate=True, progress=progress, note=note)
             progress("正在读取事项")
             lines = [line for op in ops for line in applier.apply(op)]
             for line in lines:
                 activity.log(root, "reply", f"你回复「{text[:20]}」→ {line[:60]}", status="ok" if "✓" in line else "info")
             if any(op.verb in WAKE_WORKER for op in ops) and any("✓" in line for line in lines):
-                from .worker import kick
+                from .workenv import kick
                 kick(root, config, force=True)
             return {"ok": bool(lines) and all("✓" in line for line in lines) and not problems,
                     "reply": "\n".join([*lines, *problems]), "deferred": applier.deferred}
         finally:
             state.close()
+
+
+def say_text(n, text):
+    """What the item box sends: a short action for this item ("完成了", "1 完成", "周五") runs as that action;
+    anything else is material for the AI ("预算按 600 一天重算")."""
+    from .reply import parse
+    short = re.sub(rf"^#?{n}\s+", "", text).rstrip("了啦吧。！!～~ ")
+    ops, problems = parse(f"{n} {short}", datetime.now(TZ).date())
+    if short and ops and not problems and all(set(op.numbers) == {n} for op in ops):
+        return f"{n} {short}"
+    return f"{n} + {text}"
 
 
 def enrich_deliverables(root, rows, request_id):
@@ -212,10 +244,10 @@ def enrich_deliverables(root, rows, request_id):
     from .feishu import Feishu
     from .reply import find_deliverable
     from .brief_migration import single
-    from .prework import _draft_url
+    from .values import draft_url as _draft_url
     from .workflow import Gateway, normalize
     from .state import State, exclusive_lock
-    from .monitor import save_snapshot
+    from .snapshot import save_snapshot
     from . import thread, activity
 
     try:

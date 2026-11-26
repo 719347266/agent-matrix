@@ -14,9 +14,9 @@ from datetime import datetime
 import json
 from pathlib import Path
 import secrets
-import sqlite3
 import string
 
+from . import db as database
 from .models import MatrixError
 from .timeutil import TZ
 
@@ -31,7 +31,17 @@ BACKUP_GIVE_UP = 5
 
 
 def enabled(config):
-    return getattr(config, "item_store", "feishu") == "local"
+    return getattr(config, "item_store", "feishu") in ("local", "notion", "device")
+
+
+def feishu_free(config):
+    """Items in Notion or only on this computer: no Feishu table is used."""
+    return getattr(config, "item_store", "feishu") in ("notion", "device")
+
+
+def reads_feishu(config):
+    """Feishu/Lark meetings, chats and tasks are read: with the Feishu table, or as a plain source (feishu_as_source)."""
+    return not feishu_free(config) or bool(getattr(config, "feishu_as_source", False))
 
 
 def is_items_table(config, args):
@@ -41,19 +51,7 @@ def is_items_table(config, args):
 
 
 def _db(root):
-    path = Path(root) / "state/items.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=15)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS items (record_id TEXT PRIMARY KEY, n INTEGER, fields TEXT NOT NULL, updated TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT NOT NULL, record_id TEXT NOT NULL,
-            payload TEXT NOT NULL, created TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, error TEXT,
-            state TEXT NOT NULL DEFAULT 'pending');
-        CREATE TABLE IF NOT EXISTS idmap (local_id TEXT PRIMARY KEY, feishu_id TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-    """)
-    return db
+    return database.open(root, "items", timeout=15)
 
 
 def _now():
@@ -159,31 +157,6 @@ def import_rows(root, rows, fields):
         db.close()
 
 
-def ensure(client, state=None):
-    """Import the Feishu table the first time the local store is used."""
-    root = Path(client.root)
-    if imported(root):
-        return
-    from .records import read_remote
-    from .state import State
-    from .workflow import FIELDS
-    names = list(FIELDS)
-    try:
-        listed = client.call("+field-list", "--base-token", client.config.base_token,
-                             "--table-id", client.config.tables["事项表"])
-        from .bitable import items as listed_items
-        found = [f.get("field_name") or f.get("name") for f in listed_items(listed)]
-        names = list(dict.fromkeys([*names, *[n for n in found if n]]))
-    except Exception:
-        pass
-    own = state is None
-    state = state or State(root / "state/state.db")
-    try:
-        rows = read_remote(client, state, "事项表", names)
-    finally:
-        if own:
-            state.close()
-    import_rows(root, rows, names)
 
 
 # ---- read and write -------------------------------------------------------------------------------------
@@ -251,10 +224,11 @@ def create(root, fields):
 
 
 def apply_call(client, command, args):
-    """What `base +record-batch-update/-create` on the item table does, done locally (instant)."""
+    """What `base +record-batch-update/-create` on the item table does, done locally (instant).
+
+    The caller has made sure the store holds the items already (records.ensure_local)."""
     args = list(args)
     body = json.loads(args[args.index("--json") + 1])
-    ensure(client)
     root = Path(client.root)
     if command == "+record-batch-update":
         done = [update(root, rid, patch) for rid, patch in (body.get("update_records") or {}).items()]
@@ -290,37 +264,50 @@ def _payload(db, raw):
     return data
 
 
-def backup(root, client, limit=30):
-    """Push queued changes to the Feishu table, oldest first. A change that keeps failing is set aside
-    after a few tries and the owner is told once; the local item is never rolled back."""
+WAIT = "wait"
+
+
+def feishu_push(client):
+    """One queued change → the Feishu table. Returns WAIT while a linked item has not reached Feishu yet."""
+    coords = ["--base-token", client.config.base_token, "--table-id", client.config.tables["事项表"]]
+
+    def push(db, op, rid, raw):
+        payload = _payload(db, raw)
+        target = db.execute("SELECT feishu_id FROM idmap WHERE local_id=?", (rid,)).fetchone()
+        target = target[0] if target else (None if rid.startswith("recL") else rid)
+        if payload is None or (op == "update" and not target):
+            return WAIT
+        if op == "update":
+            if payload:
+                receipt = client.call("+record-batch-update", *coords, "--json",
+                                      json.dumps({"update_records": {target: payload}}, ensure_ascii=False), write=True)
+                if receipt.get("ignored_fields"):
+                    raise MatrixError(f"飞书忽略了字段：{receipt['ignored_fields']}")
+        else:
+            receipt = client.call("+record-batch-create", *coords, "--json",
+                                  json.dumps({"create_records": [payload]}, ensure_ascii=False), write=True)
+            ids = receipt.get("record_id_list") or []
+            if len(ids) != 1:
+                raise MatrixError("飞书没有返回新记录的 ID")
+            with db:
+                db.execute("INSERT OR REPLACE INTO idmap VALUES (?,?)", (rid, ids[0]))
+    return push
+
+
+def backup(root, client=None, limit=30, push=None, target="飞书"):
+    """Push queued changes to the backup (the Feishu table by default, or Notion), oldest first. A change that
+    keeps failing is set aside after a few tries and the owner is told once; the local item is never rolled back."""
     from . import inbox
+    push = push or feishu_push(client)
     pushed = 0
     db = _db(root)
     try:
-        coords = ["--base-token", client.config.base_token, "--table-id", client.config.tables["事项表"]]
         for oid, op, rid, raw, attempts in db.execute(
                 "SELECT id, op, record_id, payload, attempts FROM outbox WHERE state='pending' ORDER BY id LIMIT ?",
                 (limit,)).fetchall():
-            payload = _payload(db, raw)
-            target = db.execute("SELECT feishu_id FROM idmap WHERE local_id=?", (rid,)).fetchone()
-            target = target[0] if target else (None if rid.startswith("recL") else rid)
-            if payload is None or (op == "update" and not target):
-                break  # waits for an earlier item to reach Feishu first
             try:
-                if op == "update":
-                    if payload:
-                        receipt = client.call("+record-batch-update", *coords, "--json",
-                                              json.dumps({"update_records": {target: payload}}, ensure_ascii=False), write=True)
-                        if receipt.get("ignored_fields"):
-                            raise MatrixError(f"飞书忽略了字段：{receipt['ignored_fields']}")
-                else:
-                    receipt = client.call("+record-batch-create", *coords, "--json",
-                                          json.dumps({"create_records": [payload]}, ensure_ascii=False), write=True)
-                    ids = receipt.get("record_id_list") or []
-                    if len(ids) != 1:
-                        raise MatrixError("飞书没有返回新记录的 ID")
-                    with db:
-                        db.execute("INSERT OR REPLACE INTO idmap VALUES (?,?)", (rid, ids[0]))
+                if push(db, op, rid, raw) == WAIT:
+                    break  # waits for an earlier item to reach the backup first
                 with db:
                     db.execute("UPDATE outbox SET state='done', error=NULL WHERE id=?", (oid,))
                     _set_meta(db, "backup_ok_at", _stamp(_now()))
@@ -332,7 +319,7 @@ def backup(root, client, limit=30):
                                (str(exc)[:300], "failed" if failed else "pending", oid))
                     _set_meta(db, "backup_error", {"at": _stamp(_now()), "error": str(exc)[:200]})
                 if failed:
-                    inbox.add(root, f"backup-failed:{oid}", f"⚠ 飞书备份有一条没写进去：{op} {rid}\n{str(exc)[:120]}\n"
+                    inbox.add(root, f"backup-failed:{oid}", f"⚠ {target}备份有一条没写进去：{op} {rid}\n{str(exc)[:120]}\n"
                               "本机的事项不受影响；在「系统」里可以重试。", kind="system")
                     continue
                 break
@@ -359,3 +346,19 @@ def status(root):
                 "imported_at": _meta(db, "imported_at"), "items": db.execute("SELECT count(*) FROM items").fetchone()[0]}
     finally:
         db.close()
+
+
+def queue_all(root):
+    """Queue every item for the backup once, e.g. right after Notion is connected."""
+    db = _db(root)
+    try:
+        with db:
+            now = _stamp(_now())
+            ids = [r[0] for r in db.execute("SELECT record_id FROM items ORDER BY n")]
+            db.executemany("INSERT INTO outbox (op, record_id, payload, created) VALUES ('update',?,'{}',?)",
+                           [(rid, now) for rid in ids])
+        return len(ids)
+    finally:
+        db.close()
+
+

@@ -1,0 +1,41 @@
+name: Windows diagnose (open it like a user, watch 3 minutes)
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "The release to check (tag, e.g. v0.4.28); its installer is used"
+        required: true
+      from:
+        description: "Install this older release first and use it, then install the new one over it (empty = a fresh computer)"
+        required: false
+        default: "v0.4.26"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        path: [upgrade, fresh]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get the installer of ${{ inputs.to }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.to }}" --pattern "Xinxiang-Setup-*.exe" --dir dist
+          Get-ChildItem dist
+      - name: Open it like a user and watch
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist/Xinxiang-Setup-*.exe).FullName
+          $from = if ("${{ matrix.path }}" -eq "upgrade") { "${{ inputs.from }}" } else { "" }
+          ./windows/diagnose.ps1 -From $from -Setup $setup -Out diag
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnose-${{ matrix.path }}
+          path: diag/*
+          if-no-files-found: warn

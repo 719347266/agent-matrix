@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import time
+from . import activity
 from .models import Config, MatrixError
 from .delivery import require_message_receipt
 
@@ -38,12 +40,89 @@ def permission_scope(args):
 
 
 class FeishuError(MatrixError):
-    def __init__(self, code="unknown", authorization=False, *, scope=None):
+    def __init__(self, code="unknown", authorization=False, *, scope=None, detail=""):
         self.authorization = authorization
         self.code = str(code)
         self.not_sent = False
         self.scope = scope
-        super().__init__(f"飞书调用失败（{self.code}）；已停止，不自动重放写操作。")
+        # What the command itself said stays on the error (it may quote content); the message only carries what is
+        # safe to show: which permissions are missing, or which local proxy is down.
+        self.detail = " ".join(str(detail or "").split())[:400]
+        proxy, scopes = proxy_down(self.detail), missing_scopes(self)
+        hint = f"（代理 {proxy} 没开）" if proxy else f"（少了权限：{'、'.join(scopes)}）" if self.code == "missing_scope" and scopes else ""
+        super().__init__(f"飞书调用失败（{self.code}）{hint}；已停止，不自动重放写操作。")
+
+
+SCOPE = re.compile(r"\b[a-z][a-z_]*(?::[a-z_.]+){1,3}\b")
+
+
+def missing_scopes(exc):
+    """The permissions a missing_scope error names (e.g. vc:meeting:readonly), as far as the command said them."""
+    text = f"{getattr(exc, 'detail', '')}"
+    return sorted({s for s in SCOPE.findall(text) if not s.startswith(("http", "https"))})[:8]
+
+
+def proxy_down(text):
+    """This computer sends traffic through a local proxy (127.0.0.1:7890 and the like) that is not running."""
+    m = re.search(r"proxyconnect tcp: dial tcp ((?:127\.0\.0\.1|localhost):\d+)", str(text or ""))
+    return m.group(1) if m else None
+
+
+def why_not(exc):
+    """Why Feishu cannot be used right now, in words the owner can act on."""
+    code = getattr(exc, "code", None)
+    if code is None:
+        return str(exc)[:160]   # already a sentence: bot not available, another app, another account
+    proxy = proxy_down(getattr(exc, "detail", ""))
+    if proxy:
+        return f"这台电脑设了网络代理（{proxy}），但代理软件现在没开，所以连不上飞书"
+    if str(code) == "missing_scope":
+        scopes = missing_scopes(exc)
+        return "飞书应用少了权限" + (f"：{'、'.join(scopes)}" if scopes else "")
+    return {"user_needs_refresh": "飞书登录过期了，要重新登录一次",
+            "cli_unavailable": "找不到飞书命令行（lark-cli）",
+            "timeout": "飞书命令行太久没有响应",
+            "network": "连不上飞书（网络不通）",
+            "invalid_json": "飞书命令行返回的内容读不懂（可能版本太旧或没登录）",
+            "no_permission": "你的飞书账号没有查看权限（东西是别人的）"}.get(str(code), f"飞书命令行报错（{code}）")
+
+
+def note_health(state, exc=None):
+    """Remember whether the sign-in check passed: the page says "connected" only while Feishu can really be read."""
+    from datetime import datetime
+    from .timeutil import TZ
+    now = datetime.now(TZ)
+    if exc is None:
+        if (state.get("feishu:health") or {}).get("ok") is not True:
+            state.set("feishu:health", {"ok": True, "at": now.strftime("%m-%d %H:%M")})
+        return
+    was = state.get("feishu:health") or {}
+    state.set("feishu:health", {"ok": False, "why": why_not(exc), "at": now.strftime("%m-%d %H:%M"),
+                                "since": was.get("since") if was.get("ok") is False else now.strftime("%m-%d %H:%M"),
+                                "count": (was.get("count", 0) if was.get("ok") is False else 0) + 1})
+
+
+def _envelope(run):
+    """The JSON the command answered with. A failing command may print progress lines on stderr and its JSON on
+    stdout (minutes +detail does), or the other way round: take whichever stream holds the JSON."""
+    streams = (run.stdout,) if run.returncode == 0 else (run.stderr, run.stdout)
+    for text in streams:
+        try:
+            return json.loads(text)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _entry_errors(data):
+    """The `error` of each entry in a batch answer ({"minutes": [{"error": …}]})."""
+    if not isinstance(data, dict):
+        return []
+    return [str(x["error"]) for v in data.values() if isinstance(v, list) for x in v if isinstance(x, dict) and x.get("error")]
+
+
+AUTH_KEEP_SECONDS = 45
+_AUTH = {}   # (command, project) → (when, answer): the last good sign-in check
 
 
 class Feishu:
@@ -58,7 +137,14 @@ class Feishu:
         from . import itemstore
         return self.use_local_items and itemstore.enabled(self.config) and itemstore.is_items_table(self.config, args)
 
+    def feishu_free(self):
+        from . import itemstore
+        return itemstore.feishu_free(self.config)
+
     def _exec(self, args, *, auth=False, manifest=False):
+        from . import itemstore
+        if not itemstore.reads_feishu(self.config):
+            raise MatrixError("没接飞书：事项记在 Notion 或本机，这一步要用飞书，已跳过。")
         scope = permission_scope(args)
         # A later failure must supersede any earlier success in this same run.
         self.authorized_scopes.discard(scope)
@@ -70,16 +156,20 @@ class Feishu:
             raise FeishuError("timeout") from exc
         except OSError as exc:
             raise FeishuError("cli_unavailable") from exc
-        try:
-            d = json.loads(r.stdout if r.returncode == 0 else r.stderr or r.stdout)
-        except (ValueError, TypeError) as exc:
-            raise FeishuError("invalid_json") from exc
+        d = _envelope(r)
+        if d is None:
+            said = (r.stderr or "") + " " + (r.stdout or "")
+            raise FeishuError("network" if proxy_down(said) else "invalid_json", detail=said[:400])
         if not isinstance(d, dict):
             raise FeishuError("invalid_envelope")
         if r.returncode != 0 or d.get("ok") is False:
-            e = d.get("error", {})
+            e = d.get("error", {}) if isinstance(d.get("error"), dict) else {}
             code = "high-risk-write-refused" if r.returncode == 10 else e.get("code", e.get("subtype", r.returncode))
-            raise FeishuError(code, e.get("type") in {"authorization", "authentication"}, scope=scope)
+            said = " ".join(str(e.get(k) or "") for k in ("message", "hint", "detail", "permission_violations", "required_scopes", "missing_scopes"))
+            if not e:   # a batch command (minutes +detail …) puts each failure on its own entry instead
+                said = " ".join(_entry_errors(d.get("data")))[:400]
+                code = "no_permission" if re.search(r"no (read )?permission|permission denied|无权限|没有权限", said, re.I) else code
+            raise FeishuError(code, e.get("type") in {"authorization", "authentication"}, scope=scope, detail=said)
         if manifest:
             if d.get("manifest_version") != "v1" or d.get("format") != "ndjson":
                 raise FeishuError("invalid_manifest")
@@ -93,6 +183,15 @@ class Feishu:
         return d if auth else d.get("data", {})
 
     def auth(self, _retry=True):
+        if self.feishu_free():  # nothing to verify: no Feishu account is used
+            ok = {"status": "ready", "available": True, "verified": True}
+            return {"app_id": self.config.app_id, "user": dict(ok), "bot": dict(ok)}
+        # Every timer checks who is signed in before it works; several fire in the same second. Ask the command
+        # once and let the others within the next moments use that answer (only a good answer is kept).
+        key = (resolve_lark(self.config.lark_binary), str(self.root))
+        kept = _AUTH.get(key)
+        if self.runner is subprocess.run and kept and time.monotonic() - kept[0] < AUTH_KEEP_SECONDS:
+            return json.loads(kept[1])
         raw = self._exec(["auth", "status", "--json", "--verify"], auth=True)
         raw = raw.get("data", raw)
         user = raw.get("identities", {}).get("user", {})
@@ -104,6 +203,10 @@ class Feishu:
         for kind in ("user", "bot"):
             v = ids.get(kind, {})
             result[kind] = {k: v.get(k) for k in ("status", "available", "verified", "openId", "userName", "tokenStatus")}
+        if self.runner is subprocess.run and all(result[k].get("verified") and result[k].get("status") == "ready" for k in ("user", "bot")):
+            _AUTH[key] = (time.monotonic(), json.dumps(result))
+        else:
+            _AUTH.pop(key, None)
         return result
 
     def verify_owner(self, status, *, require_user=True):
@@ -127,7 +230,8 @@ class Feishu:
         if command not in allowed or "--yes" in args:
             raise MatrixError("命令不在当前框架允许范围内。")
         if command in {"+record-batch-update", "+record-batch-create"} and self.local_items(args):
-            from . import itemstore
+            from . import itemstore, records
+            records.ensure_local(self)  # first use: bring the Feishu table home before writing locally
             return itemstore.apply_call(self, command, args)  # 心响 local store; Feishu gets it via backup
         argv = ["base", command, *args, "--as", "user", "--format", "json"]
         if write:
@@ -142,7 +246,7 @@ class Feishu:
         """Send an interactive card (display + open-url buttons only) to the owner."""
         if not self.can_message_self:
             raise MatrixError("尚未核验当前机器人与账号绑定，不发送消息。")
-        if not self.config.owner_open_id.startswith("ou_"):
+        if not self.config.owner_open_id.startswith("ou_") and (channel or self.config.notify_channel) != "local":
             raise MatrixError("尚未绑定本人 open_id，不发送消息。")
         argv = ["im", "+messages-send", "--user-id", self.config.owner_open_id, "--msg-type", "interactive",
                 "--content", json.dumps(card, ensure_ascii=False), "--idempotency-key", key,
@@ -161,8 +265,8 @@ class Feishu:
             return receipt
         try:  # Feishu messages (the 08:30 / 21:00 briefs) keep a copy in the local inbox too
             inbox.add(self.root, "feishu:" + key, content, kind="brief" if str(key).startswith("brief") else None)
-        except Exception:
-            pass
+        except Exception as exc:
+            activity.swallowed(self.root, "feishu._send_logged", exc)
         try:
             try:
                 self._exec([*argv, "--dry-run"])
@@ -184,7 +288,7 @@ class Feishu:
     def send_self(self, text, key, channel=None):
         if not self.can_message_self:
             raise MatrixError("尚未核验当前机器人与账号绑定，不发送消息。")
-        if not self.config.owner_open_id.startswith("ou_"):
+        if not self.config.owner_open_id.startswith("ou_") and (channel or self.config.notify_channel) != "local":
             raise MatrixError("尚未绑定本人 open_id，不发送消息。")
         # No recipient argument is exposed to agents or CLI callers.
         # Text links like [打开](url) only render in a post message; plain text stays text.

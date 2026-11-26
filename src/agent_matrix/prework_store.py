@@ -83,16 +83,6 @@ class WorkQueue:
     def __init__(self, state):
         self.state = state
         self.db = state.db
-        self.db.execute("""CREATE TABLE IF NOT EXISTS prework_queue (
-            record_id TEXT NOT NULL, input_version TEXT NOT NULL, candidate TEXT NOT NULL,
-            status TEXT NOT NULL CHECK(status IN ('queued','running','prepared','done','blocked','stale')),
-            datekey TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            next_attempt_at TEXT, lease_until TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-            claim_count INTEGER NOT NULL DEFAULT 0, result_path TEXT, result_sha256 TEXT,
-            prepared_at TEXT, receipt TEXT, delivered_at TEXT, reason TEXT,
-            PRIMARY KEY(record_id,input_version))""")
-        self.db.execute("CREATE INDEX IF NOT EXISTS prework_queue_ready ON prework_queue(status,next_attempt_at,lease_until)")
-        self.db.commit()
 
     @contextmanager
     def _transaction(self):

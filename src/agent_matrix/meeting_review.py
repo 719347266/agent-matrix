@@ -8,6 +8,7 @@ import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from . import db as database, memory
 from .bitable import find_value, items, js, require_owned
 from .config import load
 from .feishu import Feishu
@@ -38,6 +39,8 @@ class Action(Grounded):
     done_when: str | None = Field(default=None,max_length=60)
     # Number of an open item this is the same thing as (see open_items.json); merged instead of re-created.
     same_as: int | None = None
+    # Number of an item this one continues (the next step after it); see related_items.json. Not the same thing.
+    follows: int | None = None
 
 
 class Waiting(Grounded):
@@ -264,7 +267,8 @@ def task_fields(action, config, meta):
         executor="别人"
     hidden=executor=="别人" and action.direction!="others_to_me"
     ready=bool(action.due_date) and (own or executor=="别人")
-    status="未开始" if ready else "待确认"
+    # A meeting is talk, not a handoff: what the AI would do from it waits for the owner's 「AI做」 (triage only suggests).
+    status="未开始" if ready and executor!="AI" else "待确认"
     progress={"未开始":"0/1 等对方" if executor=="别人" else "0/1 未开始","待确认":"0/1 待确认"}[status]
     fields={"标题":action.title,"类型":["会议待办"],"状态":[status],"执行方":[executor],"进度":progress,
             "下一步动作":action.text,"来源":["会议"],"来源链接":meta.get("source_url") or None,
@@ -344,7 +348,9 @@ def publish(config, client, state, review):
         raise MatrixError("该会议已有确定的提取版本，不自动替换后重复建事项。")
     state.set(prefix+":validated",canonical)
     coords=["--base-token",config.base_token]
-    for table,required in (("事项表",["标题","状态","原话引用","去重键"]),("会议处理记录表",["会议ID","提取状态","提取待办数"])):
+    from .itemstore import feishu_free
+    local=feishu_free(config)   # items kept on this computer: no Feishu table to check or record the meeting in
+    for table,required in [] if local else (("事项表",["标题","状态","原话引用","去重键"]),("会议处理记录表",["会议ID","提取状态","提取待办数"])):
         fields=items(client.call("+field-list",*coords,"--table-id",config.tables[table]))
         names={f.get("name",f.get("field_name")) for f in fields}
         if not set(required)<=names:
@@ -363,17 +369,28 @@ def publish(config, client, state, review):
                        detail=f"[{action.timestamp}] {action.quote}",key=prefix+":merge:"+fields["去重键"],now=datetime.now(TZ))
             merged.append(target.get("编号"))
             continue
+        handed=(getattr(config,"intake_mode","all")=="accepted" and fields["执行方"][0]!="别人"
+                and speaker_of(transcript,action.quote) not in (None,config.owner_name))
+        if handed:  # 全自动: someone else gave it to the owner in the meeting; it waits for the owner's yes
+            fields.update({"状态":["待确认"],"进度":"0/1 待确认"})
         receipt=state.once(prefix+":"+fields["去重键"],lambda f=fields:client.call("+record-batch-create",*coords,
                            "--table-id",config.tables["事项表"],"--json",js({"create_records":[f]}),write=True))
         ids=receipt.get("record_id_list")
         if not isinstance(ids,list) or len(ids)!=1:
             raise MatrixError("事项创建回执缺少唯一记录 ID，停止。")
         task_ids.extend(ids)
+        if handed:
+            from .thread import judge
+            judge(client.root,ids[0],"ask","别人在会上交给你的，等你确认接不接")
+        if rows is not None:
+            from . import itemlinks
+            itemlinks.link_by_number(client.root, rows, ids[0], action.follows)
     meta=row["metadata"]
     record={"会议ID":review.meeting_id,"标题":meta.get("topic"),"开始时间":parse_time(meta["start_time"]).isoformat(),
             "结束时间":parse_time(meta["end_time"]).isoformat(),"逐字稿状态":["已获取"],"提取状态":["已完成"],"提取待办数":len(task_ids)}
-    state.once(prefix+":meeting-record",lambda:client.call("+record-batch-create",*coords,"--table-id",config.tables["会议处理记录表"],
-                                                         "--json",js({"create_records":[record]}),write=True))
+    if not local:
+        state.once(prefix+":meeting-record",lambda:client.call("+record-batch-create",*coords,"--table-id",config.tables["会议处理记录表"],
+                                                             "--json",js({"create_records":[record]}),write=True))
     # Owner wants control: right after the meeting, one line with the new numbers.
     # A meeting with no new tasks sends nothing.
     try:
@@ -395,12 +412,19 @@ def publish(config, client, state, review):
     if dropped:  # never lose what the AI found without saying so
         from . import inbox
         inbox.add(client.root,"meeting-dropped:"+review.meeting_id,
-                  f"⚠ 会议「{meta.get('topic') or '会议'}」有内容被校验拦掉了，可能漏了待办\n"+"\n".join(dropped[:8])
-                  +"\n原话和逐字稿对不上才会被拦。要找回，把会议名发给维护心响的 AI 看一下。",kind="system")
+                  f"会议「{meta.get('topic') or '会议'}」有几条内容和录音对不上，没有采用\n"+"\n".join(dropped[:8])
+                  +"\nAI 整理出的这几条，在录音文字里找不到对应的原话，所以没有记成事项。如果确实漏了事，直接新建一条就行。",kind="system")
         activity.log(client.root,"error",f"会议「{meta.get('topic') or '会议'}」校验拦掉了 {len(dropped)} 处内容",detail="；".join(dropped),status="failed")
     try:  # 经历层: what was decided, asked, required and left waiting, with the words (and old waiting topics come back)
         from . import memory
         memory.record_meeting(client.root,review,meta)
+        from . import hymem   # 记忆增强 (when switched on): the whole outcome of the meeting, to be extracted and reconciled
+        parts=[(label,[getattr(e,"title",None) or e.text for e in entries]) for label,entries in
+               (("定了",review.decisions),("要求",review.requirements),("还没定",review.open_questions),
+                ("在等",getattr(review,"waiting",[]) or []),("要做",review.actions))]
+        text="；".join(f"{label}：" + "、".join(x for x in items if x) for label,items in parts if items)
+        if text:
+            hymem.remember(client.root,"meeting",f"{str(meta.get('start_time') or '')[:10]} 会议《{meta.get('topic') or '会议'}》{text}",ref="meeting:"+review.meeting_id)
     except Exception as exc:
         activity.log(client.root,"error","会议经历没存进记忆",detail=f"{type(exc).__name__}: {exc}"[:200],status="failed")
     return {"ok":True,"meeting_id":review.meeting_id,"task_ids":task_ids,
@@ -426,6 +450,38 @@ def numbered_line(client, state, review, config, meta, task_ids):
     parts=" / ".join(k+" "+" ".join(v) for k,v in groups.items() if v)
     first=next(v[0] for v in groups.values() if v).lstrip("#")
     return f"{meta.get('topic') or '会议'} · 新增 {total} 件：{parts}\n回复：展开 {first} 看原话"
+
+
+def backfill_meetings(root):
+    """Once: earlier meetings' extractions become history too (quietly: no recall alerts for old news)."""
+    import sqlite3
+    db = memory._db(root)
+    try:
+        if db.execute("SELECT value FROM meta WHERE key='moments-backfill-v1'").fetchone():
+            return 0
+    finally:
+        db.close()
+    count = 0
+    try:
+        st = database.read(Path(root) / "state/state.db", timeout=10)
+        queue = {mid: json.loads(meta) for mid, meta in st.execute("SELECT meeting_id, metadata FROM meeting_queue")}
+        st.close()
+    except sqlite3.Error:
+        queue = {}
+    for path in sorted((Path(root) / "state/meeting-transcripts").glob("*/review.json")):
+        mid = path.parent.name
+        try:
+            review = Review.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        count += len(memory.record_meeting(root, review, {**queue.get(mid, {}), "meeting_id": mid}, announce=False))
+    db = memory._db(root)
+    try:
+        with db:
+            db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('moments-backfill-v1', ?)", (memory._now(),))
+    finally:
+        db.close()
+    return count
 
 
 def main(argv=None):

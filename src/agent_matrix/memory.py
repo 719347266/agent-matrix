@@ -12,8 +12,10 @@ this is the context around them. Matching is cheap code (character-pair similari
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 
-from .merge import similarity
+from . import db as database
+from .textmatch import similarity
 from .timeutil import TZ
 
 KIND_LABEL = {"decision": "定了", "requirement": "需求", "open_question": "还没定", "waiting": "等条件再定", "action": "要做"}
@@ -21,18 +23,7 @@ RECALL_MIN = 0.34
 
 
 def _db(root):
-    from .thread import _db as base
-    db = base(root)
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS moments (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, source_id TEXT NOT NULL,
-            source_title TEXT, at TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, quote TEXT, stamp TEXT,
-            wait_for TEXT, due TEXT, status TEXT NOT NULL DEFAULT 'open', created TEXT NOT NULL,
-            UNIQUE(source, source_id, kind, text));
-        CREATE TABLE IF NOT EXISTS preferences (id INTEGER PRIMARY KEY AUTOINCREMENT, rule TEXT NOT NULL UNIQUE, why TEXT,
-            source TEXT, created TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
-        CREATE TABLE IF NOT EXISTS recalls (waiting_id INTEGER NOT NULL, source_id TEXT NOT NULL, PRIMARY KEY (waiting_id, source_id));
-    """)
-    return db
+    return database.open(root, "xinxiang")
 
 
 def _now():
@@ -59,37 +50,6 @@ def record_meeting(root, review, meta, announce=True):
     return new
 
 
-def backfill_meetings(root):
-    """Once: earlier meetings' extractions become history too (quietly: no recall alerts for old news)."""
-    import sqlite3
-    from .meeting_review import Review
-    db = _db(root)
-    try:
-        if db.execute("SELECT value FROM meta WHERE key='moments-backfill-v1'").fetchone():
-            return 0
-    finally:
-        db.close()
-    count = 0
-    try:
-        st = sqlite3.connect(f"file:{Path(root) / 'state/state.db'}?mode=ro", uri=True, timeout=10)
-        queue = {mid: json.loads(meta) for mid, meta in st.execute("SELECT meeting_id, metadata FROM meeting_queue")}
-        st.close()
-    except sqlite3.Error:
-        queue = {}
-    for path in sorted((Path(root) / "state/meeting-transcripts").glob("*/review.json")):
-        mid = path.parent.name
-        try:
-            review = Review.model_validate_json(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        count += len(record_meeting(root, review, {**queue.get(mid, {}), "meeting_id": mid}, announce=False))
-    db = _db(root)
-    try:
-        with db:
-            db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('moments-backfill-v1', ?)", (_now(),))
-    finally:
-        db.close()
-    return count
 
 
 def _insert(root, source, source_id, title, at, rows):
@@ -132,7 +92,7 @@ def recall(root, topic, *, limit=5, exclude_source_id=None, kinds=("decision", "
     """Moments about the same topic, best match first (ties: most recent). Cheap; no model call."""
     scored = []
     for m in moments(root, limit=800):
-        if m["kind"] not in kinds or (exclude_source_id and m["source_id"] == exclude_source_id):
+        if m["kind"] not in kinds or m["status"] == "stale" or (exclude_source_id and m["source_id"] == exclude_source_id):
             continue
         s = max(similarity(topic, m["text"]), similarity(m["text"], topic))
         if s >= RECALL_MIN:
@@ -207,6 +167,9 @@ SEED_RULES = [
 ]
 
 
+OWNER_SOURCES = ("seed", "本人")
+
+
 def rules(root):
     db = _db(root)
     try:
@@ -214,22 +177,113 @@ def rules(root):
             with db:
                 for rule, why in SEED_RULES:
                     db.execute("INSERT OR IGNORE INTO preferences (rule, why, source, created) VALUES (?,?,?,?)", (rule, why, "seed", _now()))
-        return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " ")}
-                for i, r, w, s, c in db.execute("SELECT id, rule, why, source, created FROM preferences WHERE active=1 ORDER BY id")]
+        names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
+        return [{"id": i, "rule": r, "why": w, "source": s, "created": c[5:16].replace("T", " "),
+                 "fresh": s not in OWNER_SOURCES and not ok,   # learned by the AI, the owner has not said it is right yet
+                 "scope": sc or "", "scope_name": scope_name(sc, names), "wins": wn or 0, "losses": ls or 0, "trigger": tg or ""}
+                for i, r, w, s, c, ok, sc, wn, ls, tg in db.execute(
+                    "SELECT id, rule, why, source, created, confirmed, scope, wins, losses, trigger FROM preferences WHERE active=1 ORDER BY id")]
     finally:
         db.close()
 
 
-def add_rule(root, rule, why="", source="本人"):
+def scope_name(scope, names=None):
+    """"" → 全部；"project:3" → 项目「示例 2.0」；"type:方案" → 做「方案」时."""
+    scope = str(scope or "")
+    if scope.startswith("project:"):
+        name = (names or {}).get(int(scope[8:]) if scope[8:].isdigit() else -1)
+        return f"项目「{name}」" if name else "某个项目"
+    if scope.startswith("type:"):
+        return f"做「{scope[5:]}」时"
+    return "全部"
+
+
+def clean_trigger(text):
+    """"发 PR 时" → "发 PR": the action alone, short, so the same action from different rounds groups together."""
+    text = " ".join(str(text or "").split())
+    return re.sub(r"(的)?(时候|时|前|后)$", "", text).strip()[:20]
+
+
+def insert_rule(db, rule, why, source, scope, trigger=""):
     rule = " ".join(str(rule or "").split())[:120]
     if not rule:
         return None
+    conflict = ("DO NOTHING" if source == "AI 学的" else
+                "DO UPDATE SET active=1, why=excluded.why, scope=excluded.scope, trigger=excluded.trigger")
+    added = db.execute("INSERT INTO preferences (rule, why, source, created, scope, trigger) VALUES (?,?,?,?,?,?) "
+                       "ON CONFLICT(rule) " + conflict, (rule, str(why)[:200], source, _now(), str(scope or "")[:80], clean_trigger(trigger)))
+    return rule if added.rowcount else None
+
+
+def add_rule(root, rule, why="", source="本人", scope="", trigger=""):
     db = _db(root)
     try:
         with db:
-            db.execute("INSERT INTO preferences (rule, why, source, created) VALUES (?,?,?,?) "
-                       "ON CONFLICT(rule) DO UPDATE SET active=1, why=excluded.why", (rule, str(why)[:200], source, _now()))
-        return rule
+            return insert_rule(db, rule, why, source, scope, trigger)
+    finally:
+        db.close()
+
+
+def set_trigger(root, rule_id, trigger):
+    db = _db(root)
+    try:
+        with db:
+            db.execute("UPDATE preferences SET trigger=? WHERE id=?", (clean_trigger(trigger), int(rule_id)))
+    finally:
+        db.close()
+
+
+def credit(root, rule_id, won):
+    """A deliverable that followed this rule passed (won) or came back for breaking it / despite it (lost)."""
+    db = _db(root)
+    try:
+        with db:
+            db.execute(f"UPDATE preferences SET {'wins' if won else 'losses'}={'wins' if won else 'losses'}+1 WHERE id=?", (int(rule_id),))
+    finally:
+        db.close()
+
+
+# ---- 评审结果: every verdict on a deliverable is kept, so the AI learns what passes -----------------------------
+
+def record_outcome(root, record_id, verdict, reason=""):
+    """verdict: "通过" / "退回" / "要改". Kept with the deliverable version, its kind, its project and the memories
+    (经验库) the AI said it read and followed, so a later round can see which ones helped and which were missed."""
+    work = Path(root) / "state" / "work" / record_id
+    try:
+        result = json.loads((work / "结果.json").read_text(encoding="utf-8"))
+        template = result.get("template") or ""
+        used = [str(x)[:80] for x in result.get("memory") or [] if isinstance(x, str)][:20]
+    except (OSError, ValueError, AttributeError, TypeError):
+        template, used = "", []
+    db = _db(root)
+    try:
+        version = (db.execute("SELECT max(version) FROM deliverables WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
+        project = (db.execute("SELECT project_id FROM item_projects WHERE record_id=?", (record_id,)).fetchone() or [None])[0]
+        with db:
+            db.execute("INSERT INTO outcomes (record_id, at, verdict, reason, version, template, project_id, rules) VALUES (?,?,?,?,?,?,?,?)",
+                       (record_id, _now(), verdict, str(reason or "")[:500], version, str(template)[:20], project, json.dumps(used)))
+    finally:
+        db.close()
+
+
+def outcomes(root, since=""):
+    db = _db(root)
+    try:
+        names = {pid: name for pid, name in db.execute("SELECT id, name FROM projects")}
+        return [{"id": oid, "record_id": r, "at": a[5:16].replace("T", " "), "verdict": v, "reason": why or "", "version": ver,
+                 "template": t or "", "project": names.get(p, ""), "memory": json.loads(used) if used else None}
+                for oid, r, a, v, why, ver, t, p, used in db.execute(
+                    "SELECT id, record_id, at, verdict, reason, version, template, project_id, rules FROM outcomes WHERE at>? ORDER BY id",
+                    (since,))]
+    finally:
+        db.close()
+
+
+def confirm_rule(root, rule_id):
+    db = _db(root)
+    try:
+        with db:
+            db.execute("UPDATE preferences SET confirmed=1 WHERE id=?", (int(rule_id),))
     finally:
         db.close()
 
@@ -243,7 +297,113 @@ def remove_rule(root, rule_id):
         db.close()
 
 
-def rules_text(root):
-    """The block every AI gets on top of its instructions."""
-    lines = [f"- {r['rule']}" for r in rules(root)]
-    return ("## 本人的规矩（先读，必须遵守；和下面的说明冲突时以这里为准）\n" + "\n".join(lines) + "\n\n") if lines else ""
+# ---- 关于你: who the owner is, what they do, how they like work done -----------------------------------------
+# One plain Markdown file the owner can read and edit (state/profile.md). Every AI reads it before any work, so a
+# deliverable fits the owner's job, products, people and habits instead of a generic answer.
+
+PROFILE_MAX = 6000
+
+
+def _profile_path(root):
+    return Path(root) / "state" / "profile.md"
+
+
+def profile(root):
+    path = _profile_path(root)
+    if not path.is_file():
+        return {"text": "", "at": ""}
+    modified = datetime.fromtimestamp(path.stat().st_mtime, TZ)
+    return {"text": path.read_text(encoding="utf-8"), "at": modified.strftime("%m-%d %H:%M"), "modified": modified.isoformat(timespec="seconds")}
+
+
+def set_profile(root, text, *, expected=None):
+    from .state import exclusive_lock
+    from tempfile import NamedTemporaryFile
+    text = str(text or "").strip()[:PROFILE_MAX]
+    path = _profile_path(root)
+    with exclusive_lock(path.parent / "profile-write", wait=10):
+        current = profile(root)
+        if expected is not None and current["text"].strip() != expected:
+            raise ValueError("「关于你」已被编辑，请重新核对这处改动")
+        if current["text"].strip() == text:
+            return current
+        if text:
+            with NamedTemporaryFile(dir=path.parent, mode="w", encoding="utf-8", delete=False) as tmp:
+                tmp.write(text + "\n")
+            Path(tmp.name).replace(path)
+        else:
+            path.unlink(missing_ok=True)
+        return profile(root)
+
+
+def profile_text(root):
+    """The block every AI gets on top of its instructions, right after the rules."""
+    text = profile(root)["text"].strip()
+    return ("## 本人是谁、在做什么（先读：按他的岗位、产品和习惯来做，用他的说法，交付要能直接拿去用）\n"
+            + text + "\n\n") if text else ""
+
+
+# ---- 让 AI 认识我: the owner ticks where the AI may look, the AI writes a draft, the owner decides ----------------
+
+SCAN_SOURCES = {"feishu": "飞书近 30 天", "folders": "本机项目文件夹", "wechat": "微信近期聊天", "ai_memory": "Cindy/Claude 记忆"}
+
+
+def _scan_path(root):
+    return Path(root) / "state" / "profile_scan.json"
+
+
+def _draft_path(root):
+    return Path(root) / "state" / "profile_draft.md"
+
+
+def ask_scan(root, sources):
+    sources = [s for s in sources if s in SCAN_SOURCES]
+    if not sources:
+        raise ValueError("至少选一个地方")
+    pending = scan_asked(root)
+    if pending and set(pending.get("sources", [])) == set(sources):
+        return
+    if draft(root) and not profile(root)["text"].strip():
+        return
+    path = _scan_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"sources": sources, "at": datetime.now(TZ).isoformat()}, ensure_ascii=False), encoding="utf-8")
+
+
+def scan_asked(root):
+    try:
+        return json.loads(_scan_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def cancel_scan(root):
+    _scan_path(root).unlink(missing_ok=True)
+
+
+def save_draft(root, text, by=""):
+    path = _draft_path(root)
+    path.write_text(str(text).strip() + "\n", encoding="utf-8")
+    (path.with_suffix(".json")).write_text(json.dumps({"by": by, "at": datetime.now(TZ).strftime("%m-%d %H:%M")}, ensure_ascii=False), encoding="utf-8")
+    cancel_scan(root)
+
+
+def draft(root):
+    path = _draft_path(root)
+    if not path.is_file():
+        return None
+    try:
+        meta = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    return {"text": path.read_text(encoding="utf-8"), **meta}
+
+
+def drop_draft(root, use=False):
+    """The owner decided: use the draft as 关于你 (use=True), or throw it away."""
+    d = draft(root)
+    if d and use:
+        set_profile(root, d["text"], expected="")
+    _draft_path(root).unlink(missing_ok=True)
+    _draft_path(root).with_suffix(".json").unlink(missing_ok=True)
+    return profile(root)

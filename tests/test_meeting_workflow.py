@@ -120,6 +120,8 @@ class MeetingWorkflowTests(unittest.TestCase):
         _,review=self.make_review()
         action=review.actions[0]
         self.assertEqual(task_fields(action,self.config,self.meta)["状态"],["未开始"])
+        # What the AI would do from a meeting waits for the owner's 「AI做」, even with an owner and a date.
+        self.assertEqual(task_fields(action.model_copy(update={"executor":"AI"}),self.config,self.meta)["状态"],["待确认"])
         for changes in ({"owner_name":None},{"due_date":None}):
             fields=task_fields(action.model_copy(update=changes),self.config,self.meta)
             self.assertEqual(fields["状态"],["待确认"])
@@ -204,3 +206,127 @@ class MeetingWorkflowTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+class SearchIntervalTests(unittest.TestCase):
+    """How often Feishu is searched for finished meetings: 30 min with live meeting pushes, 5 min without."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = State(Path(self.tmp.name) / "state.db")
+        self.addCleanup(self.state.close)
+        self.queue = MeetingQueue(self.state)
+        self.now = datetime(2026, 11, 19, 17, 0, tzinfo=TZ)
+        self.state.set("listen:heartbeat", (self.now - timedelta(seconds=30)).isoformat())
+
+    def due(self, minutes_since_search, status):
+        from agent_matrix.meeting_watch import _search_due
+        self.state.set("meeting_watch:last_search", (self.now - timedelta(minutes=minutes_since_search)).isoformat())
+        self.state.set("listen:status", status)
+        return _search_due(self.queue, self.now)
+
+    def test_without_meeting_pushes_search_every_five_minutes(self):
+        status = {"vc.meeting.participant_meeting_ended_v1": "not_subscribed", "vc.note.generated_v1": "not_subscribed",
+                  "im.message.receive_v1": "live"}
+        self.assertFalse(self.due(4, status))
+        self.assertTrue(self.due(5, status))
+
+    def test_one_meeting_push_missing_still_means_five_minutes(self):
+        status = {"vc.meeting.participant_meeting_ended_v1": "live", "vc.note.generated_v1": "error 1"}
+        self.assertTrue(self.due(6, status))
+
+    def test_with_both_meeting_pushes_live_search_every_thirty_minutes(self):
+        status = {"vc.meeting.participant_meeting_ended_v1": "live", "vc.note.generated_v1": "live"}
+        self.assertFalse(self.due(29, status))
+        self.assertTrue(self.due(30, status))
+
+    def test_listener_down_or_first_run_searches_every_time(self):
+        from agent_matrix.meeting_watch import _search_due
+        self.assertTrue(_search_due(self.queue, self.now))  # never searched yet
+        self.state.set("meeting_watch:last_search", self.now.isoformat())
+        self.state.set("listen:heartbeat", (self.now - timedelta(minutes=10)).isoformat())
+        self.assertTrue(_search_due(self.queue, self.now))
+
+
+class ListenerMeetingCheckTests(unittest.TestCase):
+    """The listener's minute job looks for finished meetings itself instead of waiting for the AI employee."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        from agent_matrix import listen
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        (root / "state").mkdir()
+        self.state = State(root / "state/state.db")
+        self.addCleanup(self.state.close)
+        self.listener = listen.Listener(root / "config.yaml")
+        self.config = Config(meeting_watch_enabled=True, meeting_watch_started_at="2026-11-19T00:00:00+08:00")
+        self.now = datetime(2026, 11, 19, 17, 0, tzinfo=TZ)
+        self.kicks = []
+        self.listener.wake_worker = lambda config, force=False: self.kicks.append(force)
+        self.patch = patch
+
+    def run_check(self, effect):
+        def fake_check(config, source, queue, now):
+            effect(queue)
+            return {"ok": True}
+        with self.patch("agent_matrix.meeting_watch.check", fake_check):
+            return self.listener.meeting_check(self.config, None, self.state, self.now)
+
+    def meta(self, mid):
+        return {"meeting_id": mid, "topic": "周会", "start_time": "2026-11-19T16:00:00+08:00", "end_time": "2026-11-19T16:50:00+08:00"}
+
+    def test_nothing_new_stays_quiet_and_does_not_wake_the_ai(self):
+        self.assertEqual(self.run_check(lambda q: None), [])
+        self.assertEqual(self.kicks, [])
+
+    def test_a_meeting_that_just_became_ready_wakes_the_ai_once(self):
+        mid = "7000000000000000001"
+        self.assertEqual(self.run_check(lambda q: (q.put(self.meta(mid), self.now), q.update(mid, status="ready"))), [mid])
+        self.assertEqual(self.kicks, [True])
+        self.assertEqual(self.run_check(lambda q: None), [])  # still ready next minute: no second wake-up
+        self.assertEqual(self.kicks, [True])
+
+    def test_a_meeting_the_owner_cannot_read_wakes_nobody_says_so_once_and_is_tried_again_in_minutes(self):
+        from agent_matrix.feishu import FeishuError
+        mid = "7000000000000000003"
+        said = []
+        class Client:
+            root = Path(self.tmp.name)
+            def send_self(self, text, key):
+                said.append(text)
+                return {"message_id": "local_1"}
+        def refuse(*_args, **_kwargs):
+            raise FeishuError("no_permission", detail="No read permission for minute x")
+        config = self.config.model_copy(update={"transcripts_to_llm_allowed": True, "llm_backend": "cindy_current"})
+        meta = {**self.meta(mid), "end_time": "2026-11-19 16:50"}
+        def fake_check(config, source, queue, now):
+            if not queue.get(mid):
+                queue.put(meta, now)
+                queue.update(mid, status="ready", next_check=now.isoformat())
+        with self.patch("agent_matrix.meeting_watch.check", fake_check), self.patch("agent_matrix.meeting_watch.prepare", refuse):
+            self.assertEqual(self.listener.meeting_check(config, Client(), self.state, self.now), [])
+            self.assertEqual(self.kicks, [])                                   # no transcript: no AI woken
+            row = MeetingQueue(self.state).get(mid)
+            self.assertEqual(row["status"], "waiting_transcript")
+            self.assertEqual(row["next_check"], (self.now + timedelta(minutes=5)).isoformat())
+            MeetingQueue(self.state).update(mid, status="ready", next_check=self.now.isoformat())
+            self.listener.meeting_check(config, Client(), self.state, self.now)
+        self.assertEqual(len(said), 1)                                         # told once, not every 5 minutes
+        self.assertIn("没有查看权限", said[0])
+
+    def test_a_meeting_still_waiting_for_its_transcript_does_not_wake_the_ai(self):
+        mid = "7000000000000000002"
+        self.assertEqual(self.run_check(lambda q: (q.put(self.meta(mid), self.now), q.update(mid, status="waiting_transcript"))), [])
+        self.assertEqual(self.kicks, [])
+
+    def test_a_failing_check_is_recorded_and_does_not_raise(self):
+        def broken(queue):
+            raise MatrixError("飞书暂时不可用")
+        self.assertIsNone(self.run_check(broken))
+
+    def test_switched_off_does_nothing(self):
+        self.config.meeting_watch_enabled = False
+        self.assertIsNone(self.run_check(lambda q: self.fail("should not run")))

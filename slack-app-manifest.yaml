@@ -1,0 +1,42 @@
+# Slack App manifest for 心响: reading chats (user token) + 开发模式 phone approvals (bot + Socket Mode).
+# api.slack.com/apps → Create New App → From a manifest → paste this → Install to Workspace.
+# Then copy into 心响「工具」页:
+#   User OAuth Token (xoxp-)      → Slack「连接」
+#   Bot User OAuth Token (xoxb-)  → 手机批准
+#   Basic Information → App-Level Tokens → Generate (scope connections:write) (xapp-) → 手机批准
+# Socket Mode means Slack pushes button taps over an outgoing websocket: nothing on this computer is exposed.
+display_information:
+  name: 心响
+features:
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false   # the owner types replies here
+  bot_user:
+    display_name: 心响
+    always_online: true
+oauth_config:
+  scopes:
+    user:
+      - search:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - channels:read
+      - groups:read
+      - im:read
+      - mpim:read
+      - users:read
+    bot:
+      - chat:write
+      - im:write
+      - im:history
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.im
+  interactivity:
+    is_enabled: true
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

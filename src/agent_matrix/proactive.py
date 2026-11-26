@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import sqlite3
 
+from . import db as database
 from .timeutil import TZ
 
 HEADLINE = {"done": "AI 做完了，等你验收", "blocked": "AI 卡住了，要问你一句", "new": "新进来的事，等你定谁来做",
@@ -57,7 +58,7 @@ def alert_of(message):
 
 def _agenda(root):
     try:
-        db = sqlite3.connect(f"file:{Path(root) / 'state/state.db'}?mode=ro", uri=True, timeout=5)
+        db = database.read(Path(root) / "state/state.db")
         row = db.execute("SELECT value FROM kv WHERE key='meeting_agenda_snapshot'").fetchone()
         db.close()
         return json.loads(row[0]).get("events", []) if row else []
@@ -130,7 +131,7 @@ def focus(need):
 def ai_line(root):
     """One line: who is doing what right now (any driver), or that the AI is free."""
     try:
-        from .drive import open_jobs
+        from .jobstore import open_jobs
         jobs = open_jobs(root)
     except Exception:
         jobs = []

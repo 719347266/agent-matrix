@@ -92,7 +92,7 @@ def build(config, rows, events, target, edition, *, previous=None, catchup=False
                 elif late==-1: tags.append('明天到期')
             if count>=2: tags.append(f'⚠顺延{count}次')
         url=r.get('交付物链接')
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         url=_draft_url(url)
         suffix=f' [打开]({url})' if st=='待验收' and url else ''
         if ex=='我' and r.get('能否AI预做') and st in {'未开始','进行中'}:
@@ -112,10 +112,9 @@ def build(config, rows, events, target, edition, *, previous=None, catchup=False
         groups.append(('',[(short(notice['text'],65),[],key)]))
     board=board_url or config.base_url
     lines=[head]; included=set();included_notices=[]
-    sample=next((number(r['编号']) for r in review),None) or next((number(r['编号']) for r in active),12)
-    def footer(ids):
+    def footer(ids):  # read-only: acting happens in 心响, not by replying
         rest=len(active)-len(ids)
-        return (f'其余{rest}件 · ' if rest else '')+f'[看板]({board}) · 回复：{sample} 过 / {sample} 退 意见'
+        return (f'其余{rest}件 · ' if rest else '')+f'[看板]({board})'
     # Keep a footer reserved throughout; sections share the same line/character budget.
     for label, entries in groups:
         heading_added=False
@@ -181,8 +180,9 @@ def run(config, client, state, *, edition='morning', target_date=None, preview=F
     result['card']=build_card(config,rows,events,target,edition,catchup=result['text'].count('补发')>0,
                               rolls=rolls,board_url=state.get('brief-v1:board-url'))
     if preview:return result
-    # The 08:30 / 21:00 briefs are the only messages still sent on Feishu (a copy also lands in the local inbox).
-    receipt=deliver_card(client,state,key,result['card'],channel='feishu')
+        # The briefs go to Feishu only when the owner wants them there and Feishu is connected; they are always in the inbox.
+    on_feishu=getattr(config,'brief_channel','feishu')=='feishu' and not client.feishu_free()
+    receipt=deliver_card(client,state,key,result['card'],channel='feishu' if on_feishu else 'local')
     state.set('brief-v1:last-ai',result['ai_signatures'])
     for k in result['included_notices']:
         notice=state.get(k);notice['delivered']=message_id(receipt);state.set(k,notice)
@@ -223,8 +223,10 @@ def _clean_summary(value, limit=30):
 
 
 def describe(r, target, by_number):
-    """Plain words for one item: (bold line, grey hint, hint colour, url-to-open)."""
-    from .prework import _draft_url
+    """Plain words for one item: (bold line, grey hint, hint colour, url-to-open).
+
+    Read-only: the hint says where the item stands, never what to reply. Acting happens in 心响."""
+    from .values import draft_url as _draft_url
     n = number(r['编号']); st = single(r['状态']); ex = single(r.get('执行方'))
     title = short(r.get('标题'), 22)
     due = day(r.get('截止日'))
@@ -237,27 +239,27 @@ def describe(r, target, by_number):
     hint = when
     if st == '待确认':
         if not ex:
-            hint, color = f'谁来做？回「{n} 我来」「{n} AI做」或「{n} 给某人」', 'grey'
+            hint, color = '还没定谁来做', 'grey'
         elif not r.get('截止日'):
-            hint, color = f'什么时候做完？回「{n} 周五」，不做回「{n} 不做」', 'grey'
+            hint, color = '还没定什么时候做完', 'grey'
         else:
-            hint, color = f'要做吗？回「{n} 我来」或「{n} 不做」', 'grey'
+            hint, color = '还没定要不要做', 'grey'
     elif st == '卡住':
         blocker = str(r.get('卡点') or '')
         wait = re.search(r'#(\d+)', blocker)
         if wait and ex == '我':
             m = int(wait.group(1))
-            hint = f'AI 已备好 #{m}，先看一眼，没问题回「{m} 过」就能开始' + (f' · {when}' if when else '')
+            hint = f'等你先看 AI 备好的 #{m}' + (f' · {when}' if when else '')
         elif ex == 'AI':
-            hint, color = f'AI 卡住：{short(blocker, 18)}，补材料回「{n} + 材料」', 'orange'
+            hint, color = f'AI 卡住：{short(blocker, 18)}，等你补材料', 'orange'
         else:
             hint = f'卡住：{short(blocker, 20)}' + (f' · {when}' if when else '')
     elif st == '待验收':
-        hint, color = _clean_summary(r.get('预做结果摘要')) or '点打开看看，没问题回「过」', 'grey'
+        hint, color = _clean_summary(r.get('预做结果摘要')) or 'AI 做好了，等你看', 'grey'
     elif ex == 'AI':
         hint, color = 'AI 在做 · ' + short(r.get('进度'), 15), 'grey'
     elif ex == '我' and r.get('能否AI预做') and st in {'未开始', '进行中'}:
-        hint = (when + ' · ' if when else '') + f'AI 可以先帮你备材料，回「{n} AI备」'
+        hint = (when + ' · ' if when else '') + 'AI 可以先帮你备材料'
     count = int(r.get('顺延次数') or 0)
     if count >= 2 and st not in {'完成', '取消', '待验收'}:
         hint += f' · 已顺延 {count} 次'
@@ -290,6 +292,19 @@ def _row_item(r_line, button_url=None, cmd=None, cmd_label=None):
          'horizontal_spacing': '4px', 'elements': buttons}]}
 
 
+def _read_row(r_line, url=None):
+    """A read-only row for the briefs: bold title, grey hint and, for a document, a plain link (no buttons)."""
+    head, hint, color, _ = r_line
+    note = f"<font color='{color}'>{hint}</font>" if hint else ''
+    if url:
+        note += (' · ' if note else '') + f'[打开文档]({url})'
+    text = [{'tag': 'markdown', 'content': f'**{head}**'}]
+    if note:
+        text.append({'tag': 'markdown', 'content': note, 'text_size': 'notation'})
+    return {'tag': 'column_set', 'flex_mode': 'none', 'columns': [
+        {'tag': 'column', 'width': 'weighted', 'weight': 1, 'vertical_spacing': '2px', 'elements': text}]}
+
+
 def _block(title, color, items, more=0, *, fill=None):
     elements = [{'tag': 'markdown', 'content': f"**<font color='{color}'>{title}</font>**"}, *items]
     if more:
@@ -301,14 +316,13 @@ def _block(title, color, items, more=0, *, fill=None):
     return block
 
 
+FOOTER_ID = 'footer'  # the closing note is for the Feishu reader; the 心响 inbox copy leaves it out
+
+
 def card(header, subtitle, template, blocks, footer_hint, board_url, *, tag=None, summary=''):
-    footer = [{'tag': 'column_set', 'flex_mode': 'none', 'columns': [
-        {'tag': 'column', 'width': 'weighted', 'weight': 4, 'vertical_align': 'center', 'elements': [
-            {'tag': 'markdown', 'content': f"<font color='grey'>{footer_hint}</font>", 'text_size': 'notation'}]},
-        {'tag': 'column', 'width': 'auto', 'vertical_align': 'center', 'elements': [
-            {'tag': 'button', 'text': {'tag': 'plain_text', 'content': '打开看板'}, 'type': 'default', 'size': 'small',
-             'behaviors': [{'type': 'open_url', 'default_url': board_url}]}]}]}] if board_url else [
-        {'tag': 'markdown', 'content': f"<font color='grey'>{footer_hint}</font>", 'text_size': 'notation'}]
+    note = ' · '.join(x for x in [f"<font color='grey'>{footer_hint}</font>" if footer_hint else '',
+                                  f'[看板]({board_url})' if board_url else ''] if x)
+    footer = [{'tag': 'markdown', 'element_id': FOOTER_ID, 'content': note, 'text_size': 'notation'}] if note else []
     head = {'title': {'tag': 'plain_text', 'content': header}, 'template': template,
             'icon': {'tag': 'standard_icon', 'token': 'todo_colorful'}}
     if subtitle:
@@ -320,7 +334,8 @@ def card(header, subtitle, template, blocks, footer_hint, board_url, *, tag=None
                                      'vertical_spacing': '12px', 'elements': [*blocks, *footer]}}
 
 
-REPLY_HINT = '回复「编号 + 动作」就行：{n} 过 · {n} 退 要改的地方 · {n} 周五（改日期）· 展开 {n}（看详情）'
+# Feishu only carries the report; every action is a button in 心响 (this brief is in its inbox too).
+READ_ONLY_HINT = '只读 · 要处理的事在心响收件箱里点开这份简报'
 
 
 def build_card(config, rows, events, target, edition, *, catchup=False, rolls=(), board_url=None):
@@ -342,8 +357,8 @@ def build_card(config, rows, events, target, edition, *, catchup=False, rolls=()
     done_today = [r for r in rows if visible(r) and st(r) == '完成' and day(r.get('完成时间')) == today]
     blocks = []
     if rolls:
-        items = [_row_item((f"#{x['number']} {short(by_number.get(x['number'], {}).get('标题'), 22)}",
-                        f"{x['from'][5:]} → {x['to'][5:]} · 第 {x['count']} 次顺延" + (f"，要改计划吗？回「{x['number']} 下周一」或「{x['number']} 不做」" if x['count'] >= 2 else ''),
+        items = [_read_row((f"#{x['number']} {short(by_number.get(x['number'], {}).get('标题'), 22)}",
+                        f"{x['from'][5:]} → {x['to'][5:]} · 第 {x['count']} 次顺延" + ('，该改计划了' if x['count'] >= 2 else ''),
                         'red' if x['count'] >= 2 else 'grey', None)) for x in rolls[:4]]
         blocks.append(_block('今天没做完，已顺延到明天', 'grey', items, max(0, len(rolls) - 4)))
     if cal['accepted']:
@@ -351,22 +366,21 @@ def build_card(config, rows, events, target, edition, *, catchup=False, rolls=()
         more = len(cal['accepted']) - 4
         blocks.append(_block(('明天' if edition == 'evening' else '今天') + f"的会 · {len(cal['accepted'])} 场", 'grey',
                              [{'tag': 'markdown', 'content': lines + (f"\n<font color='grey'>还有 {more} 场</font>" if more > 0 else '')}]))
+    def row(r):
+        line = describe(r, target, by_number)
+        return _read_row(line, line[3])
     if mine:
         blocks.append(_block(('明天你要做' if edition == 'evening' else '今天你要做') + f' · {len(mine)} 件', 'blue',
-                             [_row_item(describe(r, target, by_number), None if st(r) == '卡住' else describe(r, target, by_number)[3],
-                                        cmd=None if st(r) == '卡住' else f"{number(r['编号'])} 完成", cmd_label='完成')
-                              for r in mine[:4]], max(0, len(mine) - 4), fill='blue-50'))
+                             [row(r) for r in mine[:4]], max(0, len(mine) - 4), fill='blue-50'))
     if review:
         blocks.append(_block(f'AI 做好了，等你看 · {len(review)} 件', 'blue',
-                             [_row_item(describe(r, target, by_number), describe(r, target, by_number)[3],
-                                        cmd=f"{number(r['编号'])} 过", cmd_label='通过') for r in review[:5]],
-                             max(0, len(review) - 5)))
+                             [row(r) for r in review[:5]], max(0, len(review) - 5)))
     if decide:
         blocks.append(_block(f'需要你定 · {len(decide)} 件', 'violet',
-                             [_row_item(describe(r, target, by_number)) for r in decide[:3]], max(0, len(decide) - 3)))
+                             [row(r) for r in decide[:3]], max(0, len(decide) - 3)))
     if ai and len(blocks) < 5:
         blocks.append(_block(f'AI 正在做 · {len(ai)} 件', 'grey',
-                             [_row_item(describe(r, target, by_number)) for r in ai[:3]], max(0, len(ai) - 3)))
+                             [row(r) for r in ai[:3]], max(0, len(ai) - 3)))
     weekday = '一二三四五六日'[target.weekday()]
     if edition == 'evening':
         header = f'明天 {target:%m/%d} 周{weekday} · 计划'
@@ -376,7 +390,6 @@ def build_card(config, rows, events, target, edition, *, catchup=False, rolls=()
         subtitle = f'{len(cal["accepted"])} 场会 · 你要做 {len(mine)} 件 · 等你看 {len(review)} 件'
     if not blocks:
         blocks.append({'tag': 'markdown', 'content': ('明天' if edition == 'evening' else '今天') + '没有要做和要验收的事。'})
-    sample = next((number(r['编号']) for r in review), None) or next((number(r['编号']) for r in active), 12)
     summary = f"{header}：你要做 {len(mine)} 件，等你看 {len(review)} 件"
-    return card(header, subtitle, 'indigo' if edition == 'evening' else 'blue', blocks, REPLY_HINT.format(n=sample),
+    return card(header, subtitle, 'indigo' if edition == 'evening' else 'blue', blocks, READ_ONLY_HINT,
                 board_url or config.base_url, tag='补发' if catchup else None, summary=summary)

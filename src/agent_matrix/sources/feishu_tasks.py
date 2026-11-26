@@ -7,6 +7,7 @@
 """
 from datetime import datetime, timedelta
 
+from .. import activity
 from ..brief_migration import number, single
 from ..models import MatrixError
 
@@ -16,10 +17,25 @@ FIRST_IMPORT_DAYS = 14
 def _list(client, *, complete, since):
     data = client._exec(["task", "+get-my-tasks", "--complete=" + ("true" if complete else "false"),
                          "--created_at", since.strftime("%Y-%m-%d"), "--page-all", "--as", "user", "--format", "json"])
-    items = data.get("items") if isinstance(data, dict) else data
-    if not isinstance(items, list):
-        raise MatrixError("飞书任务列表结构异常，本轮不同步。")
-    return items
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        raise MatrixError(f"飞书任务列表结构异常（{type(data).__name__}），本轮不同步。")
+    for key in ("items", "tasks", "data"):   # the CLI's versions name the list differently
+        if isinstance(data.get(key), list):
+            return data[key]
+        if isinstance(data.get(key), dict):
+            return _items(data[key])
+    if not any(isinstance(v, list) for v in data.values()):
+        return []   # nothing at all: no tasks (an empty answer leaves the list out)
+    raise MatrixError(f"飞书任务列表结构异常（{'、'.join(sorted(data))[:80]}），本轮不同步。")
+
+
+def _items(inner):
+    for key in ("items", "tasks"):
+        if isinstance(inner.get(key), list):
+            return inner[key]
+    return []
 
 
 def _assigned_to(task, owner):
@@ -47,7 +63,8 @@ def fields_for(task, config, tz):
 
 def sync(config, client, state, now, *, notify=True):
     from ..workflow import Gateway, ensure_options
-    if not state.get("v1:source-options"):
+    from ..itemstore import feishu_free
+    if not state.get("v1:source-options") and not feishu_free(config):  # items kept here already carry every option
         ensure_options(client, state, "来源", ["飞书任务", "聊天"])
         state.set("v1:source-options", True)
     started = state.get("feishu-tasks:started")
@@ -79,8 +96,15 @@ def sync(config, client, state, now, *, notify=True):
                        key="feishu-task-merge:" + task["guid"], now=now)
             merged.append(target.get("编号"))
             continue
-        receipt = gateway.create(fields_for(task, config, now.tzinfo), key, "feishu-task")
+        fields = fields_for(task, config, now.tzinfo)
+        waits = getattr(config, "intake_mode", "all") == "accepted"
+        if waits:  # 全自动: a task someone assigned waits for the owner's yes before it counts
+            fields.update({"状态": ["待确认"], "进度": "0/1 待确认"})
+        receipt = gateway.create(fields, key, "feishu-task")
         created.append(receipt["record_id_list"][0])
+        if waits:
+            from ..thread import judge
+            judge(client.root, created[-1], "ask", "别人在飞书任务里分给你的，等你确认接不接")
     # Completion follows the Feishu task, whether the item was created from it or merged with it.
     by_link = {}
     for r in all_rows:
@@ -93,6 +117,11 @@ def sync(config, client, state, now, *, notify=True):
             gateway.update(row, {"状态": ["完成"], "进度": "完成", "完成时间": task.get("completed_at") or now.isoformat()},
                            f"feishu-task-done:{row['record_id']}", "feishu-task")
             completed.append(row["record_id"])
+            try:
+                from ..thread import closed
+                closed(client.root, row["record_id"], "你", "在飞书任务里勾了完成")
+            except Exception as exc:
+                activity.swallowed(client.root, "sources.feishu_tasks.sync", exc)
     if merged:
         from .. import activity
         activity.log(client.root, "detect", "飞书任务：" + "、".join(f"#{n}" for n in merged) + " 是已有的事，已关联，不重复建")

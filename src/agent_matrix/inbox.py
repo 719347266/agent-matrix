@@ -15,18 +15,12 @@ from pathlib import Path
 import re
 import sqlite3
 
+from . import db as database
 from .timeutil import TZ
 
 
 def _db(root):
-    path = Path(root) / "state/inbox.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=30)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("""CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
-        at TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
-        blocks TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0)""")
-    return db
+    return database.open(root, "inbox")
 
 
 # ---- turning what used to be a Feishu message into blocks --------------------------------------------
@@ -34,6 +28,9 @@ def _db(root):
 def _plain(text):
     text = re.sub(r"<[^>]+>", "", str(text or ""))
     return re.sub(r"\*\*(.*?)\*\*", r"\1", text).strip()
+
+
+LINK = re.compile(r"\[([^\]]*)\]\((https?://[^\s)]+)\)")
 
 
 def _refs(text):
@@ -49,12 +46,17 @@ def from_text(text):
 
 
 def _row(column_set):
-    """One card row: bold head, grey hint, then「打开」links and callback buttons."""
+    """One card row: bold head, grey hint, then「打开」links (a button or a plain link) and callback buttons."""
     head, hint, url, actions = "", "", None, []
     for col in column_set.get("columns") or []:
         for el in col.get("elements") or []:
             if el.get("tag") == "markdown":
-                text = _plain(el.get("content"))
+                content = str(el.get("content") or "")
+                link = LINK.search(content)  # read-only cards carry the document as a plain link
+                url = url or (link.group(2) if link else None)
+                text = _plain(LINK.sub("", content)).strip(" ·")
+                if not text:
+                    continue
                 if not head:
                     head = text
                 else:
@@ -76,6 +78,8 @@ def from_card(card):
     blocks = [{"type": "text", "text": subtitle}] if subtitle else []
     refs = []
     for el in ((card.get("body") or {}).get("elements") or card.get("elements") or []):
+        if el.get("element_id") == "footer":  # a note for the Feishu reader only (see brief_v1.card)
+            continue
         tag = el.get("tag")
         if tag == "interactive_container":
             section = {"type": "section", "title": "", "rows": [], "more": ""}
@@ -84,8 +88,8 @@ def from_card(card):
                     text = _plain(inner.get("content"))
                     if not section["title"] and not section["rows"]:
                         section["title"] = text
-                    else:
-                        section["more"] = text
+                    elif text:  # notes under the rows (meetings, what was decided, "还有 N 件"): keep every line
+                        section["more"] = (section["more"] + "\n" if section["more"] else "") + text
                 elif inner.get("tag") == "column_set":
                     row = _row(inner)
                     section["rows"].append(row)
@@ -144,7 +148,8 @@ def add(root, key, content, *, kind=None):
 def messages(root, limit=100, unread_only=False):
     db = _db(root)
     try:
-        rows = db.execute("SELECT id, at, kind, title, summary, blocks, read FROM messages WHERE key!='history-imported' " +
+        rows = db.execute("SELECT id, at, CASE WHEN key LIKE 'prep-%' THEN 'prep' ELSE kind END, title, summary, blocks, read "
+                          "FROM messages WHERE superseded=0 AND key!='history-imported' AND key NOT LIKE 'banner-test-%' AND key NOT LIKE 'test-alert-%' " +
                           ("AND read=0 " if unread_only else "") + "ORDER BY at DESC, id DESC LIMIT ?", (limit,)).fetchall()
     finally:
         db.close()
@@ -159,7 +164,7 @@ def messages(root, limit=100, unread_only=False):
 def unread(root):
     db = _db(root)
     try:
-        return db.execute("SELECT count(*) FROM messages WHERE read=0").fetchone()[0]
+        return db.execute("SELECT count(*) FROM messages WHERE superseded=0 AND read=0").fetchone()[0]
     finally:
         db.close()
 
@@ -188,7 +193,7 @@ def import_history(root, days=3):
     since = (datetime.now(TZ) - timedelta(days=days)).isoformat()
     count = 0
     try:
-        adb = sqlite3.connect(Path(root) / "state/activity.db", timeout=10)
+        adb = database.read(Path(root) / "state/activity.db", timeout=10)
         rows = adb.execute("SELECT id, at, title, detail FROM events WHERE kind='send' AND status='ok' AND at>=? ORDER BY id",
                            (since,)).fetchall()
         adb.close()

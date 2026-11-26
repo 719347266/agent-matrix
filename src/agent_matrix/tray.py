@@ -47,7 +47,7 @@ class Tray:
         except (OSError, ValueError):
             self.last_seen = 0
         self.last_restart = 0
-        self.icon = pystray.Icon("agent-matrix", dot(COLORS["unknown"]), "事项中心", menu=pystray.Menu(self.items))
+        self.icon = pystray.Icon("agent-matrix", dot(COLORS["unknown"]), "心响", menu=pystray.Menu(self.items))
 
     # ---- actions --------------------------------------------------------------
     def python(self, *args, wait=False):
@@ -123,7 +123,7 @@ class Tray:
         else:
             for e in sorted((e for e in events if e["id"] > self.last_seen), key=lambda e: e["id"])[:4]:
                 title = {"send": "心响" if e["ok"] else "心响 · 消息没送到", "prework": "AI 有进展"}.get(
-                    e["kind"], "事项中心出了点问题")
+                    e["kind"], "心响出了点问题")
                 if e["kind"] in {"send", "prework"} or not e["ok"]:
                     try:
                         self.icon.notify(e["title"][:100], title)

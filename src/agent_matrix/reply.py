@@ -21,6 +21,8 @@ import re
 import sys
 from zoneinfo import ZoneInfo
 
+from . import activity
+from .timeutil import WEEKDAYS, parse_date  # noqa: F401
 from .bitable import js, require_owned
 from .brief_migration import single, number
 from .config import load
@@ -28,7 +30,6 @@ from .feishu import Feishu
 from .models import MatrixError, MatrixBusy
 from .state import State, exclusive_lock
 
-WEEKDAYS = "一二三四五六日"
 
 
 @dataclass
@@ -39,40 +40,13 @@ class Op:
     raw: str = ""
 
 
-def parse_date(text, today):
-    """Owner wording → date. Returns None when the text is not a date."""
-    t = text.strip()
-    if t in {"今天", "今日"}:
-        return today
-    if t in {"明天", "明日"}:
-        return today + timedelta(days=1)
-    if t == "后天":
-        return today + timedelta(days=2)
-    m = re.fullmatch(r"(下下|下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])", t)
-    if m:
-        target = WEEKDAYS.index(m[2].replace("天", "日"))
-        base = today - timedelta(days=today.weekday())
-        offset = {"下": 7, "下下": 14}.get(m[1] or "", 0)
-        found = base + timedelta(days=target + offset)
-        if not m[1] and found < today:
-            found += timedelta(days=7)  # "周五" said on Saturday means next Friday
-        return found
-    m = re.fullmatch(r"(?:(\d{4})[-/.年])?(\d{1,2})[-/.月](\d{1,2})[日号]?", t)
-    if m:
-        year = int(m[1]) if m[1] else today.year
-        try:
-            found = date(year, int(m[2]), int(m[3]))
-        except ValueError:
-            return None
-        if not m[1] and found < today - timedelta(days=60):
-            found = date(year + 1, found.month, found.day)
-        return found
-    return None
 
 
 VERBS = [
     (r"(过|通过|可以|ok|OK|好的?)", "approve"),
     (r"(退|退回|打回)\s*[:：]?\s*(.*)", "reject"),
+    # "62 改 换成蓝色": back to the AI in the same conversation, even after it was finished (改到/改成 a date is a reschedule)
+    (r"(?:让\s*(?:AI|ai)\s*)?(?:再改|重改|修改|调整|改)(?![到成])\s*[:：]?\s*(.+)", "revise"),
     (r"(?:合并到|并入|并到|和|跟|同)\s*#?(\d{1,5})(?:\s*(?:是)?同一件(?:事)?)?", "merge"),
     (r"(不重复|不是重复|不是同一件(?:事)?|不一样)", "distinct"),
     (r"(?:完成|做完了?|搞定|done)?\s*[，,]?\s*(无交付|不需要交付|不用交付|没有交付|无文件|不用文件|没有文件)", "no_deliverable"),
@@ -86,6 +60,7 @@ VERBS = [
     (r"(继续|接着做|继续做|往下做)", "resume"),
     (r"给\s*(\S{1,12})", "delegate"),
     (r"([A-Da-d])", "option"),
+    (r"(?:交付链接|换链接)\s*[:：]?\s*(\S+)", "link"),   # the owner points the deliverable at a new link
     (r"\+\s*(.+)", "material"),
 ]
 
@@ -117,7 +92,7 @@ def parse(text, today):
         for pattern, verb in VERBS:
             found = re.fullmatch(pattern, rest)
             if found:
-                arg = found.group(found.lastindex) if verb in {"reject", "delegate", "option", "material", "merge"} else ""
+                arg = found.group(found.lastindex) if verb in {"reject", "revise", "delegate", "option", "material", "merge", "link"} else ""
                 if verb == "reject" and not arg.strip():
                     problems.append(f"#{numbers[0]} 退回的话，要改哪里？例如：{numbers[0]} 退 少了定价")
                     break
@@ -126,7 +101,7 @@ def parse(text, today):
         else:
             # "3个会都开完了" is chat; only a #-prefixed or short reply gets a question back.
             if hashed or len(rest) <= 6:
-                problems.append(f"没看懂「{raw}」。可回：过 / 退 意见 / 完成 / 周五 / 不做 / 我来 / AI做 / AI备 / 先做 / 继续 / 展开")
+                problems.append(f"没看懂「{raw}」。可回：过 / 退 意见 / 改 要求 / 完成 / 周五 / 不做 / 我来 / AI做 / AI备 / 先做 / 继续 / 展开")
     return ops, problems
 
 
@@ -144,15 +119,26 @@ def _append(old, line):
 
 
 class Applier:
-    def __init__(self, config, client, state, *, source, message_ref, immediate=False, progress=None):
+    def __init__(self, config, client, state, *, source, message_ref, immediate=False, progress=None, note=None):
         from .workflow import Gateway
         self.config, self.client, self.state = config, client, state
-        from .monitor import save_snapshot
+        from .snapshot import save_snapshot
         self.gateway = Gateway(client, state, on_rows=(lambda rows: save_snapshot(client.root, rows)) if immediate else None, progress=progress)
         self.immediate = immediate
         self.deferred = []
         self.source, self.ref = source, message_ref
+        self.note = note  # the owner's note when closing ("备注并完成")
         self.now = _now(config)
+
+    def closed(self, row, how):
+        """Remember who closed it: the owner (心响, Feishu reply, 豚豚) or the AI judging it already done."""
+        if self.client is None:
+            return
+        try:
+            from .thread import closed
+            closed(self.client.root, row["record_id"], "AI" if self.source == "ai" else "你", how, self.note)
+        except Exception as exc:
+            activity.swallowed(self.client.root, "reply.closed", exc)
 
     def rows(self):
         return self.gateway.rows()
@@ -174,21 +160,34 @@ class Applier:
         if self.client is None:
             return ""
         try:
-            from .drive import stop_record
+            from .jobstore import stop_record
             return "，已通知 AI 停止" if stop_record(self.client.root, row["record_id"]) else ""
         except Exception:
             return ""
 
+    def verdict(self, row, verdict, reason=""):
+        """The owner's verdict on a deliverable is kept: the AI learns from what passed and what came back."""
+        if self.client is None:
+            return
+        try:
+            from .memory import record_outcome
+            record_outcome(self.client.root, row["record_id"], verdict, reason)
+            from . import hymem   # 记忆增强: what the owner thought of this deliverable
+            hymem.remember(self.client.root, "verdict", f"本人评审「{_title(row, 40)}」：{verdict}" + (f"，原因：{reason}" if reason else ""),
+                           ref=f"verdict:{row['record_id']}:{self.now.isoformat()}")
+        except Exception as exc:
+            activity.swallowed(self.client.root, "reply.verdict", exc)
+
     def write(self, row, patch, op, n):
         receipt = self.gateway.update(row, patch, self.key(op, n), f"reply:{self.source}:{self.ref}")
         # What the owner says about an item goes into its notebook, so whoever works on it next sees it.
-        said = {"reject": "本人退回：", "material": "本人补充：", "reschedule": "本人改期到 ", "delegate": "本人交给 "}.get(op.verb)
+        said = {"reject": "本人退回：", "revise": "本人要改：", "material": "本人补充：", "reschedule": "本人改期到 ", "delegate": "本人交给 ", "link": "本人把交付链接换成："}.get(op.verb)
         if said and self.client is not None:
             try:
                 from .prework import add_note
                 add_note(self.client.root, row["record_id"], said + op.arg)
-            except Exception:
-                pass
+            except Exception as exc:
+                activity.swallowed(self.client.root, "reply.write", exc)
         return receipt
 
     def ready_after(self, row, patch):
@@ -239,18 +238,31 @@ class Applier:
                 from .thread import forget_judgment
                 forget_judgment(self.client.root, row["record_id"])
             return f"#{n} {name} → 恢复了，回到「新进来」等你定 ✓"
+        if op.verb == "revise":
+            if st == "取消":
+                return f"#{n} {name} 已经标为不做。要接着做，先点「恢复」。"
+            patch = {"状态": ["进行中"], "执行方": ["AI"], "进度": "按意见修改", "卡点": None,
+                     "退回意见": _append(row.get("退回意见"), f"{self.now:%m-%d} {op.arg}")}
+            if st in {"完成", "待验收"}:
+                patch.update({"验收结果": ["退回"], "完成时间": None})
+            self.write(row, patch, op, n)
+            if st in {"完成", "待验收"}:
+                self.verdict(row, "要改", op.arg)
+            return f"#{n} {name} → AI 在原来的对话里接着改，改好出新版本 ✓"
         if st == "取消" and op.verb == "cancel":
             return f"#{n} {name} 已经标为不做 ✓" + self.stop_ai(row)
-        if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete"}:
+        if st in {"完成", "取消"} and op.verb not in {"reschedule", "no_deliverable", "material", "complete", "link"}:
             return f"#{n} {name} 已经是{st}，没动。"
-        if st == "取消" and op.verb in {"no_deliverable", "material", "complete"}:
+        if st == "取消" and op.verb in {"no_deliverable", "material", "complete", "link"}:
             return f"#{n} {name} 已经取消了，没动。"
         if op.verb == "approve":
             if st != "待验收":
                 return f"#{n} {name} 现在是{st}，还没交付，不能验收。"
-            from .prework import _draft_url
+            from .values import draft_url as _draft_url
             self.write(row, {"状态": ["完成"], "验收结果": ["通过"], "完成时间": self.now.isoformat(), "进度": "完成",
                              "交付情况": ["有交付" if _draft_url(row.get("交付物链接")) else "待补交付"]}, op, n)
+            self.closed(row, "验收通过")
+            self.verdict(row, "通过")
             unlocked = self.unlock_parent(row, n)
             return f"#{n} {name} → 完成 ✓" + (f"；#{unlocked} 可以开始了" if unlocked else "")
         if op.verb == "reject":
@@ -258,11 +270,13 @@ class Applier:
                 return f"#{n} {name} 现在是{st}，没有待验收的结果可退。"
             self.write(row, {"状态": ["进行中"], "验收结果": ["退回"], "进度": "按意见修改",
                              "退回意见": _append(row.get("退回意见"), f"{self.now:%m-%d} {op.arg}")}, op, n)
+            self.verdict(row, "退回", op.arg)
             return f"#{n} {name} → 退回修改 ✓"
         if op.verb in {"complete", "no_deliverable"}:
             return self.complete(row, op, n, name, st, no_file=op.verb == "no_deliverable") + self.stop_ai(row)
         if op.verb == "cancel":
             self.write(row, {"状态": ["取消"], "进度": "不做"}, op, n)
+            self.closed(row, "判断不用做" if self.source == "ai" else "标为不做")
             return f"#{n} {name} → 不做了 ✓" + self.stop_ai(row)
         if op.verb == "reschedule":
             from .workflow import day
@@ -300,6 +314,21 @@ class Applier:
             patch = self.ready_after(row, {"拍板结果": op.arg.upper()})
             self.write(row, patch, op, n)
             return f"#{n} {name} → 选 {op.arg.upper()} ✓"
+        if op.verb == "link":
+            from .values import draft_url
+            url, old = draft_url(op.arg.strip()), draft_url(row.get("交付物链接"))
+            if not url:
+                return f"#{n} {name} 这不是一个能打开的链接（要以 http 开头），没改。"
+            if url == old:
+                return f"#{n} {name} 交付已经是这个链接 ✓"
+            patch = {"交付物链接": url}
+            if st == "完成" or single(row.get("交付情况")) == "待补交付":
+                patch["交付情况"] = ["有交付"]
+            self.write(row, patch, op, n)
+            if self.client is not None:  # kept as a new version, so the earlier link can still be found
+                from .thread import add_deliverable
+                add_deliverable(self.client.root, row["record_id"], summary="你换了交付链接", url=url)
+            return f"#{n} {name} → 交付链接换好了 ✓"
         if op.verb == "material" and (st == "完成" or single(row.get("交付情况")) == "待补交付"):
             link = re.search(r"https?://\S+", op.arg)
             if not link:
@@ -340,7 +369,7 @@ class Applier:
                 "标题": ("备材料：" + str(row.get("标题")))[:60], "执行方": ["AI"], "状态": ["未开始"],
                 "进度": "0/1 未开始", "负责人": owner, "父事项": [{"id": row["record_id"]}],
                 "截止日": (row.get("截止日") and self._before(row["截止日"])) or (self.now.date() + timedelta(days=1)).strftime("%Y-%m-%d 00:00"),
-                "完成标准": ("能直接用于：" + str(row.get("标题")))[:60], "来源": ["手动"], "类型": ["临时"],
+                "完成标准": ("能直接用于：" + str(row.get("标题")))[:60], "来源": row.get("来源") or ["手动"], "类型": ["临时"],  # 备材料 comes from where its parent came from
             }, "prep:" + row["record_id"], f"reply:{self.source}:{self.ref}")
             child_id = child["record_id_list"][0]
             child_row = next(r for r in self.rows() if r["record_id"] == child_id)
@@ -352,7 +381,7 @@ class Applier:
 
     def complete(self, row, op, n, name, st, *, no_file):
         """完成 = the work is done; then settle the deliverable: attached, not needed, or still missing."""
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         patch = {} if st == "完成" else {"状态": ["完成"], "完成时间": self.now.isoformat(), "进度": "完成"}
         if no_file:
             patch["交付情况"] = ["无交付"]; note = "，标为无交付"
@@ -378,6 +407,8 @@ class Applier:
         if st == "完成" and single(row.get("交付情况")) == single(patch.get("交付情况")):
             return f"#{n} {name} 已经完成 ✓"
         receipt = self.write(row, patch, op, n)
+        if st != "完成":
+            self.closed(row, ("判断已经办完" if self.source == "ai" else "标记完成") + ("（无交付）" if no_file else ""))
         if getattr(self, "immediate", False) and patch.get("交付情况") == ["待补交付"]:
             self.deferred.append(receipt.get("readback") or {**row, **patch})
         return f"#{n} {name} → 完成 ✓{note}"
@@ -385,7 +416,7 @@ class Applier:
     def merge(self, row, op, n, name, into):
         """「31 合并到 3」: #31's facts go into #3 (never overwriting #3's owner/date), #31 is closed as merged."""
         from .merge import merge_into
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         if into == n:
             return f"#{n} 不能合并到自己。"
         target = self.find(into)
@@ -411,7 +442,7 @@ class Applier:
             if not parent or single(parent.get("状态")) != "卡住" or f"#{n}" not in str(parent.get("卡点") or ""):
                 continue
             patch = {"状态": ["未开始"], "卡点": None, "进度": "0/1 可开始"}
-            from .prework import _draft_url
+            from .values import draft_url as _draft_url
             link = _draft_url(row.get("交付物链接"))
             if link and not parent.get("交付物链接"):
                 patch["交付物链接"] = link
@@ -420,7 +451,7 @@ class Applier:
         return None
 
     def expand(self, row):
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         from .workflow import day
         n = number(row["编号"])
         lines = [f"#{n} {row.get('标题')}",
@@ -521,10 +552,14 @@ def find_deliverable(client, config, title, now, days=21):
     return {"title": scored[0][3], "url": scored[0][4]}
 
 
-WAKE_WORKER = {"material", "reject", "ai", "first", "resume", "prep"}
+WAKE_WORKER = {"material", "reject", "revise", "ai", "first", "resume", "prep"}
 
 
 def handle(config, client, state, text, *, source, message_ref):
+    from . import approvals
+    answer = approvals.command(client.root, text)   # 开发模式「批准 / 拒绝 <id>」: not an item command
+    if answer:
+        return answer
     ops, problems = parse(text, _now(config).date())
     if not ops and not problems:
         return None
@@ -537,10 +572,10 @@ def handle(config, client, state, text, *, source, message_ref):
         activity.log(client.root, "reply", f"你回复「{text.strip()[:20]}」→ {line[:60]}", status="ok" if "✓" in line else "info")
     if any(op.verb in WAKE_WORKER for op in ops) and any("✓" in x for x in lines):
         try:  # new material, a rejection or "先做": the AI employee starts now, not on the next tick
-            from .worker import kick
+            from .workenv import kick
             kick(client.root, config, force=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            activity.swallowed(client.root, "reply.handle", exc)
     return "\n".join([*lines, *problems])
 
 
@@ -647,7 +682,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="处理本人对事项的回复指令")
     p.add_argument("command", nargs="?", default="text", choices=["text", "poll", "check"])
     p.add_argument("--text")
-    p.add_argument("--source", default="cindy", choices=["cindy", "feishu"])
+    p.add_argument("--source", default="cindy", choices=["cindy", "feishu", "ai"])
     p.add_argument("--message-ref")
     p.add_argument("--config", type=Path, default=Path("config.yaml"))
     args = p.parse_args(argv)

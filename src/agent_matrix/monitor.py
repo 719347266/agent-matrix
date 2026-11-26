@@ -21,6 +21,8 @@ import os
 from pathlib import Path
 import sqlite3
 
+from .snapshot import SNAPSHOT_FIELDS, save_snapshot, snapshot_rows, _local_store, _snapshot, _STORE  # noqa: F401
+from . import db as database
 from . import activity
 from .timeutil import TZ
 
@@ -29,68 +31,18 @@ EVENT_NAMES = {"card.action.trigger": "卡片按钮", "im.message.receive_v1": "
 CINDY = {"routine": "会议复盘与提前代做", "poll": "事项中心｜飞书回复轮询",
          "jobs": ["事项中心｜每日周期事项", "事项中心｜工作日早间简报", "事项中心｜工作日明日计划"]}
 STALE_AI_HOURS = 3
-SNAPSHOT_FIELDS = ["编号", "标题", "执行方", "状态", "进度", "卡点", "截止日", "交付物链接", "验收结果",
-                   "退回意见", "排除本人提醒", "更新时间", "预做结果摘要", "交付情况", "完成时间",
-                   # for the 心响 item page: where it came from and what was asked
-                   "原话引用", "来源", "来源链接", "完成标准", "补充材料", "下一步动作", "创建时间", "关联任务链接"]
 
 
-# ---- task snapshot (written by the listener every 2 minutes) --------------------
-
-def save_snapshot(root, rows):
-    path = Path(root) / "state/tasks.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"at": datetime.now(TZ).isoformat(timespec="seconds"), "rows": snapshot_rows(rows)},
-                              ensure_ascii=False, default=str))
-    tmp.replace(path)
+# ---- task snapshot (written by the listener every 10 minutes) --------------------
 
 
-def snapshot_rows(rows):
-    from .prework import _draft_url
-    def one(v):
-        if isinstance(v, list) and not v:
-            return None  # an empty select reads back as []
-        return v[0] if isinstance(v, list) and len(v) == 1 and isinstance(v[0], str) else v
-    out = []
-    for r in rows:
-        item = {k: one(r.get(k)) for k in SNAPSHOT_FIELDS}
-        item["交付物链接"] = _draft_url(r.get("交付物链接"))
-        item["record_id"] = r.get("record_id")
-        item["父事项"] = [x.get("id") or x.get("record_id") for x in r.get("父事项") or [] if isinstance(x, dict)]
-        out.append(item)
-    return out
 
 
-_STORE = {}
 
 
-def _local_store(root):
-    """Is `item_store: local` on? (config.yaml re-read only when it changes)"""
-    path = Path(root) / "config.yaml"
-    try:
-        stamp = path.stat().st_mtime
-    except OSError:
-        return False
-    if _STORE.get(path) is None or _STORE[path][0] != stamp:
-        try:
-            from .config import load
-            from .itemstore import enabled
-            _STORE[path] = (stamp, enabled(load(path)))
-        except Exception:
-            _STORE[path] = (stamp, False)
-    return _STORE[path][1]
 
 
-def _snapshot(root):
-    """The items as the pages show them: straight from the local store when it is on, else the last table read."""
-    if _local_store(root):
-        from . import itemstore
-        if itemstore.imported(root):
-            return {"at": datetime.now(TZ).isoformat(timespec="seconds"), "rows": snapshot_rows(itemstore.rows(root))}
-    try:
-        return json.loads((Path(root) / "state/tasks.json").read_text())
-    except (OSError, ValueError):
-        return {"at": None, "rows": []}
+
 
 
 def _day(value):
@@ -209,7 +161,7 @@ def classify(rows, now):
 # ---- system checks: plain words, what was done, what you do ----------------------
 
 def _ro(path):
-    return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=3)
+    return database.read(path, timeout=3)
 
 
 def _kv(db, key, default=None):
@@ -311,7 +263,7 @@ def problems(root, now, streams, heartbeat, beats, errors_today, cindy, links=No
     beat = _age((beats.get("会议检查") or {}).get("at"), now)
     if working and (beat is None or beat > 15):
         add("warn", "AI 员工没在检查", f"已经 {int(beat) if beat else '很久'} 分钟没检查会议和事项，会后待办、AI 代做都在等。",
-            "已在飞书提醒你一次（2 小时内不重复）。", "点「重启监听」，它负责每 2 分钟叫醒 AI 员工。", {"kind": "restart_listener"})
+            "已在飞书提醒你一次（2 小时内不重复）。", "点「重启监听」，恢复后台检查。", {"kind": "restart_listener"})
     acks = _acks(root)
     for name in CINDY["jobs"]:
         runs = cindy.get(name, {}).get("runs", [])
@@ -362,7 +314,7 @@ def worker_view(root, rows, moving, now):
 
     Returns the AI employee's state for its own panel section:
     {"state": working|extracting|checking|idle, "line", "n", "title", "step", "minutes", "queue", "last"}."""
-    from .worker import is_running, read_status
+    from .workenv import is_running, read_status
     ws = read_status(root)
     running = is_running(root)
     n_of, title_of = {}, {}

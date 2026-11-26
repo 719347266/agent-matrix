@@ -119,7 +119,7 @@ class MeetingTaskTests(unittest.TestCase):
     transcript = "00:10 我：如果你看了没问题，我这边就让大伟去做进去了。\n00:20 杨：我再看看吧。"
 
     def review(self, **changes):
-        action = dict(title="安排大伟做标签体系", text="安排", quote="我这边就让大伟去做进去了", timestamp="00:10",
+        action = dict(title="安排大伟做数据看板", text="安排", quote="我这边就让大伟去做进去了", timestamp="00:10",
                       reference=self.transcript.splitlines()[0], owner_name="我", direction="mine",
                       commitment_phrase="我这边就让大伟去做", confidence=0.6)
         action.update(changes)
@@ -127,7 +127,7 @@ class MeetingTaskTests(unittest.TestCase):
                       actions=[Action(**action)])
 
     def test_low_confidence_or_missing_commitment_is_not_a_task(self):
-        meta = {"meeting_id": "1" * 19, "start_time": "2026-11-16 14:32", "topic": "标签体系沟通"}
+        meta = {"meeting_id": "1" * 19, "start_time": "2026-11-16 14:32", "topic": "数据看板沟通"}
         review = self.review()
         validate_review(review, self.transcript, meta)
         self.assertEqual(kept_actions(review), [])
@@ -162,18 +162,33 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("https://", visible_text(out["text"]))
         self.assertIn("其余", out["text"])
 
-    def test_card_groups_items_and_explains_next_step(self):
+    def test_card_is_a_read_only_report(self):
+        """Feishu only carries the report: no buttons, no "reply N 过"; documents stay plain links."""
         from agent_matrix.brief_v1 import build_card
         rows = [row(3, "卡住", "我", 卡点="等#26验收备稿", 截止日="2026-11-16T00:00:00.000+08:00"),
                 row(26, "待验收", 交付物链接="https://x.feishu.cn/docx/a", 预做结果摘要="核对清单已整理。另有说明"),
-                row(24, "待确认", "我")]
-        c = build_card(Config(base_url="https://x.feishu.cn/base/b"), rows, [], date(2026, 11, 17), "morning")
+                row(24, "待确认", "我"), row(30, "未开始", "我", 能否AI预做=True), row(31, "卡住", "AI", 卡点="缺收入导出")]
+        rolls = [{"number": 30, "from": "2026-11-16", "to": "2026-11-17", "count": 2}]
+        c = build_card(Config(base_url="https://x.feishu.cn/base/b"), rows, [], date(2026, 11, 17), "evening", rolls=rolls)
         self.assertEqual(c["schema"], "2.0")
         flat = json.dumps(c, ensure_ascii=False)
-        self.assertIn("先看一眼，没问题回「26 过」就能开始", flat)
-        self.assertIn("什么时候做完？回「24 周五」", flat)
-        self.assertIn("核对清单已整理", flat); self.assertNotIn("另有说明", flat)
+        for word in ['"button"', '"callback"', "回「", "回复"]:
+            self.assertNotIn(word, flat)
+        self.assertIn("等你先看 AI 备好的 #26", flat)
+        self.assertIn("还没定什么时候做完", flat)
+        self.assertIn("AI 可以先帮你备材料", flat)
+        self.assertIn("第 2 次顺延，该改计划了", flat)
+        self.assertIn("核对清单已整理</font> · [打开文档](https://x.feishu.cn/docx/a)", flat); self.assertNotIn("另有说明", flat)
+        footer = c["body"]["elements"][-1]
+        self.assertEqual(footer["element_id"], "footer")
+        self.assertIn("心响", footer["content"]); self.assertIn("[看板](https://x.feishu.cn/base/b)", footer["content"])
         self.assertLessEqual(len([b for b in c["body"]["elements"] if b["tag"] == "interactive_container"]), 5)
+
+    def test_text_brief_has_no_reply_instructions(self):
+        rows = [row(26, "待验收", "AI", 交付物链接="https://x.feishu.cn/docx/a"), row(24, "待确认", "我")]
+        out = build(Config(owner_open_id="ou_me", base_url="https://x.feishu.cn/base/b"), rows, [], date(2026, 11, 17), "morning")
+        self.assertNotIn("回复", out["text"])
+        self.assertTrue(out["text"].endswith("[看板](https://x.feishu.cn/base/b)"))
 
     def test_empty_day_is_one_line(self):
         out = build(Config(), [], [], date(2026, 11, 17), "morning")
@@ -188,16 +203,41 @@ class PrepAndWeeklyTests(unittest.TestCase):
     def test_prep_links_items_by_topic_and_skips_empty_meetings(self):
         from agent_matrix.agents.meeting_prep import _keywords, _related, build
         keys = _keywords("2.2需求确认")
-        self.assertTrue(_related("整理2.2多自定义角色与头像需求稿", keys))
+        self.assertTrue(_related("整理2.2多主题皮肤需求稿", keys))
         self.assertFalse(_related("整理投放测试策略", keys))
-        self.assertTrue(_related("准备实习生例会复盘材料", _keywords("XX团队-实习生运营复盘会")))
+        self.assertTrue(_related("准备新人例会复盘材料", _keywords("XX团队-新人运营复盘会")))
         queue = SimpleNamespace(list=lambda: [])
         event = {"event_id": "e1", "summary": "2.2需求确认", "start_time": {"datetime": "2026-11-18T09:45:00+08:00"}}
         now = datetime(2026, 11, 18, 9, 15, tzinfo=TZ)
-        rows = [row(13, "待验收", 标题="整理2.2多自定义角色与头像需求稿", 交付物链接="https://x.feishu.cn/docx/a")]
+        rows = [row(13, "待验收", 标题="整理2.2多主题皮肤需求稿", 交付物链接="https://x.feishu.cn/docx/a")]
         card = build(Config(owner_name="我"), rows, event, queue, "/tmp", now)
         self.assertIn("30 分钟后开始", json.dumps(card, ensure_ascii=False))
         self.assertIsNone(build(Config(), [row(6, "未开始", 标题="整理投放测试策略")], event, queue, "/tmp", now))
+
+    def test_prep_is_read_only_with_plain_links(self):
+        from agent_matrix import inbox
+        from agent_matrix.agents.meeting_prep import build
+        queue = SimpleNamespace(list=lambda: [])
+        event = {"event_id": "e1", "summary": "2.2需求确认", "start_time": {"datetime": "2026-11-18T09:45:00+08:00"},
+                 "vchat": {"meeting_url": "https://vc.feishu.cn/j/1"}}
+        rows = [row(13, "待验收", 标题="整理2.2多主题皮肤需求稿", 交付物链接="https://x.feishu.cn/docx/a"),
+                row(14, "待确认", "我", 标题="2.2需求的验收标准")]
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            card = build(Config(owner_name="我"), rows, event, queue, root, datetime(2026, 11, 18, 9, 15, tzinfo=TZ))
+        flat = json.dumps(card, ensure_ascii=False)
+        for word in ['"button"', '"callback"', "回「"]:
+            self.assertNotIn(word, flat)
+        self.assertIn("[进入会议](https://vc.feishu.cn/j/1)", flat)
+        # The 心响 inbox copy keeps every line, the document link and the join link; not the Feishu-only footer.
+        title, blocks, refs = inbox.from_card(card)
+        self.assertEqual((title, refs), ("09:45 2.2需求确认", [13, 14]))
+        rows_ = blocks[1]["rows"]
+        self.assertEqual([(r["head"], r["url"]) for r in rows_],
+                         [("#13 整理2.2多主题皮肤需求稿", "https://x.feishu.cn/docx/a"), ("#14 2.2需求的验收标准", None)])
+        self.assertEqual(rows_[1]["hint"], "还没定什么时候做完")
+        self.assertEqual(blocks[-1], {"type": "text", "text": "[进入会议](https://vc.feishu.cn/j/1)"})
+        self.assertNotIn("逐字稿", json.dumps(blocks, ensure_ascii=False))
 
     def test_weekly_reasons_are_recorded_facts_and_send_once_on_friday(self):
         from agent_matrix.agents.weekly_review import why, due
@@ -221,14 +261,14 @@ class CompleteDeliverableTests(unittest.TestCase):
     def test_completion_settles_the_deliverable(self):
         from unittest.mock import patch
         rows = [row(1, "未开始", "我", 标题="跟进会员设计稿交接"),
-                row(2, "未开始", "我", 标题="撰写标签体系需求文档"),
+                row(2, "未开始", "我", 标题="撰写数据看板需求文档"),
                 row(3, "未开始", "我", 标题="年度运营计划方案"),
                 row(4, "进行中", "我", 标题="整理周报", 交付物链接="https://x.feishu.cn/docx/w")]
         a = applier(rows)
-        found = {"title": "标签体系需求文档 v1", "url": "https://x.feishu.cn/docx/tag"}
-        with patch("agent_matrix.reply.find_deliverable", side_effect=lambda c, cfg, title, now: found if "标签" in title else None):
+        found = {"title": "数据看板需求文档 v1", "url": "https://x.feishu.cn/docx/tag"}
+        with patch("agent_matrix.reply.find_deliverable", side_effect=lambda c, cfg, title, now: found if "看板" in title else None):
             self.assertIn("行动项", self.run_text(a, "1 完成")[0])
-            self.assertIn("《标签体系需求文档 v1》", self.run_text(a, "2 完成")[0])
+            self.assertIn("《数据看板需求文档 v1》", self.run_text(a, "2 完成")[0])
             self.assertIn("没找到", self.run_text(a, "3 完成")[0])
             self.assertIn("交付物已在", self.run_text(a, "4 完成")[0])
         d = a.gateway.data
@@ -248,11 +288,11 @@ class CompleteDeliverableTests(unittest.TestCase):
             return {"title_highlighted": title, "result_meta": {"owner_id": owner, "edit_user_id": owner, "update_time_iso": when,
                                                                 "url": "https://x.feishu.cn/docx/" + str(abs(hash(title)))}}
         client = SimpleNamespace(_exec=lambda argv: {"results": [
-            result("<h>标签体系</h>需求文档"), result("别人的标签体系需求文档", owner="ou_x"),
-            result("标签体系需求文档（旧）", when="2026-09-01T10:00:00+08:00")]})
+            result("<h>数据看板</h>需求文档"), result("别人的数据看板需求文档", owner="ou_x"),
+            result("数据看板需求文档（旧）", when="2026-09-01T10:00:00+08:00")]})
         config = Config(owner_open_id="ou_me")
-        self.assertEqual(find_deliverable(client, config, "撰写标签体系需求文档", now)["title"], "标签体系需求文档")
-        self.assertIsNone(find_deliverable(client, config, "聚光投放复盘", now))
+        self.assertEqual(find_deliverable(client, config, "撰写数据看板需求文档", now)["title"], "数据看板需求文档")
+        self.assertIsNone(find_deliverable(client, config, "广告投放复盘", now))
 
 
 class NotebookTests(unittest.TestCase):

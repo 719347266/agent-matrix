@@ -8,6 +8,14 @@ import UserNotifications
 
 /// The 心响 main window: the local client served by the always-on listener (127.0.0.1 only).
 @MainActor
+/// The band at the top of the window: drag it to move the window, double-click it to zoom, like any title bar.
+final class DragStrip: NSView {
+    static let height: CGFloat = 28
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { window?.performZoom(nil) } else { window?.performDrag(with: event) }
+    }
+}
+
 final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     static let shared = CenterWindow()
     private var window: NSWindow?
@@ -28,25 +36,38 @@ final class CenterWindow: NSObject, NSWindowDelegate, WKNavigationDelegate {
     func show(_ root: String, item: Int? = nil) {
         clientURL = address(root)
         let fresh = window == nil || window?.isVisible == false
-        if let item, item > 0, !fresh, let web {
-            // already showing 心响: just open that item, no reload
-            web.evaluateJavaScript("location.hash='item-\(item)'", completionHandler: nil)
+        // item 0 opens the inbox (several new things at once); a positive number opens that item
+        let target: String? = item.flatMap { $0 == 0 ? "inbox" : ($0 > 0 ? "item-\($0)" : nil) }
+        if let target, !fresh, let web {
+            // already showing 心响: just jump there, no reload
+            web.evaluateJavaScript("location.hash='\(target)'", completionHandler: nil)
         }
-        if let item, item > 0, fresh, let base = clientURL,
+        if let target, fresh, let base = clientURL,
            var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) {
-            parts.fragment = "item-\(item)"
+            parts.fragment = target
             clientURL = parts.url ?? base
         }
         if window == nil {
-            let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: WKWebViewConfiguration())
+            // The page runs up under the title bar (no separate strip on top); it is told so, to leave room for
+            // the window buttons and a band to drag the window by.
+            let setup = WKWebViewConfiguration()
+            setup.userContentController.addUserScript(WKUserScript(
+                source: "document.documentElement.classList.add('macapp')", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800), configuration: setup)
             web.autoresizingMask = [.width, .height]
             web.navigationDelegate = self
             let links = ClientLinks(clientURL: clientURL!)
             self.links = links  // WKWebView keeps its UI delegate weakly.
             web.uiDelegate = links
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
-                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            w.title = "心响"; w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = self
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.title = "心响"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
+            let holder = NSView(frame: NSRect(x: 0, y: 0, width: 1180, height: 800))
+            holder.addSubview(web)
+            let strip = DragStrip(frame: NSRect(x: 0, y: 800 - DragStrip.height, width: 1180, height: DragStrip.height))
+            strip.autoresizingMask = [.width, .minYMargin]
+            holder.addSubview(strip)
+            w.contentView = holder; w.isReleasedWhenClosed = false; w.delegate = self
             w.minSize = NSSize(width: 720, height: 520)
             if !w.setFrameUsingName("XinxiangMain") { w.center() }
             w.setFrameAutosaveName("XinxiangMain")
@@ -135,7 +156,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
         let root = self.root, n = response.notification.request.content.userInfo["n"] as? Int ?? -1
-        Task { @MainActor in CenterWindow.shared.show(root, item: n > 0 ? n : nil) }
+        Task { @MainActor in CenterWindow.shared.show(root, item: n >= 0 ? n : nil) }
         done()
     }
 
@@ -153,7 +174,9 @@ final class Banner {
     private let size = NSSize(width: 360, height: 86)
 
     func show(title: String, text: String, item: Int?, root: String) {
-        guard let screen = NSScreen.main else { return }
+        // the screen the owner is looking at: where the mouse is (with two displays NSScreen.main may be the other one)
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else { return }
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.nonactivatingPanel, .borderless],
                             backing: .buffered, defer: false)
         panel.level = .statusBar; panel.isFloatingPanel = true; panel.hidesOnDeactivate = false
@@ -361,10 +384,17 @@ final class Monitor: ObservableObject {
         if seen == 0 { UserDefaults.standard.set(max(newest, 1), forKey: "lastAlertId"); return }  // first run: no flood of old news
         if a["quiet"] as? Bool ?? false { return }  // in a meeting: they wait, nothing is lost
         let fresh = items.filter { ($0["id"] as? Int ?? 0) > seen }
-        for x in fresh.prefix(3) {
+        if fresh.count == 1, let x = fresh.first {
             Notifier.shared.post(x["title"] as? String ?? "心响", x["body"] as? String ?? "", item: x["n"] as? Int)
+        } else if fresh.count > 1 {
+            let names = ["done": "AI 做完 %d 件，等你验收", "blocked": "AI 卡住 %d 件，要问你", "new": "新进来 %d 件",
+                         "pending": "%d 件等的条件到了", "recall": "%d 个话题又出现了", "system": "%d 条要处理的提醒"]
+            var counts: [String: Int] = [:]
+            for x in fresh { counts[x["kind"] as? String ?? "", default: 0] += 1 }
+            let parts = ["blocked", "done", "new", "pending", "recall", "system"].compactMap { k in
+                counts[k].map { String(format: names[k] ?? "%d 条", $0) } }
+            Notifier.shared.post("心响 · \(fresh.count) 条新动态", parts.joined(separator: "；"), item: 0)
         }
-        if fresh.count > 3 { Notifier.shared.post("心响", "还有 \(fresh.count - 3) 条新消息，打开心响看", item: nil) }
         if let last = fresh.last?["id"] as? Int { seen = last; UserDefaults.standard.set(seen, forKey: "lastAlertId") }
     }
 

@@ -15,27 +15,13 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
-import sqlite3
 
+from . import db as database
 from .timeutil import TZ
 
 
 def _db(root):
-    path = Path(root) / "state/xinxiang.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, timeout=30)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, at TEXT NOT NULL,
-            sender TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, url TEXT, driver TEXT, dedupe TEXT UNIQUE);
-        CREATE INDEX IF NOT EXISTS messages_item ON messages(record_id, id);
-        CREATE TABLE IF NOT EXISTS deliverables (id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, version INTEGER NOT NULL,
-            at TEXT NOT NULL, summary TEXT, url TEXT, confirm TEXT, assumptions TEXT, sources TEXT, UNIQUE(record_id, version));
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS judgments (record_id TEXT PRIMARY KEY, at TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT);
-    """)
-    return db
+    return database.open(root, "xinxiang")
 
 
 def _now():
@@ -60,10 +46,37 @@ def add(root, record_id, sender, kind, text, *, url=None, driver=None, at=None, 
 URL = re.compile(r"https?://[^\s；;，,)）]+")
 
 
+def closed(root, record_id, by, how, note=None, at=None):
+    """Who closed an item and how (你 / AI / 飞书任务 · 标记完成 / 验收通过 / 标为不做), with the owner's note.
+    Also one line in the item's conversation, so the story shows it."""
+    at = at or _now()
+    db = _db(root)
+    try:
+        with db:
+            db.execute("INSERT INTO closures (record_id, at, by, how, note) VALUES (?,?,?,?,?)",
+                       (record_id, at, by, how, (note or "").strip()[:2000] or None))
+    finally:
+        db.close()
+    add(root, record_id, "system", "closed", f"{by}{how}", at=at)
+
+
+def closures(root):
+    """The latest closure of every item: {record_id: {by, how, at, note}}."""
+    db = _db(root)
+    try:
+        return {rid: {"by": by, "how": how, "at": at, "note": note}
+                for rid, by, how, at, note in db.execute(
+                    "SELECT record_id, by, how, at, note FROM closures WHERE id IN (SELECT max(id) FROM closures GROUP BY record_id)")}
+    finally:
+        db.close()
+
+
 def classify(text):
     """Notebook line → (sender, kind, text, url): who said it and what kind of line it is."""
     t = str(text or "").strip()
     url = (URL.search(t) or [None])[0] if URL.search(t) else None
+    if t.startswith("本人要改："):
+        return "me", "feedback", t.removeprefix("本人要改："), None
     if t.startswith(("本人补充：", "本人退回：")):
         return "me", "feedback", ("退回：" if t.startswith("本人退回") else "") + t.split("：", 1)[1], None
     if t.startswith(("本人改期到", "本人交给")):
@@ -111,6 +124,32 @@ def add_deliverable(root, record_id, *, summary, url, confirm="", assumptions=()
         db.close()
 
 
+def edit_deliverable(root, record_id, version, *, url=None, summary=None):
+    """The owner corrects one version in place (its link, its wording). False when there is no such version."""
+    db = _db(root)
+    try:
+        with db:
+            if not db.execute("SELECT 1 FROM deliverables WHERE record_id=? AND version=?", (record_id, version)).fetchone():
+                return False
+            if url is not None:
+                db.execute("UPDATE deliverables SET url=? WHERE record_id=? AND version=?", (url, record_id, version))
+            if summary is not None:
+                db.execute("UPDATE deliverables SET summary=? WHERE record_id=? AND version=?", (summary, record_id, version))
+        return True
+    finally:
+        db.close()
+
+
+def remove_deliverable(root, record_id, version):
+    """Take one version away (a link the AI made up, a duplicate). The other versions keep their numbers."""
+    db = _db(root)
+    try:
+        with db:
+            return db.execute("DELETE FROM deliverables WHERE record_id=? AND version=?", (record_id, version)).rowcount > 0
+    finally:
+        db.close()
+
+
 def assumptions_of(markdown):
     """The bullet list under「我做的假设」in a delivery."""
     part = markdown.split("我做的假设", 1)[1] if "我做的假设" in markdown else ""
@@ -130,10 +169,13 @@ def history(root, record_ids=None):
                 return {}
             q, args = f" WHERE record_id IN ({','.join('?' * len(ids))})", tuple(ids)
         out = {}
-        for rid, at, sender, kind, text, url, driver in db.execute(
-                "SELECT record_id, at, sender, kind, text, url, driver FROM messages" + q + " ORDER BY at, id", args):
+        for rid, at, sender, kind, text, url, driver, dedupe in db.execute(
+                "SELECT record_id, at, sender, kind, text, url, driver, dedupe FROM messages" + q + " ORDER BY at, id", args):
+            if sender == "ai" and kind == "say" and (dedupe or "").startswith("note:") and text.startswith("本人要改："):
+                sender, kind, text, url = classify(text)
+                driver = None
             out.setdefault(rid, {"messages": [], "deliverables": []})["messages"].append(
-                {"at": at[5:16].replace("T", " "), "from": sender, "kind": kind, "text": text, "url": url, "driver": driver})
+                {"at": at[5:16].replace("T", " "), "iso_at": at, "from": sender, "kind": kind, "text": text, "url": url, "driver": driver})
         for rid, version, at, summary, url, confirm, assumptions, sources in db.execute(
                 "SELECT record_id, version, at, summary, url, confirm, assumptions, sources FROM deliverables" + q + " ORDER BY version", args):
             out.setdefault(rid, {"messages": [], "deliverables": []})["deliverables"].append(

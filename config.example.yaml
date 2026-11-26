@@ -24,10 +24,43 @@ prework_enabled: false
 prework_lead_days: 2
 # 实时来源：聊天用你的身份读取、本地过滤；到下面这些时间点才批量交给模型提取
 chat_watch_enabled: true
+chat_review_every_minutes: 5   # 有新候选、且离上一轮满 5 分钟就整理；0 = 只在下面的固定时间整理
+chat_poll_minutes: 30          # 多久读一次 Slack / 飞书聊天（分钟）：1、5、10、15、30、60，设置页里能改
 chat_review_times: ['11:30', '14:30', '17:30', '20:30']
 feishu_tasks_enabled: true
+# Slack 作为第二个聊天来源：填用户 token（xoxp-），或设环境变量 SLACK_USER_TOKEN；都不填就不读 Slack
+slack_token: ''
+# 开发模式要你批准时推到手机：飞书卡片 + Slack 按钮（Slack 需建一个 Socket Mode 的 App，见 slack-app-manifest.yaml）
+slack_bot_token: ''   # xoxb-，Bot User OAuth Token
+slack_app_token: ''   # xapp-，App-Level Token（connections:write）
+approval_notify: [feishu, slack]   # [] = 只在心响里提示
+# Jira Cloud：指派给你、没完成的单子同步成事项。地址 + 邮箱 + API Token（id.atlassian.com/manage-profile/security/api-tokens），也可以在心响「工具」页连接
+jira_site: ''
+jira_email: ''
+jira_token: ''
+jira_others: []
+jira_unassigned_projects: []
+jira_owner_field: {}
+jira_title_fields: []
 # 会议标题里太常见、不能用来关联事项的词，例如公司名
 topic_stopwords: []
 
 # 心响：事项存在本机（点了立刻生效），飞书多维表格在后台做备份。改成 feishu 则直接读写飞书表格。
 item_store: local
+# 事项记在哪也可以选 notion（不需要飞书，在心响「系统 → 事项记在哪」连接）或 device（只存本机）
+notion_token: ''
+notion_database_id: ''
+
+# 本机 Claude 干活时可用的 MCP 工具。["*"] = 你在 Claude 里已连上的全部 MCP（发送、发布、合并、删除类一律禁止）；[] = 不用。
+worker_mcp_tools: ["*"]
+# 发送类工具默认一律禁止；这里写上完整工具名的才放行（比如让 pr-notify 把 PR 通知发到 Slack 群）。
+# 开着开发模式时，每次发送都先停下来等你在心响里批准。
+worker_mcp_send: []
+
+# 别人找你的事怎么处理（也可以在心响「设置 → 消息来源」或首次引导里选）：
+#   all      全能模式：别人找你的事都接进来，AI 直接开始做
+#   accepted 全自动模式：你答应了（回了「好的」「我来」）才接进来，然后 AI 开始做
+#   manual   手动模式：什么都不自动接，要做的事在心响里自己新建
+intake_mode: all
+# 08:30 早报和 21:00 晚报：feishu = 同时发到飞书；local = 只在心响里。其余通知一直只在心响里。
+brief_channel: feishu

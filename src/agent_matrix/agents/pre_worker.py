@@ -101,7 +101,9 @@ def assess(config, rows, *, today=None) -> dict:
         raise MatrixError("预做评估日期范围超出有效边界。") from exc
     enabled = getattr(config, "prework_enabled", False) is True
     owner_id = getattr(config, "owner_open_id", "")
-    configured_owner = isinstance(owner_id, str) and bool(owner_id.strip())
+    from ..itemstore import feishu_free
+    local_only = feishu_free(config)  # no Feishu account: every item here is the owner's; 执行方 decides who works
+    configured_owner = (isinstance(owner_id, str) and bool(owner_id.strip())) or local_only
     counts = Counter(row.get("record_id") for row in rows if isinstance(row, dict) and isinstance(row.get("record_id"), str))
     candidates, skipped = [], []
 
@@ -145,16 +147,17 @@ def assess(config, rows, *, today=None) -> dict:
             skip(row, "policy_declined", "该事项明确设为不代做。")
             continue
         owners = row.get("负责人")
-        if owners is None or owners == []:
-            skip(row, "owner_missing", "负责人待确认，不能默认由本人负责。")
-            continue
-        if (not isinstance(owners, list) or len(owners) != 1 or not isinstance(owners[0], dict)
-                or not isinstance(owners[0].get("id"), str) or not owners[0]["id"].strip()):
-            skip(row, "owner_ambiguous", "负责人必须是唯一且用户 ID 明确的人员。")
-            continue
-        if owners[0]["id"] != owner_id:
-            skip(row, "owner_other", "该事项由他人负责。")
-            continue
+        if not local_only:
+            if owners is None or owners == []:
+                skip(row, "owner_missing", "负责人待确认，不能默认由本人负责。")
+                continue
+            if (not isinstance(owners, list) or len(owners) != 1 or not isinstance(owners[0], dict)
+                    or not isinstance(owners[0].get("id"), str) or not owners[0]["id"].strip()):
+                skip(row, "owner_ambiguous", "负责人必须是唯一且用户 ID 明确的人员。")
+                continue
+            if owners[0]["id"] != owner_id:
+                skip(row, "owner_other", "该事项由他人负责。")
+                continue
         v1 = "执行方" in row
         if v1:
             executor = _selection(row.get("执行方"))

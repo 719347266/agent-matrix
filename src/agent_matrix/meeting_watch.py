@@ -40,11 +40,6 @@ class MeetingQueue:
     def __init__(self, state):
         self.state = state
         self.db = state.db
-        self.db.execute("""CREATE TABLE IF NOT EXISTS meeting_queue (
-            meeting_id TEXT PRIMARY KEY, metadata TEXT NOT NULL, status TEXT NOT NULL,
-            attempts INTEGER NOT NULL DEFAULT 0, next_check TEXT NOT NULL,
-            transcript_path TEXT, transcript_sha256 TEXT, delivery_receipt TEXT)""")
-        self.db.commit()
 
     def get(self, meeting_id):
         row = self.db.execute("SELECT meeting_id,metadata,status,attempts,next_check,transcript_path,transcript_sha256,delivery_receipt FROM meeting_queue WHERE meeting_id=?", (meeting_id,)).fetchone()
@@ -56,6 +51,12 @@ class MeetingQueue:
 
     def list(self):
         return [self.get(row[0]) for row in self.db.execute("SELECT meeting_id FROM meeting_queue ORDER BY next_check,meeting_id")]
+
+    def ready(self, now):
+        rows = self.db.execute("SELECT meeting_id,metadata,status,next_check FROM meeting_queue "
+                               "WHERE status IN ('ready','prepared','needs_attention') ORDER BY next_check,meeting_id")
+        return [{"meeting_id": mid, "topic": json.loads(meta).get("topic"), "status": status}
+                for mid, meta, status, due in rows if parse_time(due) <= now]
 
     def put(self, meta, now):
         mid = meta.get("meeting_id", "")
@@ -156,12 +157,23 @@ def ingest(config, source, queue, mid, now):
     return queue.get(mid)["status"]
 
 
+MEETING_PUSH = ("vc.meeting.participant_meeting_ended_v1", "vc.note.generated_v1")
+SEARCH_WITH_PUSH = timedelta(minutes=30)
+SEARCH_WITHOUT_PUSH = timedelta(minutes=5)
+
+
 def _search_due(queue, now):
-    """Full re-scan every 30 minutes; in between the listener pushes new meetings."""
+    """Full re-scan every 30 minutes while the listener receives meeting pushes; every 5 minutes when those
+    pushes are not live (e.g. the Feishu tenant offers no user-identity meeting events), so a finished meeting
+    is still picked up within minutes. Without a running listener: every check."""
     last = queue.state.get("meeting_watch:last_search")
     beat = queue.state.get("listen:heartbeat")
     listening = beat and now - parse_time(beat) < timedelta(minutes=3)
-    return not listening or not last or now - parse_time(last) >= timedelta(minutes=30)
+    if not listening or not last:
+        return True
+    status = queue.state.get("listen:status") or {}
+    pushed = all(status.get(key) == "live" for key in MEETING_PUSH)
+    return now - parse_time(last) >= (SEARCH_WITH_PUSH if pushed else SEARCH_WITHOUT_PUSH)
 
 
 def check(config, source, queue, now):
@@ -192,8 +204,7 @@ def check(config, source, queue, now):
             delay = (1,2,5,10,30)[min(attempt-1,4)]
             queue.update(row["meeting_id"],meta=meta,status="waiting_transcript",attempts=attempt,
                          next_check=(now+timedelta(minutes=delay)).isoformat())
-    ready = [{"meeting_id":r["meeting_id"],"topic":r["metadata"].get("topic"),"status":r["status"]}
-             for r in queue.list() if r["status"] in {"ready","prepared","needs_attention"} and parse_time(r["next_check"])<=now]
+    ready = queue.ready(now)
     allowed = config.transcripts_to_llm_allowed and config.llm_backend=="cindy_current"
     actionable=any(r["status"]=="needs_attention" for r in ready) or (bool(ready) and allowed)
     # Calendar reservations remain metadata; elapsed scheduled time is not proof
@@ -216,6 +227,50 @@ def defer(queue, mid, now):
     queue.update(mid,status="needs_attention" if exhausted else "waiting_transcript",attempts=old,
                  next_check=(now+timedelta(minutes=5 if old<3 else 30)).isoformat())
     return {"ok":True,"meeting_id":mid,"status":"needs_attention" if exhausted else "waiting_transcript"}
+
+
+def fetch_ready(config, client, queue, now):
+    """Fetch the transcript of every meeting that just became ready, in code, before any AI is woken: the AI is only
+    called (Cindy's pre-run check, the built-in worker) for a meeting whose transcript is already here.
+    A meeting the owner cannot read (the minutes belong to someone else) is said once, right away, and tried again
+    every 5 minutes until access is given. Returns the meetings fetched in this round."""
+    if not config.transcripts_to_llm_allowed or config.llm_backend != "cindy_current":
+        return []
+    fetched = []
+    for row in queue.ready(now):
+        if row["status"] != "ready":
+            continue
+        mid = row["meeting_id"]
+        try:
+            prepare(config, client, queue, mid)
+        except MatrixError as exc:
+            defer(queue, mid, now)
+            if getattr(exc, "code", None) == "no_permission":
+                queue.update(mid, next_check=(now + timedelta(minutes=5)).isoformat())
+                _say_no_permission(client, queue, queue.get(mid) or {})
+            said = f"meeting-fetch-error:{mid}:{getattr(exc, 'code', type(exc).__name__)}"
+            if not queue.state.get(said):   # retried every few minutes: the same failure is logged once
+                queue.state.set(said, now.isoformat())
+                from . import activity
+                activity.log(client.root, "error", f"会议逐字稿没拿到：{row.get('topic') or mid}", detail=str(exc)[:300], status="failed")
+            continue
+        queue.update(mid, next_check=now.isoformat())   # in hand: due now, so the pre-run check wakes the AI at once
+        fetched.append(mid)
+    return fetched
+
+
+def _say_no_permission(client, queue, row):
+    meta = row.get("metadata") or {}
+    topic, start = meta.get("topic") or "会议", meta.get("start_time") or ""
+    link = f"\n[打开会议]({meta['source_url']})" if str(meta.get("source_url") or "").startswith("https://") else ""
+    key = "meeting-no-permission-" + sha256(str(row.get("meeting_id")).encode()).hexdigest()[:24]
+    text = (f"【会议妙记看不了】{topic}（{start}）\n妙记属于别人，你的飞书账号没有查看权限，会上分给你的事还提不出来。"
+            f"\n在飞书里申请查看，或让主持人给你开权限；拿到后心响 5 分钟内自动接着提取。{link}")
+    try:
+        queue.state.once(key, lambda: client.send_self(text, key))
+    except MatrixError as exc:
+        from . import activity
+        activity.swallowed(client.root, "meeting_watch._say_no_permission", exc)
 
 
 def notify_missing(config,client,queue,mid):

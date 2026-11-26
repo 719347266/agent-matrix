@@ -62,7 +62,7 @@ class DriveTests(unittest.TestCase):
         job, folder = self.open_job("meeting", ref={"meeting_id": "m1", "source": str(source), "validate": ["v"], "publish": ["p"]})
         (folder / "review.json").write_text("{}")
         answers = iter([(1, {"ok": False, "error": "缺少承接字眼"}), (0, {"ok": True}), (0, {"ok": True, "task_ids": ["r1"]})])
-        with patch("agent_matrix.worker._cli", lambda root, *a: next(answers)):
+        with patch("agent_matrix.workenv._cli", lambda root, *a: next(answers)):
             first = drive.submit(self.root, self.config, job["id"])
             self.assertEqual(first["status"], "fix")
             self.assertIn("缺少承接字眼", first["problem"])
@@ -87,7 +87,7 @@ class DriveTests(unittest.TestCase):
         job, folder = self.open_job("item", n=44, ref={"record_id": "rec44", "version": "a" * 64})
         (folder / "交付.md").write_text(GOOD)
         (folder / "结果.json").write_text(json.dumps({"outcome": "done", "template": "方案", "summary": "先投人群包A",
-                                                     "sources": ["会议"]}, ensure_ascii=False))
+                                                     "sources": ["会议"], "memory": []}, ensure_ascii=False))
         with patch("agent_matrix.drive._item") as item:
             item.return_value.workdir = folder
             item.return_value.publish.return_value = {"url": "https://x/docx/a"}
@@ -119,7 +119,7 @@ class DriveTests(unittest.TestCase):
 
         class Done:
             stdout = "✓"
-        with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[-1]) or Done()):
+        with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[argv.index("--text") + 1]) or Done()):
             out = drive.submit(self.root, self.config, job["id"])
         self.assertEqual(commands, ["47 AI备", "49 AI做"])
         self.assertEqual([a["n"] for a in out["applied"]], [47, 49, 50])
@@ -160,7 +160,7 @@ class MoreTriageTests(unittest.TestCase):
 
             class Done:
                 stdout = "✓"
-            with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[-1]) or Done()):
+            with patch("agent_matrix.drive.subprocess.run", lambda argv, **k: commands.append(argv[argv.index("--text") + 1]) or Done()):
                 out = drive.submit(root, Config(), job["id"])
             self.assertEqual(commands, ["47 完成", "47 + https://x/docx/a", "50 不做", "51 无交付"])
             self.assertEqual([a["n"] for a in out["applied"]], [47, 50, 51])

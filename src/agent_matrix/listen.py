@@ -10,8 +10,10 @@ Pushed events (one `lark-cli event consume` child each):
                                            (worker.py) is woken at once for extraction
   task.task.update_user_access_v2          Feishu task changed → synced into the task table
   card.action.trigger                      a tapped card button → applied, the card turns into "✓ 已完成"
+开发模式 waiting for the owner → a Feishu card + a Slack DM with 批准/拒绝 buttons (approval_push.py, every 5 s;
+Slack taps arrive over a Socket Mode websocket in their own thread).
 Timers: prep cards ~30 min before meetings, brief catch-up, Friday review (every minute);
-chat reading (every 10 min); Feishu task sync fallback (every 15 min); the AI employee is
+chat reading (every 30 min); Feishu task sync fallback (every 15 min); the AI employee is
 started every 2 minutes when it is not already working (it exits when nothing is left).
 
 A subscription the Feishu console has not enabled yet is retried every 10 minutes, so
@@ -45,6 +47,69 @@ def log(*parts):
     print(datetime.now(TZ).strftime("%m-%d %H:%M:%S"), *parts, flush=True)
 
 
+def hymem_loop(root, path):
+    """记忆增强: writes what is queued into Hy Memory in the background (the model calls take seconds each)."""
+    from . import hymem
+    while True:
+        time.sleep(30)
+        try:
+            config = load(path)
+            hymem.mark(root, hymem.ready(config))   # writers in other processes check this flag
+            if hymem.ready(config):
+                written, failed = hymem.flush(root, config)
+                if written or failed:
+                    log("hymem", f"写入 {written}，失败 {failed}")
+        except Exception as exc:
+            log("hymem failed", type(exc).__name__, str(exc)[:200])
+
+
+def wechat_loop(root, path, wake=None):
+    """WeChat is read in its own thread: the command takes minutes, so nothing waits for it and the project lock
+    is only held for the moment the result is filed."""
+    from .sources import wechat
+    while True:
+        time.sleep(120)
+        try:
+            config = load(path)
+            if not config.wechat_enabled or config.intake_mode == "manual":
+                continue
+            state = State(root / "state/state.db")
+            try:
+                seen = wechat.cursors(state)
+            finally:
+                state.close()
+            now = datetime.now(TZ)
+            try:
+                read = wechat.collect(config, seen, now)
+            except MatrixError as exc:
+                state = State(root / "state/state.db")
+                try:
+                    state.set("wechat:status", {"ok": False, "at": now.strftime("%m-%d %H:%M"), "error": str(exc)[:160]})
+                finally:
+                    state.close()
+                log("wechat", "→", str(exc)[:160])
+                continue
+            for _ in range(20):   # the lock is busy only for moments
+                try:
+                    with exclusive_lock(root / "state"):
+                        state = State(root / "state/state.db")
+                        try:
+                            out = wechat.store(config, root, state, now, read)
+                        finally:
+                            state.close()
+                    break
+                except MatrixBusy:
+                    time.sleep(3)
+            else:
+                continue
+            if out["chats"] or out["candidates"]:
+                log("timer", "wechat", "→", json.dumps(out, ensure_ascii=False))
+            if out["candidates"] and wake:
+                wake(config)
+        except Exception as exc:
+            log("wechat failed", type(exc).__name__, str(exc)[:200])
+
+
 def backup_loop(root, path):
     """心响 keeps the items on this computer; this copies every change to the Feishu table in the background,
     in its own thread, so a slow or failing Feishu never holds up a click or another timer."""
@@ -56,6 +121,14 @@ def backup_loop(root, path):
             config = load(path)
             if not itemstore.enabled(config) or not itemstore.imported(root) or not itemstore.status(root)["pending"]:
                 wait = 3
+                continue
+            if config.item_store in ("notion", "device"):
+                from . import notion
+                out = itemstore.backup(root, push=notion.push(config) if config.item_store == "notion" else lambda *a: None,
+                                       target="Notion ")
+                if out["pushed"] and config.item_store == "notion":
+                    log("backup", out["pushed"], "→ Notion", "· 还剩", out["pending"])
+                wait = 3 if out["pushed"] or not out["pending"] else 60
                 continue
             if client is None:
                 client = Feishu(config, root)
@@ -138,7 +211,16 @@ class Listener:
             state = State(self.root / "state/state.db")
             try:
                 client = Feishu(config, self.root)
-                client.verify_owner(client.auth())
+                try:
+                    client.verify_owner(client.auth())
+                except MatrixError as exc:
+                    if not isinstance(exc, MatrixBusy) and not client.feishu_free():
+                        from .feishu import note_health
+                        note_health(state, exc)   # every timer stops here while Feishu cannot be used: say so on the page
+                    raise
+                if not client.feishu_free():
+                    from .feishu import note_health
+                    note_health(state)
                 return job(config, client, state)
             finally:
                 state.close()
@@ -207,7 +289,19 @@ class Listener:
         state.set("card:seen:" + eid, True)
         return "updated" if in_place else "handled"
 
+    def on_slack_item(self, config, client, state, payload):
+        """A choice tapped on a Slack item message (我来 / 交给 AI / 不做 / 通过…): run like the 心响 button."""
+        from .approval_push import on_item_tap
+        return on_item_tap(config, client, state, payload)   # reply.handle wakes the AI itself for 交给 AI / 继续
+
+    def on_slack_text(self, config, client, state, event):
+        """The owner typed in the Slack bot's DM: a reply command, answered in the same DM."""
+        from .approval_push import on_text
+        return on_text(config, client, state, event)
+
     def on_meeting(self, config, client, state, event):
+        if config.intake_mode == "manual":
+            return "manual"
         from .meeting_watch import MeetingQueue, MeetingSource, ingest
         mid = event.get("meeting_id") or (event.get("note_source") or {}).get("source_entity_id")
         if not mid:
@@ -218,12 +312,14 @@ class Listener:
 
     def on_task(self, config, client, state, event):
         from .sources import feishu_tasks
+        if config.intake_mode == "manual":
+            return "manual"
         return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if config.feishu_tasks_enabled else "off"
 
     def dispatch(self, key, event):
         handler = {"im.message.receive_v1": self.on_message, "vc.note.generated_v1": self.on_meeting,
                    "vc.meeting.participant_meeting_ended_v1": self.on_meeting,
-                   "task.task.update_user_access_v2": self.on_task, "card.action.trigger": self.on_card}[key]
+                   "task.task.update_user_access_v2": self.on_task, "card.action.trigger": self.on_card, "slack.item": self.on_slack_item, "slack.text": self.on_slack_text}[key]
         try:
             result = self.locked(lambda c, cl, s: handler(c, cl, s, event))
             log("event", key, "→", json.dumps(result, ensure_ascii=False, default=str)[:160])
@@ -235,6 +331,36 @@ class Listener:
             activity.log(self.root, "error", f"实时事件处理出错：{key}", detail=str(exc), status="failed")
 
     # ---- timers -----------------------------------------------------------------
+    def push_approvals(self, config, no_feishu):
+        """开发模式 waiting for the owner → a Feishu card and a Slack message with 批准 / 拒绝 buttons."""
+        from . import approval_push
+        if approval_push.slack_ready(config):
+            state = State(self.root / "state/state.db")
+            try:
+                if approval_push.push_slack(self.root, config, state):
+                    log("approvals", "slack updated")
+                from .snapshot import _snapshot
+                if approval_push.push_items(self.root, config, state, _snapshot(self.root).get("rows") or []):
+                    log("attention", "slack updated")
+            except Exception as exc:
+                self.trouble("approvals-slack", f"{type(exc).__name__} {str(exc)[:300]}")
+            finally:
+                state.close()
+        if no_feishu:
+            return
+        state = State(self.root / "state/state.db")
+        try:   # the Feishu login check costs a lark-cli call: only when a card is actually due
+            due = approval_push.unsent_feishu(self.root, config, state)
+        finally:
+            state.close()
+        if due:
+            try:
+                log("approvals", "feishu cards", self.locked(lambda c, cl, s: approval_push.push_feishu(c, cl, s)))
+            except MatrixBusy:
+                self.last["approvals"] = 0
+            except Exception as exc:
+                self.trouble("approvals-feishu", f"{type(exc).__name__} {str(exc)[:300]}")
+
     def every(self, name, seconds):
         now = time.time()
         if now - self.last.get(name, 0) >= seconds:
@@ -242,14 +368,51 @@ class Listener:
             return True
         return False
 
+    def trouble(self, name, what):
+        """A timer went wrong: always in the log; told to the owner once per half hour for the same trouble, not
+        every minute."""
+        log("timer failed", name, what[:300])
+        key, seen = f"{name}|{what[:80]}", getattr(self, "troubles", {})
+        if time.time() - seen.get(key, 0) < 1800:
+            return
+        seen[key] = time.time()
+        self.troubles = seen
+        from . import activity
+        activity.log(self.root, "error", f"后台定时任务出错：{name}", detail=what, status="failed")
+
     def wake_worker(self, config, force=False):
         """The AI employee runs in its own process; this only starts it when it is idle."""
         try:
-            from .worker import kick
+            from .workenv import kick
             if kick(self.root, config, force=force) == "started":
                 log("worker", "started")
         except Exception as exc:
             log("worker kick failed", type(exc).__name__, str(exc)[:200])
+
+    def meeting_check(self, config, client, state, now):
+        """Finds finished meetings on the meeting_watch schedule (every 5 minutes while
+        Feishu does not push meeting events) and starts the AI employee as soon as a transcript is ready.
+        Returns the meetings that just became ready (empty when nothing happened, so the log stays quiet).
+        A failure here is recorded and never stops the other minute jobs."""
+        if not config.meeting_watch_enabled or config.intake_mode == "manual":
+            return None
+        from .meeting_watch import MeetingQueue, MeetingSource, check, fetch_ready
+        from . import activity
+        queue = MeetingQueue(state)
+        before = {r["meeting_id"]: r["status"] for r in queue.list()}
+        try:
+            check(config, MeetingSource(client), queue, now)
+            fetch_ready(config, client, queue, now)   # the transcript, in code, before any AI is woken for it
+        except Exception as exc:
+            activity.log(self.root, "error", "会议检查出错", detail=f"{type(exc).__name__}: {exc}"[:300], status="failed")
+            return None
+        rows = queue.list()
+        activity.beat(self.root, "会议检查", f"待处理 {sum(r['status'] in {'ready', 'prepared', 'needs_attention'} for r in rows)} 场")
+        # a meeting whose transcript could not be fetched went back to waiting: it wakes nobody
+        new = [r["meeting_id"] for r in rows if r["status"] in {"ready", "prepared", "needs_attention"} and before.get(r["meeting_id"]) != r["status"]]
+        if new:
+            self.wake_worker(config, force=True)
+        return new
 
     SCHEDULE = [("recurring", (6, 0), False), ("morning", (8, 30), True), ("evening", (21, 0), True)]
 
@@ -275,20 +438,40 @@ class Listener:
 
     def timers(self):
         jobs = []
-        if self.every("minute", 60):
+        from .itemstore import feishu_free, reads_feishu
+        cfg = load(self.path)
+        auto = cfg.intake_mode != "manual"
+        no_feishu = feishu_free(cfg)        # no Feishu table: briefs, meeting prep cards, weekly review are off
+        no_source = not reads_feishu(cfg)   # Feishu / Lark meetings, chats and tasks need it; Slack does not
+        lark = cfg.lark_brand == "lark"     # Lark's API quota is per company and small: read less often
+        if self.every("minute", 300) and not no_source:
             def minute(config, client, state):
                 from .agents import meeting_prep, weekly_review
                 from .reply import catch_up_briefs
-                now = datetime.now(TZ)
-                out = {"prep": meeting_prep.run(config, client, state, now, horizon=31, lead=20)}
-                if state.get("brief-v1:migration-stage") == "v1_active":
-                    out["catch_up"] = catch_up_briefs(config, client, state, now)
-                    out["weekly"] = weekly_review.run(config, client, state, now)
                 from . import monitor
-                out["cindy_alert"] = monitor.alert_if_cindy_stalled(self.root, client, state, now)
+                now = datetime.now(TZ)
+                parts = []
+                if not no_feishu and self.every("meeting_prep", 600):
+                    parts.append(("prep", lambda: meeting_prep.run(config, client, state, now, horizon=35, lead=20)))
+                if state.get("brief-v1:migration-stage") == "v1_active" and not no_feishu:
+                    parts += [("catch_up", lambda: catch_up_briefs(config, client, state, now)),
+                              ("weekly", lambda: weekly_review.run(config, client, state, now))]
+                if not no_feishu:
+                    parts += [("cindy_alert", lambda: monitor.alert_if_cindy_stalled(self.root, client, state, now))]
+                parts += [("meetings", lambda: self.meeting_check(config, client, state, now))]
+                out, wrong = {}, []
+                for name, part in parts:   # each on its own: one that fails must not stop the others
+                    try:
+                        out[name] = part()
+                    except MatrixBusy:
+                        raise
+                    except Exception as exc:
+                        wrong.append(f"{name}: {type(exc).__name__} {str(exc)[:120]}")
+                if wrong:
+                    self.trouble("minute", "；".join(wrong))
                 return out
             jobs.append(("minute", minute))
-        if self.every("snapshot", 120):
+        if self.every("snapshot", 600):
             def snapshot(config, client, state):
                 from .workflow import Gateway
                 from . import monitor
@@ -296,20 +479,44 @@ class Listener:
                 monitor.save_snapshot(self.root, rows)
                 return {"rows": len(rows)}
             jobs.append(("snapshot", snapshot))
-        if self.every("chats", 600):
+        from .sources import chats, slack
+        # every chat_poll_minutes, working hours only (chat_poll); the first poll of the day catches up on the night
+        if auto and cfg.chat_watch_enabled and not no_source and self.every("chats", cfg.chat_poll_minutes * 60):
             def chat_poll(config, client, state):
-                from .sources import chats
-                if not config.chat_watch_enabled:
+                if not config.chat_watch_enabled or config.intake_mode == "manual":
                     return "off"
+                hour = datetime.now(TZ).strftime("%H:%M")
+                if hour < config.chat_extract_from or hour >= config.chat_extract_until:
+                    return "off_hours"
                 return chats.poll(config, client, state, datetime.now(TZ), skip_chat_ids=[state.get("inbox:chat_id")])
             jobs.append(("chats", chat_poll))
-        if self.every("tasks", 900):
+        if auto and cfg.chat_watch_enabled and slack.token(cfg) and self.every("slack", cfg.chat_poll_minutes * 60):
+            def slack_poll(config, client, state):
+                if not config.chat_watch_enabled or config.intake_mode == "manual":
+                    return "off"
+                out = slack.poll(config, self.root, state, datetime.now(TZ))
+                if isinstance(out, dict) and out.get("candidates"):
+                    self.wake_worker(config)  # don't wait for the periodic kick; the worker decides if it's time
+                return out
+            jobs.append(("slack", slack_poll))
+        if auto and self.every("jira", 600):  # Jira Cloud limits are per user and generous; no Feishu needed
+            from .sources import jira as jira_source
+            if jira_source.connected(cfg):
+                def jira_sync(config, client, state):
+                    from .sources import jira
+                    if config.intake_mode == "manual":
+                        return "off"
+                    from .engines import translate_jira
+                    return jira.sync(config, client, state, datetime.now(TZ), translate=translate_jira)
+                jobs.append(("jira", jira_sync))
+        if auto and cfg.feishu_tasks_enabled and not no_source and self.every("tasks", 3600 if lark else 900):   # Lark: hourly
             def tasks(config, client, state):
                 from .sources import feishu_tasks
-                return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if config.feishu_tasks_enabled else "off"
+                on = config.feishu_tasks_enabled and config.intake_mode != "manual"
+                return feishu_tasks.sync(config, client, state, datetime.now(TZ)) if on else "off"
             jobs.append(("tasks", tasks))
-        if self.every("worker", 120):
-            self.wake_worker(load(self.path))
+        if self.every("worker", 600):
+            self.wake_worker(cfg)
         if self.every("schedule", 60):
             self.fixed_times()
         if self.every("memory", 600):
@@ -320,6 +527,28 @@ class Listener:
                     log("memory", "waiting due", told)
             except Exception as exc:
                 log("memory failed", type(exc).__name__, str(exc)[:200])
+        if self.every("wake", 120):
+            def wake():   # its own thread: checking for items takes the project lock and may take a while
+                try:
+                    from . import wakeup
+                    if not 8 <= datetime.now(TZ).hour < 23 and not wakeup.chosen(self.root):
+                        return
+                    done = wakeup.watch(self.root, load(self.path))
+                    if done:
+                        log("wake", done)
+                except Exception as exc:
+                    log("wake failed", type(exc).__name__, str(exc)[:200])
+            threading.Thread(target=wake, daemon=True, name="xinxiang-wake").start()
+        if self.every("approvals", 5):
+            self.push_approvals(cfg, no_feishu)   # card taps arrive only where the Feishu events run
+        if self.every("expected", 600):
+            try:  # 预计会遇到的事: told the day before and on the day (local only; once per day per thing)
+                from . import versions
+                told = versions.expected_due(self.root)
+                if told:
+                    log("expected", "due", told)
+            except Exception as exc:
+                log("expected failed", type(exc).__name__, str(exc)[:200])
         for name, job in jobs:
             try:
                 result = self.locked(job)
@@ -328,17 +557,21 @@ class Listener:
             except MatrixBusy:
                 self.last[name] = 0  # try again on the next loop
             except Exception as exc:
-                log("timer failed", name, type(exc).__name__, str(exc)[:200])
-                from . import activity
-                activity.log(self.root, "error", f"监听定时任务出错：{name}", detail=str(exc), status="failed")
+                self.trouble(name, f"{type(exc).__name__} {str(exc)[:300]}")
 
     def run(self):
         config = load(self.path)
-        for key, identity in EVENTS:
+        from .itemstore import feishu_free
+        for key, identity in [] if feishu_free(config) else EVENTS:
             Consumer(key, identity, self.inbox, self.status, config.lark_binary).start()
         from .app import start_background
         served = start_background(self.root, config)
         threading.Thread(target=backup_loop, args=(self.root, self.path), daemon=True, name="xinxiang-backup").start()
+        threading.Thread(target=wechat_loop, args=(self.root, self.path, self.wake_worker), daemon=True, name="xinxiang-wechat").start()
+        threading.Thread(target=hymem_loop, args=(self.root, self.path), daemon=True, name="xinxiang-hymem").start()
+        from .approval_push import slack_loop
+        threading.Thread(target=slack_loop, args=(self.root, self.path, log, lambda p: self.inbox.put(("slack.item", p)),
+                                                     lambda e: self.inbox.put(("slack.text", e))), daemon=True, name="xinxiang-slack-approval").start()
         log("listener started", self.root, "· 心响", f"http://127.0.0.1:{config.app_port}/" if served else "(port busy, served elsewhere)")
         while True:
             try:

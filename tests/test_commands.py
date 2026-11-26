@@ -25,6 +25,15 @@ def until(predicate, timeout=3):
     raise AssertionError("command did not settle")
 
 
+class ItemBoxTests(unittest.TestCase):
+    def test_short_actions_run_and_the_rest_is_material(self):
+        from agent_matrix.commands import say_text
+        self.assertEqual(say_text(1, "完成了"), "1 完成")
+        self.assertEqual(say_text(1, "1 完成"), "1 完成")
+        self.assertEqual(say_text(1, "预算按 600 一天重算"), "1 + 预算按 600 一天重算")
+        self.assertEqual(say_text(1, "2 完成"), "1 + 2 完成")  # another item's number is not this item's action
+
+
 class CommandQueueTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -137,7 +146,7 @@ class CommandQueueTests(unittest.TestCase):
 
 class ImmediateCompletionTests(unittest.TestCase):
     def test_optional_document_search_does_not_delay_completion_or_stop(self):
-        a = applier([row(1, "进行中", 标题="撰写标签体系需求文档")])
+        a = applier([row(1, "进行中", 标题="撰写数据看板需求文档")])
         a.immediate, a.deferred = True, []
         with patch("agent_matrix.reply.find_deliverable", side_effect=AssertionError("must defer")), patch.object(a, "stop_ai", return_value="已通知停止") as stop:
             reply = a.one(Op([1], "complete"), 1, a.find(1))
@@ -148,7 +157,7 @@ class ImmediateCompletionTests(unittest.TestCase):
         stop.assert_called_once()
 
     def test_failed_write_does_not_schedule_search_or_claim_completion(self):
-        a = applier([row(1, "进行中", 标题="撰写标签体系需求文档")])
+        a = applier([row(1, "进行中", 标题="撰写数据看板需求文档")])
         a.immediate, a.deferred = True, []
         with patch.object(a, "write", side_effect=RuntimeError("readback unavailable")):
             with self.assertRaises(RuntimeError):

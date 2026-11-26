@@ -10,19 +10,13 @@ import json
 from zoneinfo import ZoneInfo
 
 from .bitable import js, require_owned
-from .brief_migration import single, number, validate_registry, SOURCE_FIELDS
+from .values import single, number, validate_registry
+from .schema import SOURCE_FIELDS  # noqa: F401
+from . import activity, lifecycle
 from .models import MatrixError
 from .records import read_records
-from .schema import field, date, select
+from .schema import field, date, select, STATUSES, EXTRA, FIELDS, DEFAULT_PROGRESS  # noqa: F401
 
-STATUSES = ['待确认', '未开始', '进行中', '卡住', '待验收', '完成', '取消']
-EXTRA = [field('顺延历史'), date('完成时间'), field('排除本人提醒', 'checkbox'),
-         field('补充材料'), field('拍板结果'), select('交付情况', ['有交付', '无交付', '待补交付'])]
-FIELDS = list(dict.fromkeys([*SOURCE_FIELDS, '编号', '执行方', '进度', '卡点', '完成标准',
-    '交付物链接', '验收结果', '退回意见', '父事项', '顺延次数', '去重键', '来源链接',
-    '预做凭据', '更新时间', '创建时间', '能否AI预做', '类型', '关联任务链接', *[x['name'] for x in EXTRA]]))
-DEFAULT_PROGRESS = {'待确认': '0/1 待确认', '未开始': '0/1 未开始', '进行中': '进行中',
-                    '卡住': '卡住', '待验收': '1/1 已交付', '完成': '完成', '取消': '不做'}
 
 def digest(value):
     return sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -52,7 +46,7 @@ def normalize(key, value):
     if key in {'顺延次数', '延期次数'}:
         return int(value)
     if key in {'交付物链接','AI草稿链接','来源链接','关联任务链接'}:
-        from .prework import _draft_url
+        from .values import draft_url as _draft_url
         return _draft_url(value)
     return value
 
@@ -61,6 +55,20 @@ def matches(row, patch):
 
 def visible(row):
     return not row.get('排除本人提醒')
+
+def note_transition(root, row, patch, source):
+    """Check a status change against lifecycle.ALLOWED. Today an unlisted change is only recorded."""
+    if '状态' not in patch:
+        return
+    reason = lifecycle.problem(row.get('状态'), patch.get('状态'))
+    if not reason:
+        return
+    if lifecycle.ENFORCE:
+        raise MatrixError(reason + '，未写入。')
+    number = row.get('编号')
+    activity.log(root, 'lifecycle', (f'#{number} ' if number else '') + reason + f'（来自 {source}）',
+                 status='observed', ref=row.get('record_id') or '')
+
 
 class Gateway:
     def __init__(self, client, state, *, on_rows=None, progress=None):
@@ -99,6 +107,7 @@ class Gateway:
                     self.state.confirm(key, receipt)
                 return receipt
             raise MatrixError('上次写入未核实或后来被修改；未重放，请核对该事项。')
+        note_transition(self.client.root, fresh, patch, source)
         # Do not overwrite a simultaneous human change, including ownership/due date.
         if not matches(fresh, {k:v for k,v in before.items() if k not in {'record_id', '更新时间'}}):
             raise MatrixError('事项刚被修改，请重新读取后处理。')
