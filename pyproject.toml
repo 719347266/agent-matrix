@@ -21,4 +21,4 @@ agent-matrix = "agent_matrix.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_matrix = ["app/*.html", "app/*.png", "prompts/*.md"]
+agent_matrix = ["app/*.html", "app/*.png", "prompts/*.md", "prompts/specs/*.md"]

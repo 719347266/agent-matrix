@@ -39,6 +39,7 @@ from .timeutil import TZ
 ITEM_LEASE_MINUTES = 120
 OTHER_LEASE_MINUTES = 30
 MAX_FIX_ROUNDS = 2
+ITEM_FIX_ROUNDS = 3   # an item gets one more: one of its rounds may be the review (specs.review_request)
 
 
 
@@ -889,7 +890,8 @@ def _item_job(root, config, driver, item, client, rows, row, notes):
     history = _history_text(root, item.rid)
     from .eventbrief import build as brief
     told = brief(root, item.rid, rows)
-    base = (told + "\n---\n\n" if told else "") + first_prompt(root, row)   # the brief first: the AI need not dig for it
+    stage = _stage(root, item, rows, row)   # 交付规格 and 做事方式: what this round produces
+    base = (told + "\n---\n\n" if told else "") + first_prompt(root, row) + "\n\n" + stage   # the brief first: the AI need not dig for it
     extra = []
     if history:
         extra += ["", "## 这件事之前的对话（心响保存；可能是别的 AI 做的，接着往下，不要从头来）", history]
@@ -900,7 +902,22 @@ def _item_job(root, config, driver, item, client, rows, row, notes):
             "output": ["交付.md", "结果.json"], "lease_until": _lease(ITEM_LEASE_MINUTES),
             "instructions": base + "\n".join(extra),
             # the built-in GPT resumes its own conversation instead of re-reading everything
-            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
+            "builtin_prompt": resume_prompt(changes, (item.workdir / ".timed_out").is_file()) + "\n\n" + stage if any((item.workdir / f).is_file() for f in (".thread", ".claude-session")) else base}
+
+
+def _stage(root, item, rows, row):
+    """Which kind of deliverable this is, how settled its spec is, and what this round does (specs.plan), kept in the
+    folder for the check after it and for the page."""
+    from . import specs
+    from .background import _one, parent_of
+    old = specs.read_plan(item.workdir) or {}
+    parent = parent_of(row, rows)
+    kind = old.get("kind") or specs.guess(_one(row.get("标题")), _one(row.get("下一步动作")), _one(parent.get("标题")) if parent else "")
+    p = specs.plan(root, item.rid, kind, outline_done=(item.workdir / "提纲.md").is_file())
+    p["workdir"] = str(item.workdir)
+    p["checklist"] = specs.checklist(specs.text(root, kind)) or specs.checklist(specs.expert(root, kind)) if kind else []
+    specs.keep_plan(item.workdir, p)
+    return specs.work_text(root, p)
 
 
 SORTING = ("triage", "meeting", "chat", "learn", "donecheck")   # 整理: judging new items, meetings, chats, learning rules, done yet
@@ -1311,7 +1328,7 @@ def _submit_item(root, config, job):
         return closed
     if problem:
         job["rounds"] += 1
-        if job["rounds"] > MAX_FIX_ROUNDS:
+        if job["rounds"] > ITEM_FIX_ROUNDS:
             item.block(f"自检没通过：{problem}"[:28], {"note": problem}, 0)
             _close(root, job, "blocked")
             return {"ok": False, "status": "blocked", "problem": problem}
@@ -1327,9 +1344,30 @@ def _submit_item(root, config, job):
         return {"ok": True, "status": "blocked"}
     if result["outcome"] == "handled":
         return _handled(root, item, job, result)
+    _keep_spec(root, item)
+    if result["outcome"] == "outline":
+        item.keep_files()
+        question = str(result.get("question") or "按这个提纲写吗？").strip()
+        item.block(f"提纲好了：{question}"[:60], {"tried": "调研完，提纲写在 提纲.md", "note": str(result.get("summary") or "")}, 0)
+        _close(root, job, "blocked")
+        return {"ok": True, "status": "blocked", "outline": True}
     published = item.publish(result, 0)
     _close(root, job, "done")
     return {"ok": True, "status": "done", "url": published.get("url")}
+
+
+def _keep_spec(root, item):
+    """规格.md from the AI: the first spec of its kind is used from now on; under review it waits for the owner's 用."""
+    from . import specs
+    p = specs.read_plan(item.workdir) or {}
+    try:
+        body = (item.workdir / "规格.md").read_text(encoding="utf-8")
+    except OSError:
+        return
+    if p.get("form") and specs.form(root, p.get("kind"), body):
+        activity.log(root, "learn", f"#{item.n} 做事时形成了「{p['kind']}」的交付规格（草稿），在「记忆 → 交付规格」里能看能改")
+    elif p.get("revise") and specs.propose(root, p.get("kind"), body):
+        activity.log(root, "learn", f"「{p['kind']}」的交付规格有一份修订等你确认")
 
 
 def save_drafts(root, drafts, job_id):

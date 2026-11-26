@@ -40,6 +40,7 @@ TEMPLATES = {
     "周报": (["本周完成", "进行中", "下周计划", "风险"], 1500),
     "数据汇总": (["结论", "口径"], 3000),
     "方案": (["推荐", "对比", "拍板"], 4000),
+    "调研报告": (["结论"], 8000),
     "会议材料": (["议程", "决策", "背景"], 2000),
     "回复草稿": (["草稿", "确认"], 1200),
     "其他": ([], 5000),
@@ -52,7 +53,7 @@ class Result(BaseModel):
     record_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     input_version: str = Field(pattern=r"^[a-f0-9]{64}$")
     kind: Literal["internal_result", "draft"]
-    template: Literal["需求文档", "周报", "数据汇总", "方案", "会议材料", "回复草稿", "其他"]
+    template: Literal["需求文档", "调研报告", "周报", "数据汇总", "方案", "会议材料", "回复草稿", "其他"]
     # One line in the 12:00/17:00 batch: "#15 周报初稿 · <summary>".
     summary: str = Field(min_length=1, max_length=40)
     artifact_path: str

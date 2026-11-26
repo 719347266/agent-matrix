@@ -478,6 +478,26 @@ function reset(item) {
   assert.match(sent, /交给 AI 的说明/); assert.match(sent, /class="prompt-text">## 共同规矩/); assert.match(sent, /11-26 15:00 交给 AI 的完整说明/);
   evaluate('PROMPTS.rec61={text:"",at:""}'); assert.match(evaluate("itemView(byN(61))"), /还没交给过 AI/);
   evaluate('S.tab="talk"');
+  // 做事方式: one switch on 事项 for everything, one in the item for that item; the outline and the delivery are shown plainly
+  evaluate(`D.settings={...(D.settings||{}),work_mode:"auto",specs:[{kind:"需求文档",state:"trial",label:"试用中",uses:3,passed:2,recent:3,reviewed:"",why:"",text:"## 结构\\n1. 背景",proposal:"## 结构\\n1. 背景\\n2. 验收"},{kind:"周报",state:"none",label:"还没有",uses:0,passed:0,recent:0,reviewed:"",why:"",text:"",proposal:""}]};
+    D.items=[{n:71,rid:"rec71",title:"写切换模型需求",status:"卡住",who:"AI",blocker:"提纲好了：按这个提纲写吗？",work:{kind:"需求文档",spec:"试用中",mode:"auto",own_mode:"",outline:"## 提纲\\n1. 要解决什么问题",waiting_outline:true,review:[],fixed:0}},
+             {n:72,rid:"rec72",title:"写周报",status:"待验收",who:"AI",work:{kind:"周报",spec:"草稿",mode:"careful",own_mode:"careful",outline:"",waiting_outline:false,review:["✓ 有结果","改了：补了风险"],fixed:1}}];
+    D.deliverables={72:[{v:1,at:"11-26 18:00",summary:"本周周报",url:"https://x.feishu.cn/docx/a",confirm:"下周计划要不要加评审"}]}; D.inbox=[]; S.view="all"; S.all="全部"; S.dim="type"`);
+  const bar = evaluate("allPage()");
+  for (const label of ["做事方式","自动","快速","仔细","setGlobalMode"]) assert.ok(bar.includes(label), label);
+  const outline = evaluate("itemView(byN(71))");
+  for (const label of ["提纲：等你看过再写","按提纲写","修改提纲…","要解决什么问题","类型：需求文档 · 规格：试用中"]) assert.ok(outline.includes(label), label);
+  assert.doesNotMatch(outline, /按现有资料继续/, "an outline waits for 按提纲写, not a generic continue");
+  assert.deepEqual(plain("rowButtons(byN(71)).map(b=>b[0])"), ["按提纲写"]);
+  const done = evaluate("itemView(byN(72))");
+  for (const label of ["周报","规格：草稿","做事方式：仔细","v1 · 本周周报","待你确认：","下周计划要不要加评审","自审 2 项，改了 1 处","打开文档","验收通过","让 AI 修改"]) assert.ok(done.includes(label), label);
+  assert.equal((done.match(/>验收通过</g)||[]).length, 1, "deciding on it is in one place");
+  assert.match(done, /class="on" role="radio" aria-checked="true"[^\n]*?\('careful'\)">仔细/, "this item's own mode is shown as chosen");
+  assert.match(done, /改回默认（自动）/); assert.match(evaluate("itemView(byN(71))"), /跟随默认/);
+  assert.equal((outline.match(/按提纲写/g)||[]).length, 1, "one place for each button");
+  assert.doesNotMatch(outline, /## 提纲/, "the outline reads as headings, not as # marks");
+  const specCards = evaluate("specsView()");
+  for (const label of ["交付规格","需求文档","试用中","最近 3 次里一次通过 2 次","有一份修订等你确认","周报","还没有","第一次做这一类事时"]) assert.ok(specCards.includes(label), label);
   // 术语：状态、分区、按钮只用 TERM 里的说法；这些口语和旧叫法在页面上一处都不许出现
   const BANNED = /卡住|要你来|看起来|都不要|都我来|我自己来|办完|AI 问你|等你定|你来做|别人在做|AI 排队|AI 正在做|等你验收|关掉|没办完|恢复（标错了）|先做这件|要你看|等你看|等你确认接不接|AI 问：/;
   evaluate(`D.items=[{n:1,title:"甲",status:"待确认",who:"我"},{n:2,title:"乙",status:"未开始",who:"我",due:TODAY},{n:3,title:"丙",status:"进行中",who:"AI"},
