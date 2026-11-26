@@ -44,9 +44,10 @@ class Documents(unittest.TestCase):
 
     def test_a_requirements_document_is_a_type_of_its_own_with_room_to_say_things(self):
         body = "现在会员只能用默认模型。" * 120   # ~1300 字：方案 used to stop at 1200
-        doc = f"# 观己｜对话｜切换模型｜需求\n\n## 要解决什么问题\n{body}\n\n## 需求\n1. 会员可以切换。\n\n## 用到的资料\n- 会议\n\n## 我做的假设\n无\n"
+        doc = f"# 示例 App｜对话｜切换模型｜需求\n\n## 要解决什么问题\n{body}\n\n## 需求\n1. 会员可以切换。\n\n## 用到的资料\n- 会议\n\n## 我做的假设\n无\n"
         self.assertIsNone(self.check("需求文档", doc))
-        self.assertIn("要解决什么问题", self.check("需求文档", doc.replace("## 要解决什么问题", "## 背景")))
+        self.assertIsNone(self.check("需求文档", doc.replace("## 要解决什么问题", "## 背景")), "either opening will do: teams name it differently")
+        self.assertIn("要解决什么问题或背景", self.check("需求文档", doc.replace("## 要解决什么问题", "## 说明")))
 
     def test_the_prompt_asks_for_the_teams_own_format_full_sentences_and_nothing_made_up(self):
         worker = promptfile.read(".", "worker.md")
@@ -68,3 +69,43 @@ class ThePromptIsKept(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkUsesMemory(unittest.TestCase):
+    """The brief carries the owner's memory that bears on the work, picked in code: not left to the AI to go and look."""
+    def setUp(self):
+        from agent_matrix import library, memory
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "state").mkdir()
+        (self.root / "config.yaml").write_text("owner_name: 王小明\n", encoding="utf-8")
+        library.folder(self.root).mkdir(parents=True)
+        (library.folder(self.root) / ".migrated").write_text("x", encoding="utf-8")
+        library.save(self.root, library.GENERAL, library.render(library.GENERAL, "每件事动手前都读。", "## 交付先给结论\n先给结论。"))
+        library.save(self.root, "写需求经验", library.render("写需求经验", "要写需求文档、会员规则时打开。", "## 会员规则先查现有权益文档\n先查。"))
+        library.save(self.root, "发 PR 经验", library.render("发 PR 经验", "要发 PR、通知 reviewer 时打开。", "## 从 main 切分支\n切。"))
+        db = memory._db(self.root)
+        with db:
+            for sid, title, kind, text in (("m1", "周会", "decision", "会员每天对话次数按档位给，Pro 每天 100 句"),
+                                           ("m1", "周会", "decision", "下周上线小组件"), ("m2", "本次会", "decision", "切换模型排入 2.4")):
+                db.execute("INSERT INTO moments (source, source_id, source_title, at, kind, text, quote, stamp, wait_for, due, status, created) "
+                           "VALUES ('meeting',?,?, '2026-11-20T10:00:00', ?, ?, '', '', NULL, NULL, 'open', '2026-11-20')", (sid, title, kind, text))
+        db.close()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_general_rules_and_the_experience_on_this_kind_of_work_come_in_full(self):
+        from agent_matrix import eventbrief
+        got = "\n".join(eventbrief._experience(self.root, "写会员切换模型的需求文档"))
+        self.assertIn("先给结论", got)
+        self.assertIn("会员规则先查现有权益文档", got)
+        self.assertNotIn("从 main 切分支", got, "experience about other work stays in the index")
+        self.assertNotIn("\n## ", got, "the brief's own headings are not broken by the memory's")
+
+    def test_what_earlier_meetings_settled_about_the_same_thing_comes_along(self):
+        from agent_matrix import eventbrief
+        got = eventbrief._earlier(self.root, "m2", "会员对话次数和切换模型的规则")
+        self.assertTrue(any("Pro 每天 100 句" in g and "周会" in g for g in got), got)
+        self.assertFalse(any("小组件" in g for g in got), "not about this")
+        self.assertFalse(any("排入 2.4" in g for g in got), "this meeting's own is in 会上已经定下的")

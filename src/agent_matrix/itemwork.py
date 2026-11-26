@@ -27,7 +27,7 @@ from .workenv import _check, now, project, read_status, scratch, write_status
 MAX_FIX_ROUNDS = 2
 
 SECTIONS_ALWAYS = ["用到的资料", "我做的假设"]
-TEMPLATE_HINT = {"需求文档": "要解决什么问题 / 需求（按功能分节，每条规则写清条件和结果） / 待确认", "周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
+TEMPLATE_HINT = {"需求文档": "要解决什么问题（或背景） / 需求（按功能分节，每条规则写清条件和结果） / 待确认", "周报": "本周完成 / 进行中 / 下周计划 / 风险", "数据汇总": "结论 / 数据表 / 口径",
                  "方案": "推荐 / 选项对比 / 需要你拍板", "会议材料": "议程 / 需要决策 / 背景数据",
                  "回复草稿": "草稿 / 需要你确认", "其他": "按完成标准逐条覆盖"}
 TRIAGE_LABEL = {"ai": "AI 能独立做，已接手", "prep": "需要你来做，AI 先备材料", "me": "需要你自己来",
@@ -89,9 +89,9 @@ def check_result(workdir, row, root=None):
     if missing:
         return result, "交付.md 最后要有这两节小标题：" + "、".join(f"## {s}" for s in missing) + "。"
     sections, cap = TEMPLATES[template]
-    missing = [s for s in sections if not any(s in n for n in names)]
+    missing = [s for s in sections if not any(alt in n for alt in s.split("|") for n in names)]
     if missing:
-        return result, f"按「{template}」模板，交付.md 缺少这些小标题：" + "、".join(missing) + "。"
+        return result, f"按「{template}」模板，交付.md 缺少这些小标题：" + "、".join(s.replace("|", "或") for s in missing) + "。"
     found = [w for w in PLACEHOLDERS if w in doc]
     if found:
         return result, "交付.md 里还有占位文字：" + "、".join(found) + "。换成真实内容。"
