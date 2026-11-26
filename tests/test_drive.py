@@ -77,7 +77,7 @@ class DriveTests(unittest.TestCase):
         job, _ = self.open_job("item", n=44, ref={"record_id": "rec44", "version": "a" * 64})
         with patch("agent_matrix.drive._item") as item:
             item.return_value.workdir = self.root / "empty"
-            for _ in range(drive.MAX_FIX_ROUNDS):
+            for _ in range(drive.ITEM_FIX_ROUNDS):
                 self.assertEqual(drive.submit(self.root, self.config, job["id"])["status"], "fix")
             self.assertEqual(drive.submit(self.root, self.config, job["id"])["status"], "blocked")
             item.return_value.block.assert_called_once()

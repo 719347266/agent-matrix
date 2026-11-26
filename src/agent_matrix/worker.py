@@ -38,6 +38,7 @@ from .state import State, exclusive_lock
 from .timeutil import TZ
 
 MAX_FIX_ROUNDS = 2
+ITEM_FIX_ROUNDS = 3   # an item gets one more: one of its rounds may be the review (specs.review_request)
 IDLE_POLL_SECONDS = 15  # a free lane looks for new work this often while other lanes are busy
 
 
@@ -166,7 +167,7 @@ def run_item_job(root, config, job):
     thread = thread_file.read_text().strip() if thread_file.is_file() else None
     prompt, seen, result = (job["builtin_prompt"] if thread else job["instructions"]), {}, {}
     stop = lambda: drive.get(root, job["id"])["status"] != "open"
-    for _ in range(MAX_FIX_ROUNDS + 1):
+    for _ in range(ITEM_FIX_ROUNDS + 1):
         run = Run(config, item.workdir, thread=thread, guard=guard).run(prompt, on_tick=lambda: _tick(root, config, job, item, seen), should_stop=stop)
         if not run.stopped and not stop() and thread and not run.messages and not run.timed_out and run.returncode:
             # the old conversation cannot be resumed: start a new one, the history comes with the instructions
