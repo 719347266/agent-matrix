@@ -223,7 +223,7 @@ button:disabled{opacity:.5;cursor:wait}
 .chain-item a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22em}.chain-item em{font-style:normal;color:var(--ink3)}
 .chain-item .x{border:0;background:none;color:var(--ink3);padding:0 4px;font-size:14px;line-height:1}.chain-item .x:hover{color:var(--red)}
 .chain-item.maybe{border-style:dashed}.chain-pick{padding:0;background:none;gap:6px;flex-wrap:wrap}.chain-pick select{height:28px}.chain-pick input{flex:1;min-width:160px}
-.tabs{display:flex;gap:2px;padding:14px 24px 0;border-bottom:1px solid var(--line2)}
+.tabs{display:flex;gap:2px;padding:14px 24px 0;border-bottom:1px solid var(--line2);position:sticky;top:var(--headh,0);background:var(--solid,var(--panel));z-index:2}
 .tab{border:0;background:none;padding:6px 10px 9px;color:var(--ink2);font-size:13px;position:relative}
 .tab:hover{color:var(--ink)}
 .tab.on{color:var(--ink);font-weight:600}
@@ -2047,7 +2047,7 @@ function sourceTab(i){
   const parent=i.parent&&byN(i.parent), kids=D.items.filter(x=>x.parent===i.n);
   return `<div class="src">
     <div><span class="k">来源</span>${esc(i.source||"手动添加")}${i.source_url?`　<a href="${esc(i.source_url)}" target="_blank" rel="noopener">打开原处 ↗</a>`:""}</div>
-    ${i.quote?`<div class="quote">${esc(i.quote.slice(0,400))}</div>`:""}
+    ${i.quote?`<div class="quote">${esc(i.quote.slice(0,3000))}</div>`:""}
     <div><span class="k">要做</span>${esc(i.next||i.title)}</div>${i.criterion?`<div><span class="k">做到算完</span>${esc(i.criterion)}</div>`:""}
     ${parent?`<div><span class="k">关联</span>给 <a href="#" onclick="openItem(${parent.n});return false">#${parent.n} ${esc(parent.title)}</a> 备的材料</div>`:""}
     ${kids.length?`<div><span class="k">关联</span>AI 在帮你备材料：${kids.map(k=>`<a href="#" onclick="openItem(${k.n});return false">#${k.n}</a>`).join("、")}</div>`:""}
@@ -2117,12 +2117,14 @@ async function handTo(n,to){
   catch(e){ toast(e.message||"没换成，连不上本机服务"); render(); }
 }
 /* ---------- 回复对方：AI 起草，本人看过、可以改，点「发送」才以本人身份回到原消息下面 ---------- */
+// ponytail: line count guessed at ~40 characters per line; the box can still be dragged taller
+function fitRows(text){ const n=String(text||"").split("\n").reduce((a,l)=>a+Math.max(1,Math.ceil(l.length/40)),0); return Math.min(24,Math.max(8,n+1)); }
 function replyView(i){
   const r=i.draft_reply; if(!r) return "";
   if(r.status==="sent") return `<div class="d-sec" style="padding-top:14px"><h3>已回复对方</h3><div class="inner-list"><div class="dv-row"><div style="min-width:0"><div class="t wrap">${linkify(r.text)}</div><div class="s">${esc(String(r.sent_at||"").slice(5,16).replace("T"," "))} 发出</div></div></div></div></div>`;
   const can=!!r.where;
   return `<div class="d-sec" style="padding-top:14px"><h3>要回给对方的话<span class="hint" style="margin:0 0 0 8px;font-weight:400">${can?`AI 起草，你点「发送」才会以你的身份在${esc(r.where)}`:"这件事不是从 Lark / 飞书或 Slack 的消息来的，复制过去自己发"}</span></h3>
-    <textarea id="reply-${i.n}" data-draft="reply-${i.n}" rows="5" style="width:100%" aria-label="要回给对方的话">${esc(r.text)}</textarea>
+    <textarea id="reply-${i.n}" data-draft="reply-${i.n}" rows="${fitRows(r.text)}" style="width:100%" aria-label="要回给对方的话">${esc(r.text)}</textarea>
     <div class="acts" style="margin-top:6px">${can?`<button class="btn pri" onclick="sendReply(${i.n})">发送</button>`:""}<button class="btn" onclick="copyReply(${i.n})">复制</button><button class="btn ghost" onclick="dropReply(${i.n})">不发</button></div></div>`;
 }
 function replyText(n){ const el=$("#reply-"+n); return String(el?el.value:(byN(n).draft_reply||{}).text||"").trim(); }
@@ -2144,7 +2146,7 @@ function noticeView(i){
   const where=esc(r.label||r.channel);
   if(r.status==="sent") return `<div class="d-sec" style="padding-top:14px"><h3>已发群通知</h3><div class="inner-list"><div class="dv-row"><div style="min-width:0"><div class="t wrap">${linkify(r.text)}</div><div class="s">${esc(String(r.sent_at||"").slice(5,16).replace("T"," "))} 发到 Slack ${where}</div></div></div></div></div>`;
   return `<div class="d-sec" style="padding-top:14px"><h3>要发的群通知<span class="hint" style="margin:0 0 0 8px;font-weight:400">AI 起草，你点「发送」才会以你的身份发到 Slack ${where}</span></h3>
-    <textarea id="notice-${i.n}" data-draft="notice-${i.n}" rows="6" style="width:100%" aria-label="要发的群通知">${esc(r.text)}</textarea>
+    <textarea id="notice-${i.n}" data-draft="notice-${i.n}" rows="${fitRows(r.text)}" style="width:100%" aria-label="要发的群通知">${esc(r.text)}</textarea>
     <div class="acts" style="margin-top:6px"><button class="btn pri" onclick="sendNotice(${i.n})">发送</button><button class="btn" onclick="copyNotice(${i.n})">复制</button><button class="btn ghost" onclick="dropNotice(${i.n})">不发</button></div></div>`;
 }
 function noticeText(n){ const el=$("#notice-"+n); return String(el?el.value:(byN(n).draft_notice||{}).text||"").trim(); }
@@ -2418,6 +2420,7 @@ function render(){
   const page=S.q?searchPage:{today:todayPage,inbox:inboxPage,todo:todoPage,doing:doingPage,done:donePage,all:allPage,mem:memPage,sys:sysPage}[S.view];
   let changed=putHTML("#main",approvalView()+(solo?`<div class="solo">${itemView(item)}</div>`:page()));
   changed=putHTML("#detail",split?itemView(item):"")||changed;
+  const head=$("#detail .d-head"); if(head) $("#detail").style.setProperty("--headh",Math.floor(head.getBoundingClientRect().height)-1+"px");   // tabs stay under the sticky head
   changed=putHTML("#onboard",S.ob?obView():S.news?newsView():"")||changed;
   changed=putHTML("#adder",S.adding?addView():S.moving?moveView():S.bugging?bugView():"")||changed;
   if(changed) alignRows();
