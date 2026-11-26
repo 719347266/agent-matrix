@@ -458,6 +458,10 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .seg2{display:flex;gap:4px;margin:0 0 10px}
 .prompt-text{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.6;background:var(--field);border-radius:10px;padding:12px;max-height:70vh;overflow:auto}
 .list-bar{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}.list-bar .seg{margin:0}
+.doc-link{margin-left:8px;font-size:12px;font-weight:500;color:var(--brand);white-space:nowrap;text-decoration:none}.doc-link:hover{text-decoration:underline}
+.work-line select{height:30px;padding:0 8px;font-size:12.5px}
+.set-h{font-size:12.5px;font-weight:600;color:var(--ink2);margin:18px 2px 8px}.set-h:first-child{margin-top:4px}
+.more-set{margin:8px 0 0}.more-set>summary{cursor:pointer;font-size:12.5px;color:var(--ink3);margin:0 2px 6px}
 .list-bar .mode-by{margin-left:auto}.list-bar .mode-by+.by{margin-left:0}
 .work-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 0}.work-line .k{font-size:12.5px;color:var(--ink3)}.work-line .seg{margin:0}
 .outline-card{border:1px solid var(--line2);border-radius:14px;background:var(--field);padding:12px 14px}
@@ -785,10 +789,14 @@ async function setWorkMode(mode,rid){
   catch(e){ toast(e.message||"没保存成功"); load(); }
 }
 const setGlobalMode = m => setWorkMode(m,null);
+function modeSelect(cur,onchange,withDefault){
+  const def=(D.settings||{}).work_mode||"auto";
+  const opts=[...(withDefault?[["",`跟随默认（${TERM.mode[def]}）`]]:[]),...Object.entries(TERM.mode)];
+  return `<select aria-label="做事方式" title="${esc(MODE_TIPS[cur||def])}" onclick="event.stopPropagation()" onchange="${onchange}">${opts.map(([k,l])=>`<option value="${k}" ${k===cur?"selected":""}>${l}</option>`).join("")}</select>`;
+}
 function workLine(i){
-  const w=i.work||{}, n=i.n, def=(D.settings||{}).work_mode||"auto", cur=w.own_mode||def;
-  const note=w.own_mode?`<button class="lnk" onclick="setWorkMode('',byN(${n}).rid)">改回默认（${TERM.mode[def]}）</button>`:`<span class="hint" style="margin:0">跟随默认</span>`;
-  return `<div class="work-line"><span class="k">这件的做事方式</span>${modeSeg(cur,`(m=>setWorkMode(m,byN(${n}).rid))`,false)}${note}${w.kind?`<span class="hint" style="margin:0">类型：${esc(w.kind)} · 规格：${esc(w.spec||"")}</span>`:""}</div>`;
+  const w=i.work||{}, n=i.n;
+  return `<div class="work-line"><span class="k">这件的做事方式</span>${modeSelect(w.own_mode||"",`setWorkMode(this.value,byN(${n}).rid)`,true)}${w.kind?`<span class="hint" style="margin:0">类型：${esc(w.kind)} · 规格：${esc(w.spec||"")}</span>`:""}</div>`;
 }
 function btn(i,[label,k,cls,ph]){ return `<button data-n="${i.n}" ${pendingFor(i.n)?"disabled aria-busy=\"true\"":""} class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
 function act(n,k,ph,el){
@@ -854,14 +862,16 @@ function kidLine(i){
   const s=blockedAI(k)?`AI 备材料：${TERM.status.reply}`:k.status==="待验收"?`AI 已备好材料，${TERM.status.review}`:k.status==="完成"?"AI 已备好材料":isWorking(k)?"AI 备材料中":"AI 将先备好材料";
   return `<div class="s kid"><button class="lnk" onclick="event.stopPropagation();openItem(${k.n})">${s} ›</button></div>`;
 }
+/* the deliverable, one tap from any list: next to the title, never hidden on a narrow screen */
+const docLink = url => `<a class="doc-link" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="打开交付文档">文档 ↗</a>`;
 function row(i, opts={}){
   const unread=unreadOf(i.n).length>0, d=due(i);
-  const open = (i.status==="待验收"||i.status==="完成") && i.url && !isWorking(i) ? `<a class="btn link" href="${esc(i.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">打开交付</a>` : "";
+  const open = i.url && !opts.pick ? docLink(i.url) : "";
   const picked=opts.pick&&S.pick.has(i.n);
   return `<div class="row ${unread?"unread":""} ${S.item===i.n||picked?"sel":""}" ${opts.drag?`draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${i.n}')"`:""} onclick="${opts.pick?`togglePick(${i.n})`:`openItem(${i.n})`}">${opts.pick?`<span class="pick ${picked?"on":""}">${picked?"✓":""}</span>`:`<span class="ud"></span>`}<span class="no">#${i.n}</span>
-    <div style="min-width:0"><div class="t">${esc(i.title)}</div>${sub(i)}</div>
+    <div style="min-width:0"><div class="t">${esc(i.title)}${open}</div>${sub(i)}</div>
     <div class="meta">${pill(i)}<span class="opt">${avatar(i)}</span><span class="due opt ${late(i)?"late":""}">${esc(d)}</span><span class="ago opt">${esc(ago(i.updated))}</span></div>
-    <div class="acts">${opts.pick?"":open}${opts.noButtons||opts.pick?"":rowButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i)}`;
+    <div class="acts">${opts.noButtons||opts.pick?"":rowButtons(i).map(b=>btn(i,b)).join("")}</div></div>${inlineForm(i)}`;
 }
 const section=(title,items,extra="")=>(items=items.filter(topLevel)).length?`<div class="sec-h">${title}<span class="n">${items.length}</span>${extra}</div><div class="list">${items.map(i=>row(i)).join("")}</div>`:"";
 const byDue=(a,b)=>(a.due||"9")>(b.due||"9")?1:(a.due||"9")<(b.due||"9")?-1:a.n-b.n;
@@ -904,11 +914,11 @@ function inboxRow(m,list){
   const acts=join?`<a class="btn pri" href="${esc(join)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">进入会议</a>`
     :one?rowButtons(one).map(b=>btn(one,b)).join(""):opens?`<span class="fold">${open?"收起":"展开"}</span>`:"";
   return `<div class="row ev ${unread?"unread":""} ${one&&S.item===one.n||open?"sel":""} ${click?"":"flat"}" ${click?`onclick="${click}"`:""} ${opens?`aria-expanded="${open}"`:""}><span class="ud"></span><span class="pill ${c}" style="justify-self:start">${k}</span>
-      <div style="min-width:0"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}${more>0?`　另有 ${more} 条`:""}</div></div>
+      <div style="min-width:0"><div class="t">${esc(title)}${one&&one.url&&m.kind==="done"?docLink(one.url):""}</div><div class="s">${esc(sub)}${more>0?`　另有 ${more} 条`:""}</div></div>
       <div class="meta"><span class="ago">${esc(ago(m.at))}</span></div><div class="acts">${acts}</div></div>${one?inlineForm(one):open?msgBody(m):""}`;
 }
 function inboxPage(){
-  const all=S.inboxTab==="全部", sys=S.inboxTab==="system";
+  const sys=S.inboxTab==="system";
   // one row per item: its newest message
   const seen=new Set(), groups={need:[],today:[],old:[]};
   for(const m of D.inbox){
@@ -918,12 +928,12 @@ function inboxPage(){
     groups[sys?"today":inboxBucket(m)].push(inboxRow(m,D.inbox));
   }
   const sec=(title,rows,empty)=>rows.length||empty?`<div class="sec-h">${title}<span class="n">${rows.length||""}</span></div><div class="list">${rows.join("")||`<div class="empty">${empty}</div>`}</div>`:"";
-  const tabs=[["","最近"],["全部","全部"],["system","系统"]].map(([k,l])=>`<button class="chip ${(S.inboxTab||"")===k?"on":""}" onclick="S.inboxTab='${k}';render()">${l}</button>`).join("");
-  if(sys) return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('all')">‹ 事项</button>${tabs}</div>
+  const tabs=`<div class="seg" role="tablist">${[["","消息"],["system","系统"]].map(([k,l])=>`<button class="${(sys?"system":"")===k?"on":""}" role="tab" aria-selected="${(sys?"system":"")===k}" onclick="S.inboxTab='${k}';render()">${l}</button>`).join("")}</div>`;
+  if(sys) return `<div class="list-bar">${tabs}</div>
     <p class="hint">心响自己的运行记录：出错会自动重试、换 AI 顶上，不用你处理。要你本人做的（登录、授权）会在右上角的状态点里说。</p>${sec("系统消息",groups.today,"没有系统消息。")}`;
-  return `<div class="chips" style="align-items:center"><button class="btn ghost" onclick="go('all')">‹ 事项</button>${tabs}<span style="margin-left:auto"></span>${unreadCount()?`<button class="btn ghost" onclick="readAll()">全部标为已读</button>`:""}</div>
-    ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天发生的",groups.today,all?"":"今天还没有新动态。")}
-    ${all?sec("更早",groups.old,""):groups.old.length?`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxTab='全部';render();return false">查看更早的 ${groups.old.length} 条</a></p>`:""}`;
+  const older=groups.old.length?(S.inboxOld?sec("更早",groups.old,""):`<p class="hint" style="margin:14px 2px 0"><a href="#" onclick="S.inboxOld=true;render();return false">查看更早的 ${groups.old.length} 条</a></p>`):"";
+  return `<div class="list-bar">${tabs}${unreadCount()?`<button class="btn ghost" style="margin-left:auto" onclick="readAll()">全部标为已读</button>`:""}</div>
+    ${sec("要你处理",groups.need,"现在没有要你处理的。")}${sec("今天",groups.today,"今天还没有新消息。")}${older}`;
 }
 function readMsg(id){
   const m=D.inbox.find(x=>x.id===id); if(!m) return;
@@ -1123,7 +1133,7 @@ function allPage(){
   if(!F[S.all]) S.all="今天";
   const P=D.projects||[], cur=S.proj==="all"||S.proj===0||projOf(S.proj)?S.proj:"all", pick=!!S.picking, by=S.dim||"type";
   const bar=`<div class="list-bar"><div class="seg" role="tablist" aria-label="看哪些">${Object.keys(F).map(k=>`<button class="${k===S.all?"on":""}" role="tab" aria-selected="${k===S.all}" onclick="S.all='${k}';render()">${k}</button>`).join("")}</div>
-    <label class="by mode-by">做事方式 ${modeSeg((D.settings||{}).work_mode||"auto","setGlobalMode",false)}</label>
+    <label class="by mode-by">做事方式 ${modeSelect((D.settings||{}).work_mode||"auto","setGlobalMode(this.value)",false)}</label>
     <label class="by">分组 <select aria-label="怎么分组" onchange="S.dim=this.value;S.who=null;render()">${[["type","按类型"],["proj","按项目"],["people","按人"]].map(([k,l])=>`<option value="${k}" ${by===k?"selected":""}>${l}</option>`).join("")}</select></label></div>`;
   const chips="";
   const shown=D.items.filter(i=>!i.hidden&&topLevel(i)&&F[S.all](i)), inP=(i,k)=>k==="all"||(i.project||0)===k;
@@ -1681,7 +1691,7 @@ function setupChecks(){
   const missing=[st.want_feishu&&!r.feishu_ready&&"飞书",st.want_slack&&!s.slack&&"Slack",(st.want_wechat&&!wxOn(s)||wxBad)&&"微信"].filter(Boolean), have=[r.feishu_ready&&"飞书",s.slack&&"Slack",wxOn(s)&&!wxBad&&"微信"].filter(Boolean);
   const manage=`<button class="btn ghost" onclick="S.setTab='tool';render()">${have.length||missing.length?"管理":"去接"}</button>`;
   out.push({key:"tools",need:missing.length>0,title:"办公工具",...(missing.length?{state:"todo",text:`你想接${missing.join("和")}，还没接好。${ASK_AI}带你接，中途请你在浏览器里登录、点一次同意。${have.length?`已接入${have.join("、")}。`:""}`,ctl:manage}
-    :have.length?{state:"ok",text:`已接入${have.join("、")}${manual?"；现在是手动模式，不会自动收":""}。`,ctl:manage}
+    :have.length?{state:"ok",text:`已接入${have.join("、")}${manual?"；现在设成「不自动接」，不会自动收":""}。`,ctl:manage}
     :{state:"off",text:"没接，可以不接：要做的事点「＋ 新建事项」自己加。想自动收进会议、聊天里别人找你的事，再去接飞书或 Slack。",ctl:manage})});
   const store=s.store||{};
   out.push({key:"store",need:false,title:"事项存在哪",...(store.failed?{state:"todo",text:`事项都在本机，没丢；有 ${store.failed} 条还没同步出去。`,ctl:`<button class="btn" onclick="retryBackup()">重试</button>`}
@@ -1785,7 +1795,7 @@ async function updateNow(){
 }
 const SET_PAGES={
   ai:(st,s,w)=>["驱动心响的 AI","",aiPage(st,s)],
-  tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收进来的事怎么处理</div>${modePage(st,s)}</div>`
+  tool:(st,s,w)=>["接入","想从哪里收事，就点「接入」，驱动心响的 AI 会来配好。都不接也可以，事项自己新建。",toolPage(st,s)+`<div class="set-sec"><div class="sec-h">收事和做事</div>${modePage(st,s)}</div>`
     +setSec("chatlog","","",setRow("聊天判断","读到的每条消息最后怎么样了，没收进来的写着原因。",`<button class="btn" onclick="S.setTab='chatlog';S.chatlog=null;render()">查看</button>`))],
   data:(st,s,w)=>["数据与通知","",dataSection(s)+boostSection(st)+setSec("notify","通知","",setRow("心响里","待验收、待答复、待分配的事项。",`<span class="eng-state ok">一直开着</span>`)+notifyRow(s))],
   chatlog:(st,s,w)=>["聊天判断","读到的每条聊天消息最后怎么样了：建成事项、并入已有的事、AI 看过没建（写了原因），或者在交给 AI 之前就被规则挡掉（也写了原因）。",chatlogPage()],
@@ -2012,7 +2022,7 @@ function toolPage(st,s){
      +setRow("读会议","开完会从录音文字里找出你的事。",toggle("meeting_watch_enabled",on.meetings))
      +setRow("读聊天","从私聊和群里找出别人找你的事。",toggle("chat_watch_enabled",on.chats))
      +setRow("读飞书任务","分给你的飞书任务同步进来。",toggle("feishu_tasks_enabled",on.tasks));
-  return setSec("feishu","飞书",any&&manual?"现在是手动模式，下面这些来源都不会自动收。":"",feishu)
+  return setSec("feishu","飞书",any&&manual?"现在设成「不自动接」，下面这些来源都不会自动收。":"",feishu)
    +setSec("slack","Slack","",slackRow(s))
    +setSec("jira","Jira","",jiraRow(s))
    +setSec("wechat","微信","",wechatRows(st,s))
@@ -2024,19 +2034,18 @@ function toolPage(st,s){
      :`<p class="hint" style="margin:14px 2px 0">现在没有接任何工具。要做的事点右上角「＋ 新建事项」自己添加。</p>`);
 }
 function modePage(st,s){
-  const manual=st.intake_mode==="manual", any=(s.record||{}).feishu_ready||s.slack, auto=!!st.auto_assign;
-  return modeCards(st)
-   +(manual?"":setSec("after","接进来之后","",
-      setRow("AI 先判断能不能做",auto?"已完成的标为完成，不用做的取消，AI 能做的交给 AI，需要你决定的先备材料。":"已关闭：新事项由你分配。",switchCtl(auto,`toggleAuto(${!auto})`))
-      +setRow("自动开工",st.prework_enabled?"标成 AI 做的事会自动开始，做完交你验收。":"已关：标成 AI 做的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled)))
-     +`<p class="hint" style="margin:8px 2px 0">对外发送、审批、付款，AI 永远不会碰。</p>`)
+  const manual=st.intake_mode==="manual", any=(s.record||{}).feishu_ready||s.slack, auto=!!st.auto_assign, wm=st.work_mode||"auto";
+  const cards=(list,cur,click)=>`<div class="modes">${list.map(([k,l,d])=>`<button class="mode ${cur===k?"on":""}" aria-pressed="${cur===k}" onclick="${click(k)}"><b>${l}</b><span>${d}</span></button>`).join("")}</div>`;
+  const custom=!manual&&(!auto||!st.prework_enabled);   // switched off by hand some time: say so, and keep the switches reachable
+  return `<div class="set-h">接哪些事</div>`+cards(MODES,st.intake_mode||"all",k=>`setSetting('intake_mode','${k}')`)
+   +(manual?"":`<details class="more-set" ${custom?"open":""}><summary>细调${custom?"（已手动改过）":""}</summary>`
+      +setRow("AI 先判断能不能做",auto?"已完成的标为完成，不用做的取消，AI 能做的交给 AI，需要你决定的先备材料。":"已关闭：新事项由你分配。",switchCtl(auto,`toggleAuto(${!auto})`))
+      +setRow("自动开工",st.prework_enabled?"交给 AI 的事会自动开始，做完交你验收。":"已关闭：交给 AI 的事只排队，不开工。",toggle("prework_enabled",st.prework_enabled))+`</details>`)
+   +`<div class="set-h">AI 做事的方式</div>`+cards(Object.entries(TERM.mode).map(([k,l])=>[k,l,MODE_TIPS[k]]),wm,k=>`setGlobalMode('${k}')`)
+   +`<p class="hint" style="margin:8px 2px 0">事项页上方也能切换做事方式；单独一件可以在它的详情里改。删数据、对外发消息、付款这类事，AI 只准备材料，不执行。</p>`
    +(!any&&!manual?`<p class="hint" style="margin:8px 2px 0;color:var(--amber)">你还没有接任何办公工具，所以现在不会有事自动进来。</p>`:"");
 }
-const MODES=[["all","全能模式","别人找你的事都接进来，AI 直接开始做。"],["accepted","全自动模式","你答应了（回了「好的」「我来」）才接进来，然后 AI 开始做。"],["manual","手动模式","什么都不自动接，要做的事自己新建。"]];
-function modeCards(st){
-  const cur=st.intake_mode||"all";
-  return `<div class="modes">${MODES.map(([k,l,d])=>`<button class="mode ${cur===k?"on":""}" aria-pressed="${cur===k}" onclick="setSetting('intake_mode','${k}')"><b>${l}</b><span>${d}</span></button>`).join("")}</div>`;
-}
+const MODES=[["all","全部接","别人找你的事都接进来；AI 先判断，能做的直接开工。"],["accepted","答应了才接","你回了「好的」「我来」才接进来；AI 先判断，能做的直接开工。"],["manual","不自动接","要做的事你自己新建；AI 只做你交给它的。"]];
 const PUSH=[["im.message.receive_v1","你的回复"],["card.action.trigger","卡片按钮"],["task.task.update_user_access_v2","飞书任务"]];
 function pushLine(s){
   const p=s.push||{}, state=(ok,text)=>`<span class="eng-state ${ok?"ok":"bad"}">${text}</span>`;
@@ -2600,7 +2609,7 @@ function drawTranscript(scroll){
 }
 function go(view){ S.view=view; S.q=""; $("#q").value=""; S.inline=null; S.openMsg=null; if(!wide()) S.item=null; render(); document.querySelector(".main").scrollTop=0; }
 const NAV_OF={};   // pages that are reached from another one
-const TITLES={inbox:"全部消息",all:"事项",mem:"记忆",sys:"设置"};
+const TITLES={inbox:"消息",all:"事项",mem:"记忆",sys:"设置"};
 function searchKey(e){ if(e.key==="Escape"){ e.target.value=""; S.q=""; render(); } }
 /* 开发模式: steps the AI is waiting on you for, shown above every page */
 function approvalView(){

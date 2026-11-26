@@ -241,6 +241,20 @@ def checklist(body):
     return [re.sub(r"^[-*\d.、)\s]+", "", ln).strip() for ln in (m.group(1).splitlines() if m else []) if ln.strip().lstrip("-*0123456789.、) ")]
 
 
+WRITING = "写作自审.md"
+
+
+def writing_check(root, workdir):
+    """The Chinese writing checklist (built in, from an open-source project: specs/LICENSES.md), put in the folder for
+    the review: it is long, so the AI reads it when it reviews instead of carrying it in every prompt."""
+    from . import promptfile
+    try:
+        (Path(workdir) / WRITING).write_text(promptfile.read(root, f"specs/{WRITING}"), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
 def keep_plan(workdir, p):
     (Path(workdir) / ".plan.json").write_text(json.dumps(p, ensure_ascii=False), encoding="utf-8")
 
@@ -289,7 +303,7 @@ def work_text(root, p):
     if p.get("review"):
         out.append("写完先交；程序会请你换一个人的眼光单独再审一轮，审完改好再交。")
     elif p.get("check"):
-        out.append("交之前对照检查清单逐条自查，把结论写进 `自审.md`：`## 自审`，每条一行，写「✓」或改了什么。")
+        out.append(f"交之前对照检查清单逐条自查，语言按 `{WRITING}` 查一遍，把结论写进 `自审.md`：`## 自审`，每条一行，写「✓」或改了什么。")
     return "\n".join(out)
 
 
@@ -300,4 +314,5 @@ def review_request(p):
     lines = "\n".join(f"- {x}" for x in items) or "- 会上定下的、本人说过的要求都写进去了\n- 没有凭空编的内容\n- 没参加会的人读完能看懂、能用"
     return (f"现在换一个人来审：你是资深{role}，第一次读这份 交付.md，挑它的毛病。逐条检查：\n{lines}\n"
             "- 对照简报：会上定下的、本人后来的要求，有没有漏的\n- 有没有没依据的规则、数字、例子\n"
+            f"- 语言：按当前文件夹的 {WRITING}（中文写作检查表）查一遍，去掉空话、套话和模板化表达，不增加没有的事实\n"
             "把每一条的结论写进 自审.md（`## 自审`，每条一行：「✓」或「改了：……」），按审出的问题改好 交付.md 和 结果.json，再交。")

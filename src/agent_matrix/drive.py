@@ -917,6 +917,8 @@ def _stage(root, item, rows, row):
     p["workdir"] = str(item.workdir)
     p["checklist"] = specs.checklist(specs.text(root, kind)) or specs.checklist(specs.expert(root, kind)) if kind else []
     specs.keep_plan(item.workdir, p)
+    if p.get("review") or p.get("check"):
+        specs.writing_check(root, item.workdir)
     return specs.work_text(root, p)
 
 

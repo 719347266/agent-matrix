@@ -129,6 +129,25 @@ class TheRound(unittest.TestCase):
             self.assertNotIn("资深产品经理会怎么做", text, "the expert view is not brought every time")
 
 
+class BuiltIn(unittest.TestCase):
+    def test_the_community_expert_prompts_ship_with_their_licences(self):
+        from agent_matrix import promptfile
+        with tempfile.TemporaryDirectory() as d:
+            for kind in ("需求文档", "周报", "数据汇总"):
+                text = promptfile.read(d, f"specs/{kind}.md")
+                self.assertIn("## 参考：社区里的专家提示词（原文）", text, kind)
+                self.assertIn("在心响里用时", text, kind)
+            licences = promptfile.read(d, "specs/LICENSES.md")
+            for name in ("snarktank/ai-dev-tasks", "anthropics/skills", "wshobson/agents", "op7418/Humanizer-zh", "Apache License"):
+                self.assertIn(name, licences)
+
+    def test_the_review_brings_the_writing_checklist_into_the_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            work = Path(d, "w"); work.mkdir()
+            self.assertTrue(specs.writing_check(d, work))
+            self.assertIn("AI", (work / specs.WRITING).read_text(encoding="utf-8"))
+            self.assertIn(specs.WRITING, specs.review_request({"kind": "方案", "checklist": []}))
+
 if __name__ == "__main__":
     unittest.main()
 

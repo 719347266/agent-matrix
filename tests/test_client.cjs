@@ -395,13 +395,13 @@ function reset(item) {
     {type:"hint",text:"回复「编号 + 动作」就行：24 过 · 24 退 要改的地方"}]};
   const oldText={id:5,kind:"brief",title:"11/15 早报 · 会1场",text:"你要做\n#9 写周报 · 逾期1天",refs:[9,26],read:true,at:"2026-11-15T08:30:00",
     blocks:[{type:"text",text:"你要做\n#9 写周报 · 逾期1天\n等你验收\n#26 核对清单 · 清单已整理 [打开](https://x.feishu.cn/docx/a)\n其余3件 · [看板](https://x.feishu.cn/base/b) · 回复：26 过 / 26 退 意见"}]};
-  evaluate(`D.inbox=${JSON.stringify([brief,oldCard,oldText])}; S.view="inbox"; S.inboxTab="全部";`);
+  evaluate(`D.inbox=${JSON.stringify([brief,oldCard,oldText])}; S.view="inbox"; S.inboxTab=""; S.inboxOld=true;`);
   let page=evaluate("inboxPage()");
   assert.match(page,/onclick="openMsg\(7\)"/,"a brief about one item still opens as a brief");
   assert.doesNotMatch(page,/今天你要做/,"closed until clicked");
   evaluate("openMsg(7)");
   assert.equal(evaluate("D.inbox[0].read"),true);
-  page=evaluate("inboxPage()");
+  page=evaluate("S.inboxOld=false; inboxPage()");
   for (const words of ["今天的会 · 1 场","10:00  周会","今天你要做 · 1 件","AI 做好了，等你看 · 1 件","需要你定 · 1 件","还有 2 件","收起"]) assert.ok(page.includes(words),words);
   assert.match(page,/onclick="openItem\(26\)"/);
   assert.match(page,/<span class="pill amber">待验收<\/span>/);
@@ -412,7 +412,7 @@ function reset(item) {
   assert.match(page,/href="https:\/\/vc\.feishu\.cn\/j\/1"[^>]*>进入会议 ↗/);
   assert.equal((page.match(/1 场会 · 你要做 1 件/g)||[]).length,1,"the first line is not repeated");
   await evaluate('apply(26,"approve",null)');               // a click in the brief acts like the list row
-  page=evaluate("inboxPage()");
+  page=evaluate("S.inboxOld=false; inboxPage()");
   assert.match(page,/<span class="pill green">已完成<\/span>/);
   assert.doesNotMatch(page,/act\(26,'approve'/);
   // The answer box opens in the brief it was clicked in, not on another row of the same item.
@@ -421,13 +421,13 @@ function reset(item) {
   assert.equal(evaluate("S.inline.at"),"6");
   assert.doesNotMatch(evaluate("inboxPage()"),/inline-31/,"brief 6 is closed");
   evaluate("openMsg(6)");
-  page=evaluate("inboxPage()");
+  page=evaluate("S.inboxOld=false; inboxPage()");
   assert.equal((page.match(/id="inline-31"/g)||[]).length,1);
   assert.doesNotMatch(page,/回「|回复「|退 要改的地方/,"old reply instructions are dropped, the whole footer too");
   assert.match(page,/什么时候做完？/); assert.match(page,/AI 卡住：缺收入导出/);
   assert.match(page,/act\(31,'answer'/);
   evaluate("S.inline=null; openMsg(5)");
-  page=evaluate("inboxPage()");
+  page=evaluate("S.inboxOld=false; inboxPage()");
   assert.match(page,/<div class="b-h">你要做<\/div>/);
   assert.match(page,/onclick="openItem\(9\)"/); assert.match(page,/逾期1天/);
   assert.doesNotMatch(page,/回复：/);
@@ -447,7 +447,7 @@ function reset(item) {
   // Every path is the owner's choice: what is taken in, which tools are read, where briefs go; and items can be added by hand.
   evaluate('D.settings={intake_mode:"accepted",sources:{meetings:true,chats:false,tasks:true},brief_channel:"feishu"}; D.system={record:{feishu_ready:true}}; S.setTab="tool"');
   let src=evaluate("sysPage()")+pane("mode");
-  for (const label of ["全能模式","全自动模式","手动模式","读会议","读聊天","读飞书任务","Slack"]) assert.ok(src.includes(label), label);
+  for (const label of ["全部接","答应了才接","不自动接","读会议","读聊天","读飞书任务","Slack"]) assert.ok(src.includes(label), label);
   assert.match(src,/class="mode on" aria-pressed="true" onclick="setSetting\('intake_mode','accepted'\)"/);
   assert.match(pane("notify"),/早晚简报也发到飞书/);
   evaluate('D.system={record:{feishu_ready:false}}');   // nothing connected: no Feishu switches, notifications stay in the app
@@ -465,13 +465,13 @@ function reset(item) {
              {id:5,at:"2026-11-17T12:46:00",kind:"system",title:"⚠ 会议「例会」有内容被校验拦掉了，可能漏了待办",text:"去掉 1 条",refs:[],read:true,blocks:[]}]; S.inboxTab="";`);
   assert.deepEqual(plain("D.inbox.map(inboxBucket)"), ["need","today","today","old","today"]);
   assert.equal(evaluate('inboxBucket({kind:"blocked",at:"2026-11-15T09:00:00",title:"AI 卡住，需要你补材料",refs:[],read:true})'),"old","an old question about an item that is gone asks nothing of the owner");
-  page=evaluate("inboxPage()");
-  assert.match(page,/要你处理[\s\S]*#65 标签更新[\s\S]*今天发生的[\s\S]*#74 加到总表/);
+  page=evaluate("S.inboxOld=false; inboxPage()");
+  assert.match(page,/要你处理[\s\S]*#65 标签更新[\s\S]*今天[\s\S]*#74 加到总表/);
   assert.match(page,/来自聊天/); assert.match(page,/查看更早的 1 条/);
   assert.doesNotMatch(page,/和录音对不上/, "the system's own notices are not in the owner's messages");
   assert.match(evaluate('S.inboxTab="system"; inboxPage()'),/和录音对不上，没有采用/); evaluate('S.inboxTab=""');
   assert.doesNotMatch(page,/校验拦掉|展开 74 看原话|13:00 复盘会/);
-  assert.match(evaluate('S.inboxTab="全部"; inboxPage()'),/更早[\s\S]*13:00 复盘会/);
+  assert.match(evaluate('S.inboxTab=""; S.inboxOld=true; inboxPage()'),/更早[\s\S]*13:00 复盘会/);
   // 交给 AI 的说明: the item detail shows the words the AI got, as they were
   evaluate('D.items=[{n:61,rid:"rec61",title:"写需求",status:"待验收",who:"AI"}]; PROMPTS.rec61={text:"## 共同规矩\\n读者没参加那场会",at:"11-26 15:00"}; S.tab="prompt"');
   const sent = evaluate("itemView(byN(61))");
@@ -492,9 +492,11 @@ function reset(item) {
   const done = evaluate("itemView(byN(72))");
   for (const label of ["周报","规格：草稿","做事方式：仔细","v1 · 本周周报","待你确认：","下周计划要不要加评审","自审 2 项，改了 1 处","打开文档","验收通过","让 AI 修改"]) assert.ok(done.includes(label), label);
   assert.equal((done.match(/>验收通过</g)||[]).length, 1, "deciding on it is in one place");
-  assert.match(done, /class="on" role="radio" aria-checked="true"[^\n]*?\('careful'\)">仔细/, "this item's own mode is shown as chosen");
-  assert.match(done, /改回默认（自动）/); assert.match(evaluate("itemView(byN(71))"), /跟随默认/);
+  assert.match(done, /<option value="careful" selected>仔细</, "this item's own mode is shown as chosen");
+  assert.match(done, /跟随默认（自动）/); assert.match(evaluate("itemView(byN(71))"), /跟随默认/);
   assert.equal((outline.match(/按提纲写/g)||[]).length, 1, "one place for each button");
+  assert.match(evaluate('row({n:99,title:"交付",status:"待验收",who:"AI",url:"https://x.test/d"})'), /class="doc-link" href="https:\/\/x.test\/d"[^>]*>文档 ↗</, "the deliverable opens straight from the row");
+  assert.doesNotMatch(evaluate('row({n:98,title:"无",status:"未开始",who:"我"})'), /doc-link/);
   assert.doesNotMatch(outline, /## 提纲/, "the outline reads as headings, not as # marks");
   const specCards = evaluate("specsView()");
   for (const label of ["交付规格","需求文档","试用中","最近 3 次里一次通过 2 次","有一份修订等你确认","周报","还没有","第一次做这一类事时"]) assert.ok(specCards.includes(label), label);
