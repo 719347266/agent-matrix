@@ -883,6 +883,14 @@ class Handler(BaseHTTPRequestHandler):
                 except MatrixError as exc:
                     return self._send(400, {"ok": False, "reply": str(exc)})
                 return self._send(200, {"ok": True, "id": made, "projects": projects.all(root)})
+            if path == "/api/item/prompt":  # the words the AI got for this item, as they were sent
+                from .drive import prompt_path
+                rid = str(body.get("rid") or "")
+                target = prompt_path(root, rid) if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", rid) else None
+                if not target or not target.is_file():
+                    return self._send(200, {"ok": True, "text": "", "at": ""})
+                at = datetime.fromtimestamp(target.stat().st_mtime, TZ).strftime("%m-%d %H:%M")
+                return self._send(200, {"ok": True, "text": target.read_text(encoding="utf-8"), "at": at})
             if path == "/api/item/project":  # put items in a project (0 = none)
                 from . import projects
                 from .models import MatrixError

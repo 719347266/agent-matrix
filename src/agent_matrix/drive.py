@@ -1081,7 +1081,26 @@ def _open(root, job, driver):
         job["instructions"] = cindy_header(root, job) + job["instructions"]
     job.update(driver=driver, status="open", rounds=0, step="领到了")
     _save(root, job)
+    keep_prompt(root, job)
     return job
+
+
+def prompt_path(root, record_id):
+    return Path(root) / "state" / "prompts" / f"{record_id}.md"
+
+
+def keep_prompt(root, job):
+    """The exact words this item's AI was given, kept so the owner can read them (事项详情 → 查看交给 AI 的说明).
+    The latest run only; the built-in GPT gets builtin_prompt, every other AI the instructions."""
+    rid = (job.get("ref") or {}).get("record_id")
+    if job.get("kind") != "item" or not rid:
+        return
+    try:
+        path = prompt_path(root, rid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(job.get("builtin_prompt") or job.get("instructions") or "", encoding="utf-8")
+    except OSError as exc:
+        activity.swallowed(root, "drive.keep_prompt", exc)
 
 
 def common_text(root):

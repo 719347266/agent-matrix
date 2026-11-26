@@ -36,12 +36,13 @@ OUTPUT_FIELDS = ["AI草稿链接", "预做结果摘要", "预做凭据"]
 
 # Each deliverable type has required sections and a length cap (FIX 2.2 / 3.1).
 TEMPLATES = {
-    "周报": (["本周完成", "进行中", "下周计划", "风险"], 800),
-    "数据汇总": (["结论", "口径"], 2000),
-    "方案": (["推荐", "对比", "拍板"], 1200),
-    "会议材料": (["议程", "决策", "背景"], 800),
-    "回复草稿": (["草稿", "确认"], 800),
-    "其他": ([], 1500),
+    "需求文档": (["要解决什么问题", "需求"], 10000),
+    "周报": (["本周完成", "进行中", "下周计划", "风险"], 1500),
+    "数据汇总": (["结论", "口径"], 3000),
+    "方案": (["推荐", "对比", "拍板"], 4000),
+    "会议材料": (["议程", "决策", "背景"], 2000),
+    "回复草稿": (["草稿", "确认"], 1200),
+    "其他": ([], 5000),
 }
 PLACEHOLDERS = ["TODO", "待补充", "XX", "（略）", "(略)", "此处填写", "待完善"]
 
@@ -51,7 +52,7 @@ class Result(BaseModel):
     record_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     input_version: str = Field(pattern=r"^[a-f0-9]{64}$")
     kind: Literal["internal_result", "draft"]
-    template: Literal["周报", "数据汇总", "方案", "会议材料", "回复草稿", "其他"]
+    template: Literal["需求文档", "周报", "数据汇总", "方案", "会议材料", "回复草稿", "其他"]
     # One line in the 12:00/17:00 batch: "#15 周报初稿 · <summary>".
     summary: str = Field(min_length=1, max_length=40)
     artifact_path: str

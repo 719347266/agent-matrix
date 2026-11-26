@@ -456,6 +456,7 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .row .s.kid{white-space:normal}.row .s .src{color:var(--ink3)}
 .lnk{border:0;background:none;padding:0;color:var(--brand);font:inherit;font-size:12px;cursor:pointer}
 .seg2{display:flex;gap:4px;margin:0 0 10px}
+.prompt-text{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.6;background:var(--field);border-radius:10px;padding:12px;max-height:70vh;overflow:auto}
 .list-bar{display:flex;align-items:center;gap:12px;margin:0 0 14px}.list-bar .seg{margin:0}
 .list-bar .by{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink3)}
 .list-bar .by select{height:30px;padding:0 8px;font-size:12.5px}
@@ -2229,9 +2230,25 @@ function itemView(i){
     <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
     ${aiPickView(i)}${chainView(i)}${deliverView(i)}
     <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>
-    <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
-    <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):thread(i)+replyState(i)+replyView(i)+noticeView(i)}</div><div class="spacer"></div>
+    <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0],["prompt","交给 AI 的说明",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
+    <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):tab==="prompt"?promptTab(i):thread(i)+replyState(i)+replyView(i)+noticeView(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
+}
+/* 交给 AI 的说明：这件事最近一次交给 AI 时，AI 收到的完整文字（原样） */
+const PROMPTS={};
+function promptTab(i){
+  const p=PROMPTS[i.rid];
+  if(!p){ PROMPTS[i.rid]={loading:true}; loadPrompt(i.rid); return `<div class="hint">读取中…</div>`; }
+  if(p.loading) return `<div class="hint">读取中…</div>`;
+  if(p.error) return `<div class="hint">${esc(p.error)}</div>`;
+  if(!p.text) return `<div class="hint">这件事还没交给过 AI，或者是这个版本之前交的，没有留下说明。下次交给 AI 后这里会显示它收到的全部文字。</div>`;
+  return `<p class="hint" style="margin:0 0 8px">${esc(p.at)} 交给 AI 的完整说明，原样显示：本人的经验库目录、关于你、共同规矩、这件事的说明和要求。</p><pre class="prompt-text">${esc(p.text)}</pre>`;
+}
+async function loadPrompt(rid){
+  if(!LIVE){ PROMPTS[rid]={text:"",at:""}; return render(); }
+  try{ const r=await api("/api/item/prompt",{rid}); PROMPTS[rid]={text:r.text||"",at:r.at||""}; }
+  catch(e){ PROMPTS[rid]={error:"读不到，连不上本机服务"}; }
+  render();
 }
 /* ---------- 这一件交给哪个 AI：默认是设置里选的那个，单独换只影响这一件 ---------- */
 const HANDOFF="handoff";
