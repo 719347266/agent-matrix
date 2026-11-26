@@ -25,13 +25,13 @@ function reset(item) {
 (async () => {
   reset({n:45,title:"测试事项",status:"待确认",who:"AI"});
   assert.deepEqual(plain("detailButtons(byN(45)).map(b=>b[1])"), ["me","ai","date","done","cancel"]);
-  assert.match(evaluate("itemView(byN(45))"), /已经办完/);
+  assert.match(evaluate("itemView(byN(45))"), /标为完成/);
   evaluate('byN(45).status="进行中"; S.working=true');
   assert.deepEqual(plain("detailButtons(byN(45)).map(b=>b[1])"), ["cancel","done"]);
   await evaluate('apply(45,"cancel",null)');
   assert.equal(evaluate("byN(45).status"), "取消");
   assert.equal(evaluate("isWorking(byN(45))"), false);
-  assert.deepEqual(plain("statusOf(byN(45))"), ["不做",""]);
+  assert.deepEqual(plain("statusOf(byN(45))"), ["已取消",""]);
   assert.deepEqual(plain("detailButtons(byN(45)).map(b=>b[1])"), ["restore"]);
   evaluate('D.judgments[45]={decision:"skip"}');
   await evaluate('apply(45,"restore",null)');
@@ -233,14 +233,14 @@ function reset(item) {
   evaluate('D.memory.versions=[]; D.memory.verdicts={}; D.memory.library=globalThis.keptLib');
   // 效果: below the rules; nothing reviewed yet → one plain line, no chart
   let eff0 = evaluate("memPage()");
-  assert.match(eff0,/经验库[\s\S]*效果[\s\S]*等你验收几件交付后，这里会显示 AI 做得怎么样/); assert.doesNotMatch(eff0,/一次通过率|<svg/);
+  assert.match(eff0,/经验库[\s\S]*效果[\s\S]*验收过几次交付后，这里会显示 AI 的表现/); assert.doesNotMatch(eff0,/一次通过率|<svg/);
   evaluate(`D.memory.effect={has:true,recent:{total:5,first:4,rate:80},before:{total:4,first:2,rate:50},rounds:0.6,blocked:2,failed:1,
     weeks:[{start:"09-28",total:0,first:0,rate:null},{start:"10-05",total:1,first:0,rate:0},{start:"10-12",total:2,first:1,rate:50},{start:"10-19",total:1,first:1,rate:100},
            {start:"10-26",total:1,first:1,rate:100},{start:"11-02",total:2,first:1,rate:50},{start:"11-09",total:1,first:1,rate:100},{start:"11-16",total:1,first:1,rate:100}],
     by_type:[{name:"方案",total:4,first:3,rate:75,few:false},{name:"报告<b>",total:1,first:1,rate:100,few:true}],by_ai:[{name:"Claude",total:5,first:4,rate:80,few:false}],by_project:[],
     reasons:[{kind:"太长/格式",count:3,example:"写得太长"},{kind:"方向不对",count:2,example:""},{kind:"缺数据/背景",count:1,example:"没数据"},{kind:"其他",count:1,example:""}]}`);
   let eff = evaluate("memPage()");
-  for (const label of ["最近 4 周一次通过率 80%","（前 4 周 50%）","<svg","11-16","按交付类型","方案","75%","样本太少","按 AI","Claude","通过前平均要改 0.6 轮","AI 卡住问你 2 次","没做成 1 次","太长/格式","比如「写得太长」","缺数据/背景"]) assert.ok(eff.includes(label), label);
+  for (const label of ["最近 4 周一次通过率 80%","（前 4 周 50%）","<svg","11-16","按交付类型","方案","75%","样本太少","按 AI","Claude","通过前平均要改 0.6 轮","待答复 2 次","失败 1 次","太长/格式","比如「写得太长」","缺数据/背景"]) assert.ok(eff.includes(label), label);
   assert.ok(!eff.includes("报告<b>") && eff.includes("报告&lt;b&gt;"), "names are escaped");
   assert.doesNotMatch(eff,/其他 <span/, "only the top three reasons");
   assert.equal((eff.match(/<rect /g)||[]).length, 8, "one mark per week");
@@ -296,11 +296,11 @@ function reset(item) {
     D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"pending",title:"「投流方案」该定了",read:false}]; S.view=null; S.all="今天"; S.dim=null; S.openMsg=null; S.working=false; render()`);
   assert.equal(evaluate("S.view"),"all", "事项 opens first");
   const today = evaluate("allPage()");
-  for (const label of ["按类型","按项目","按人",">今天<",">全部<",">已结束<","要你看","等验收的事","问你的事","你来做","今天要交的事","提醒","投流方案"]) assert.ok(today.includes(label), label);
+  for (const label of ["按类型","按项目","按人",">今天<",">全部<",">已结束<","待我处理","等验收的事","问你的事","我负责","今天要交的事","提醒","投流方案"]) assert.ok(today.includes(label), label);
   assert.doesNotMatch(today,/别人的事|下周的事|排队的事|AI 自己判断能不能做/, "今天: only today's; the AI switch is in settings");
-  assert.deepEqual([...today.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]),["提醒","要你看：验收、AI 问你","你来做"], "what waits on you first");
+  assert.deepEqual([...today.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]),["提醒","待我处理","我负责"], "what waits on you first");
   const everything = evaluate('S.all="全部"; allPage()');
-  for (const label of ["AI 做","排队的事","别人做","别人的事","下周的事"]) assert.ok(everything.includes(label), label);
+  for (const label of ["AI 负责","排队的事","他人负责","别人的事","下周的事"]) assert.ok(everything.includes(label), label);
   assert.equal(evaluate("needCount()"),2);
   const side = evaluate("sideHTML()");
   assert.match(side,/事项<span class="c hot">2</); assert.doesNotMatch(side,/今天|新进来|收件箱|等我处理/);
@@ -321,18 +321,18 @@ function reset(item) {
   const groups = plain("freshGroupsOf(D.items.filter(i=>i.status==='待确认')).map(g=>[g.label,g.tag,g.items.map(i=>i.n)])");
   assert.deepEqual(groups,[["王客户","客户",[14]],["陈娈娇","聊天",[13]],["观己日常运营沟通","会议",[11,12]]]);
   const t2 = evaluate("allPage()");
-  for (const label of ["等你定：新进来的","都我来","都交给 AI","都不要","观己日常运营沟通","2 件"]) assert.ok(t2.includes(label), label);
+  for (const label of ["待分配","全部我负责","全部交给 AI","全部取消","观己日常运营沟通","2 件"]) assert.ok(t2.includes(label), label);
   const heads = [...t2.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]);
-  assert.deepEqual(heads,["要你看：验收、AI 问你","等你定：新进来的","看起来已经办完"], "the sections in order; an item sits in the first one it fits");
-  assert.ok(t2.includes("告诉实习生安排") && t2.includes("AI 备好了材料，等你看"), "the 备材料 shows inside its item");
+  assert.deepEqual(heads,["待我处理","待分配","疑似已完成"], "the sections in order; an item sits in the first one it fits");
+  assert.ok(t2.includes("告诉实习生安排") && t2.includes("AI 已备好材料，待验收"), "the 备材料 shows inside its item");
   assert.doesNotMatch(t2,/备材料：告诉实习生安排/, "not as a row of its own");
   assert.ok(t2.includes("陈娈娇 11/26 09:45：「你直接跟她说一声就行，谢谢~」"), "why it is here: who said what, when");
-  assert.ok(t2.includes("返回按钮加上了") && t2.includes("没办完"), "done, with the words that show it");
+  assert.ok(t2.includes("返回按钮加上了") && t2.includes("未完成"), "done, with the words that show it");
   assert.doesNotMatch(t2,/269 分钟/, "no system notice in the list");
   // the status dot: the system's own trouble, handled in the background
-  assert.match(evaluate("healthDot()"),/件要你来/, "what only the owner can do comes first");
-  assert.match(evaluate("healthDot(0)"),/AI 在处理/);
-  assert.match(evaluate("S.health=true; healthPanel()"),/269 分钟没检查[\s\S]*不用你处理/); evaluate("S.health=false");
+  assert.match(evaluate("healthDot()"),/需你处理 \d+ 项/, "what only the owner can do comes first");
+  assert.match(evaluate("healthDot(0)"),/自动修复中/);
+  assert.match(evaluate("S.health=true; healthPanel()"),/269 分钟没检查[\s\S]*无需处理/); evaluate("S.health=false");
   evaluate("D.inbox=[]"); assert.equal(evaluate("healthDot(0)"),"", "all well: no dot at all");
   // 事项 → 按人: clients apart, a person picked shows their items, and the guess can be corrected
   evaluate('S.view="all"; S.dim="people"; S.all="全部"; S.who=null');
@@ -404,7 +404,7 @@ function reset(item) {
   page=evaluate("inboxPage()");
   for (const words of ["今天的会 · 1 场","10:00  周会","今天你要做 · 1 件","AI 做好了，等你看 · 1 件","需要你定 · 1 件","还有 2 件","收起"]) assert.ok(page.includes(words),words);
   assert.match(page,/onclick="openItem\(26\)"/);
-  assert.match(page,/<span class="pill amber">等你验收<\/span>/);
+  assert.match(page,/<span class="pill amber">待验收<\/span>/);
   assert.match(page,/act\(26,'approve'/,"same buttons as a list row");
   assert.match(page,/act\(24,'me'/); assert.match(page,/act\(24,'ai'/);
   assert.match(page,/act\(9,'done'/,"your own open item can be finished from the brief");
@@ -472,5 +472,20 @@ function reset(item) {
   assert.match(evaluate('S.inboxTab="system"; inboxPage()'),/和录音对不上，没有采用/); evaluate('S.inboxTab=""');
   assert.doesNotMatch(page,/校验拦掉|展开 74 看原话|13:00 复盘会/);
   assert.match(evaluate('S.inboxTab="全部"; inboxPage()'),/更早[\s\S]*13:00 复盘会/);
+  // 术语：状态、分区、按钮只用 TERM 里的说法；这些口语和旧叫法在页面上一处都不许出现
+  const BANNED = /卡住|要你来|看起来|都不要|都我来|我自己来|办完|AI 问你|等你定|你来做|别人在做|AI 排队|AI 正在做|等你验收|关掉|没办完|恢复（标错了）|先做这件|要你看|等你看|等你确认接不接|AI 问：/;
+  evaluate(`D.items=[{n:1,title:"甲",status:"待确认",who:"我"},{n:2,title:"乙",status:"未开始",who:"我",due:TODAY},{n:3,title:"丙",status:"进行中",who:"AI"},
+    {n:4,title:"丁",status:"卡住",who:"AI",blocker:"口径"},{n:5,title:"戊",status:"卡住",who:"我",blocker:"等合同"},{n:6,title:"己",status:"待验收",who:"AI"},
+    {n:7,title:"庚",status:"完成",who:"我"},{n:8,title:"辛",status:"取消",who:"别人"},{n:9,title:"壬",status:"进行中",who:"别人"},
+    {n:10,title:"癸",status:"未开始",who:"我",done_hint:{evidence:"已发",where:"群"}}]; D.inbox=[]; D.judgments={1:{decision:"prep",reason:"要拍板"}}; S.view="all"; S.dim="type"`);
+  for (const all of ["今天","全部","已结束"]) {
+    const page = evaluate(`S.all="${all}"; allPage()`); const hit = page.match(BANNED);
+    assert.ok(!hit, `事项·${all} 里出现了「${hit&&hit[0]}」`);
+  }
+  for (let n = 1; n <= 10; n++) { const view = evaluate(`itemView(byN(${n}))`); const hit = view.match(BANNED); assert.ok(!hit, `#${n} 的详情里出现了「${hit&&hit[0]}」`); }
+  assert.deepEqual(plain("D.items.map(i=>statusOf(i)[0])"), ["待分配","未开始","进行中","待答复","受阻","待验收","已完成","已取消","进行中","未开始"]);
+  const labels = plain("D.items.flatMap(i=>[...rowButtons(i),...detailButtons(i)].map(b=>b[0]))"), acts = plain("Object.values(TERM.act)");
+  for (const l of labels) assert.ok(acts.includes(l), `按钮「${l}」不在 TERM.act 里：新按钮先在术语表里起名`);
+  for (const html of [evaluate("healthDot(1)"), evaluate("healthDot(0)"), evaluate("sideHTML()")]) assert.doesNotMatch(html, BANNED);
   console.log("Client checks passed: new, running, cancel, restore, complete, closed-item conversation, stale status, concurrency copy, briefs opened in the inbox.");
 })().catch(e => { console.error(e); process.exitCode=1; });

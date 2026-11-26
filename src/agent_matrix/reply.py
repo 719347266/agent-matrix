@@ -43,19 +43,19 @@ class Op:
 
 
 VERBS = [
-    (r"(过|通过|可以|ok|OK|好的?)", "approve"),
+    (r"(过|通过|验收通过|可以|ok|OK|好的?)", "approve"),
     (r"(退|退回|打回)\s*[:：]?\s*(.*)", "reject"),
     # "62 改 换成蓝色": back to the AI in the same conversation, even after it was finished (改到/改成 a date is a reschedule)
     (r"(?:让\s*(?:AI|ai)\s*)?(?:再改|重改|修改|调整|改)(?![到成])\s*[:：]?\s*(.+)", "revise"),
     (r"(?:合并到|并入|并到|和|跟|同)\s*#?(\d{1,5})(?:\s*(?:是)?同一件(?:事)?)?", "merge"),
     (r"(不重复|不是重复|不是同一件(?:事)?|不一样)", "distinct"),
     (r"(?:完成|做完了?|搞定|done)?\s*[，,]?\s*(无交付|不需要交付|不用交付|没有交付|无文件|不用文件|没有文件)", "no_deliverable"),
-    (r"(完成|做完了?|搞定|done)", "complete"),
+    (r"(完成|标为完成|做完了?|搞定|done)", "complete"),
     (r"(不做|取消|不要了)", "cancel"),
-    (r"(我来|我做)", "me"),
+    (r"(我来|我做|我负责)", "me"),
     (r"(AI做|ai做|交给AI|交给ai|AI来|ai来)", "ai"),
     (r"(AI备|ai备|AI准备|ai准备)", "prep"),
-    (r"(先做|优先|插队|先做这个)", "first"),
+    (r"(先做|优先|优先处理|插队|先做这个)", "first"),
     (r"(恢复|捞回来|撤销|撤回)", "restore"),
     (r"(继续|接着做|继续做|往下做)", "resume"),
     (r"给\s*(\S{1,12})", "delegate"),
