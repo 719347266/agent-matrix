@@ -358,7 +358,7 @@ button:disabled{opacity:.5;cursor:wait}
 
 /* glass: every surface is translucent over one soft colour field (iOS style) */
 body{background-color:var(--bg);background-image:radial-gradient(60vmax 60vmax at 6% 0%,var(--blob1),transparent 62%),radial-gradient(55vmax 55vmax at 100% 16%,var(--blob2),transparent 60%),radial-gradient(50vmax 50vmax at 62% 112%,var(--blob3),transparent 60%);background-attachment:fixed}
-.side,.list,.detail,.solo,.aicard,.mode,.modal .box,.ob,.command-result,.topbar,.d-head,.composer{-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
+.side,.detail,.solo,.modal .box,.ob,.topbar{-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
 .list,.solo,.mode,.aicard{background:var(--panel);border:1px solid var(--stroke);box-shadow:var(--soft)}
 .list{border-radius:16px}.solo{border-radius:18px}.aicard{border-radius:14px;box-shadow:none}
 .side{background:var(--side);border:1px solid var(--stroke)}
@@ -432,7 +432,7 @@ input,textarea,select{background:var(--field);border-radius:10px}
 .pick.on{background:var(--brand);border-color:var(--brand)}
 .batch{position:sticky;bottom:16px;margin:16px auto 0;width:max-content;max-width:100%;display:flex;gap:8px;align-items:center;padding:7px 8px 7px 16px;border-radius:99px;background:var(--sheet);border:1px solid var(--stroke);box-shadow:var(--soft);-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%)}
 .proj-chip{display:inline-flex;align-items:center;gap:6px;border:0;background:var(--gray-soft);border-radius:99px;padding:2px 10px;font-size:12.5px;color:var(--ink)}
-@container (max-width:720px){.proj-grid{grid-template-columns:1fr;gap:12px}.proj-list{position:static}.proj-list .list{display:flex;overflow-x:auto;scrollbar-width:none}.proj-list .cell{width:auto;flex:none;border-top:0;white-space:nowrap}.proj-list .cell.new{min-width:190px}}
+@container (max-width:720px){.proj-grid{grid-template-columns:minmax(0,1fr);gap:12px}.proj-list .cell.ent{width:210px;white-space:normal}.proj-list .sec-h{display:none}.proj-list{position:static}.proj-list .list{display:flex;overflow-x:auto;scrollbar-width:none}.proj-list .cell{width:auto;flex:none;border-top:0;white-space:nowrap}.proj-list .cell.new{min-width:190px}}
 /* setup check: one line per thing that has to work, its state, and the one next step */
 .chk{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:13px 16px;border-top:1px solid var(--line2)}
 .chk:first-child{border-top:0}
@@ -550,6 +550,29 @@ details.later>summary{cursor:pointer;list-style:none}details.later>summary::-web
   .props{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+
+/* 事项详情 */
+.d-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 0;font-size:12.5px;color:var(--ink2)}
+.d-meta .mi{display:inline-flex;align-items:center;gap:5px}.d-meta .mi a{margin-left:4px}.d-meta .mi.late{color:var(--red)}
+.d-meta .msep{color:var(--ink3);margin:0 8px}.d-meta .who{width:18px;height:18px;font-size:10px}
+.d-more{margin:12px 24px 0;padding:10px 14px;border:1px solid var(--line2);border-radius:12px;font-size:12.5px;display:flex;flex-direction:column;gap:7px}
+.d-more .mr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.d-more .k{color:var(--ink3);min-width:5.5em}.d-more .v{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.d-more select{height:28px}.d-more .chain{margin:4px 0 0}
+.next{margin:14px 24px 0;padding:14px 16px;border-radius:14px;background:var(--hover);border:1px solid var(--line2)}
+.next.amber{background:var(--amber-soft);border-color:transparent}.next.red{background:var(--red-soft);border-color:transparent}
+.next.violet{background:var(--violet-soft);border-color:transparent}.next.blue{background:var(--blue-soft);border-color:transparent}
+.next .what{margin:0 0 10px;line-height:1.6}.next .inline{padding:10px 0 0;border:0;background:none}
+.nc-dv{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:0 0 10px;border-radius:10px;background:var(--panel)}
+.nc-dv .ver{font-weight:700;color:var(--brand)}.nc-dv .dv-sum{flex:1;min-width:0;font-weight:600;line-height:1.5}.nc-dv .btn{flex:none}
+.nc-tags{font-size:12px;color:var(--ink3);margin:-4px 0 8px 2px}
+.nc-confirm{margin:0 0 10px;padding:8px 12px;border-radius:10px;background:var(--panel);line-height:1.6}.nc-confirm b{color:var(--amber);margin-right:8px}
+.nc-review{margin:0 0 10px 2px;font-size:12.5px;color:var(--ink2)}.nc-review summary{cursor:pointer}
+.nc-vers{margin-top:12px;font-size:12.5px}.nc-vers summary{cursor:pointer;color:var(--ink2)}
+.ver-row{display:flex;align-items:center;gap:10px;padding:7px 2px;border-top:1px solid var(--line2)}.ver-row .dv-sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ver-row .at{color:var(--ink3)}
+.nc-vers .dv-form{margin-top:8px}
+.dv-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 12px;border-radius:10px;border:1px solid var(--line);border-left:3px solid var(--green);background:var(--panel);line-height:1.5}
+.composer .cmp-state{font-size:12px;color:var(--blue);margin:0 0 6px}
+.composer .bot .btns .btn[disabled]{opacity:.5}
 </style>
 </head>
 <body>
@@ -631,7 +654,14 @@ function commands(){
   return [...all.values()].sort((a,b)=>b.created-a.created);
 }
 const waiting = c => ["sending","queued","running","unknown"].includes(c.status);
-const pendingFor = n => commands().find(c=>c.numbers.includes(n)&&(waiting(c)||c.status==="failed"));
+const pendingFor = n => commands().find(c=>c.numbers.includes(n)&&waiting(c));
+function forgetFailed(numbers){
+  for(const c of commands()) if(c.status==="failed"&&c.numbers.some(n=>numbers.includes(n))){
+    localCommands.delete(c.id); if(D&&D.commands) D.commands=D.commands.filter(x=>x.id!==c.id);
+    if(LIVE) api("/api/commands/dismiss",{id:c.id}).catch(()=>{});
+  }
+  keepCommands();
+}
 function syncCommands(){
   for(const c of D.commands||[]) localCommands.delete(c.id);
   keepCommands();
@@ -648,7 +678,8 @@ function commandView(){
   }).join("");
 }
 async function submitCommand(body,numbers,existing=null){
-  if(!existing && numbers.some(n=>pendingFor(n))) return;
+  if(!existing && numbers.some(n=>pendingFor(n))) return toast("上一条还在处理，等它好了再发");
+  if(!existing) forgetFailed(numbers);
   const id=existing?.id || (globalThis.crypto?.randomUUID?.() || ("r"+Date.now().toString(36)+Math.random().toString(36).slice(2)));
   const c={id,numbers,text:body.text,payload:body,status:"sending",message:"正在提交",created:existing?.created||Date.now()/1000};
   localCommands.set(id,c); keepCommands(); render();
@@ -816,7 +847,7 @@ function workLine(i){
 }
 function btn(i,[label,k,cls,ph]){ return `<button data-n="${i.n}" ${pendingFor(i.n)?"disabled aria-busy=\"true\"":""} class="btn ${cls||""}" onclick="event.stopPropagation();act(${i.n},'${k}',${ph?`'${ph}'`:"null"},this)">${label}</button>`; }
 function act(n,k,ph,el){
-  if(k==="focus"){ S.mode="ai"; if(S.item!==n) openItem(n); else render(); setTimeout(()=>$("#saybox")?.focus(),30); return; }
+  if(k==="focus"){ if(S.item!==n) openItem(n); else render(); setTimeout(()=>$("#saybox")?.focus(),30); return; }
   if(pendingFor(n))return;
   if(ph){ S.inline={n,k,ph,at:el?.closest?.("[data-msg]")?.dataset?.msg??null};render();$("#inline-"+n)?.focus();return; }
   apply(n,k,null);
@@ -2266,7 +2297,7 @@ function storeLine(t, mode){
 async function retryBackup(){ try{ await api("/api/backup/retry",{}); toast("已重新排队备份"); }catch(e){ toast("暂时连不上服务"); } load(); }
 
 /* ---------- one item: what it is, what to do now, the whole conversation ---------- */
-function openItem(n){ if(!byN(n)) return; if(S.item!==n){ S.tab="talk"; S.mode="ai"; } S.item=n; S.inline=null; markItemRead(n); render(); const d=$("#detail");
+function openItem(n){ if(!byN(n)) return; if(S.item!==n){ S.tab="talk"; S.more=null; } S.item=n; S.inline=null; markItemRead(n); render(); const d=$("#detail");
   // the conversation opens at its newest message, like a chat (a reply / notice waiting for 发送 sits right there,
   // at the end of it); other tabs start at the top
   const end=S.tab==="talk"; if(d) d.scrollTop=end?d.scrollHeight:0; if(!wide()) window.scrollTo(0,end?document.documentElement.scrollHeight:0); }
@@ -2295,19 +2326,17 @@ function thread(i){
     const who=m.from==="me"?"你":(m.driver||"AI");
     let body=`<div class="bub">${linkify(m.text)}</div>`;
     if(m.kind==="deliver"){ const v=dv[k]||{v:k+1,summary:m.text,url:m.url}; k++;
-      body=`<div class="dv"><div class="top"><span>交付 v${v.v}</span>${(v.url||m.url)?`<a href="${esc(v.url||m.url)}" target="_blank" rel="noopener">打开文档 ↗</a>`:""}</div><div>${linkify(v.summary||"")}</div>
-      ${v.confirm?`<div class="q">需要你拍板：${esc(v.confirm)}</div>`:""}
-      ${(v.assumptions&&v.assumptions.length)||(v.sources&&v.sources.length)?`<details><summary>它做的假设和用到的资料</summary><ul>${(v.assumptions||[]).map(a=>`<li>${esc(a)}</li>`).join("")}${(v.sources||[]).map(a=>`<li>${linkify(a)}</li>`).join("")}</ul></details>`:""}</div>`; }
+      body=`<div class="dv-line"><b>交付 v${v.v}</b><span>${linkify(v.summary||"")}</span>${(v.url||m.url)?`<a href="${esc(v.url||m.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}</div>`; }
     out.push(`<div class="m ${m.from==="me"?"me":""} ${m.kind==="ask"?"ask":""}"><div class="who-line"><b>${esc(who)}</b>${esc(m.at)}</div>${body}</div>`);
   }
   flush();
   if(isWorking(i)){ const c=jobOf(i); out.push(`<div class="m"><div class="who-line"><b>${esc(c.driver||"AI")}</b>现在</div><div class="steps">${esc(c.step||"在做")}…</div></div>`); }
-  return out.length?`<div class="thread">${out.join("")}</div>`:`<div class="hint" style="margin:0">还没有对话。在下面说一句，AI 就从这件事开始；只想自己记一笔，切到「写备注」。</div>`;
+  return out.length?`<div class="thread">${out.join("")}</div>`:`<div class="hint" style="margin:0">还没有对话。在下面跟 AI 说一句，它就从这件事开始。</div>`;
 }
 function nowText(i){
   if(blockedAI(i)) return [`${TERM.status.reply}：<b>${esc(i.blocker)}</b>${i.tried?`<div class="hint" style="margin:4px 0 0">它已经试过：${esc(i.tried)}</div>`:""}`,"red"];
   if(isWorking(i)){ const c=jobOf(i); return [`${esc(c.driver||"AI")} 正在做：${esc(c.step||"")}。有补充直接在下面说；要停下点「${TERM.act.cancel}」，已经完成点「${TERM.act.done}」，AI 会立即停止。`,"blue"]; }
-  if(i.status==="待验收"){ const v=(D.deliverables[i.n]||[]).length||1; return [`${TERM.status.review}：v${v}。需要修改就在下面告诉 AI，它会改出 v${v+1}。`,"amber"]; }
+  if(i.status==="待验收"){ const v=(D.deliverables[i.n]||[]).length||1; return [`${TERM.status.review}。满意就点「${TERM.act.approve}」；要改就在下面告诉 AI，它会改出 v${v+1}。`,"amber"]; }
   if(i.status==="待确认") return [`${TERM.status.assign}：还没确定负责人和截止日。`,"violet"];
   if(i.status==="完成") return [`${TERM.status.done}。需要调整就在下面告诉 AI，它会在原来的对话里修改并交新版本。`,""];
   if(i.status==="取消") return [`${TERM.status.cancel}。`,""];
@@ -2386,38 +2415,74 @@ function sourceTab(i){
     ${kids.length?`<div><span class="k">关联</span>AI 在帮你备材料：${kids.map(k=>`<a href="#" onclick="openItem(${k.n});return false">#${k.n}</a>`).join("、")}</div>`:""}
     ${pastOf(i)}</div>`;
 }
+/* ---------- 事项详情 ----------
+   上面：这件事是什么（标题、一行信息）；接着是唯一的「下一步」卡：交付（打开文档）、待你确认、要你点的按钮都在这一张里。
+   不常用的（哪个 AI、做事方式、项目、串起来、交付链接）收进「更多」。下面是对话，最底下一个输入框：发给 AI，或只记备注。 */
+function metaLine(i){
+  const d=due(i), pj=projOf(i.project), links=(i.before||[]).length+(i.after||[]).length, parts=[`<span class="mi">${avatar(i)}${esc(whoText(i))}</span>`];
+  if(d) parts.push(`<span class="mi ${late(i)?"late":""}">${esc(d)}</span>`);
+  if(i.source||i.source_url) parts.push(`<span class="mi">来自${esc(i.source||"手动")}${i.source_url?`<a href="${esc(i.source_url)}" target="_blank" rel="noopener">原处 ↗</a>`:""}</span>`);
+  if(pj) parts.push(`<span class="mi">${projDot(pj)}${esc(pj.name)}</span>`);
+  if(links) parts.push(`<a href="#" class="mi" onclick="S.more=${i.n};render();return false">关联 ${links} 件</a>`);
+  const c=closedText(i); if(c) parts.push(`<span class="mi">${c}</span>`);
+  return parts.join('<span class="msep">·</span>');
+}
+function moreView(i){
+  if(S.more!==i.n) return "";
+  const open=!["完成","取消"].includes(i.status), pj=projOf(i.project), guessed=pj&&i.project_by==="猜", dvs=D.deliverables[i.n]||[];
+  const rows=[
+    ...(i.who==="AI"&&open?[["哪个 AI",aiOfItem(i)]]:[]),
+    ...(open?[["做事方式",modeSelect((i.work||{}).own_mode||"",`setWorkMode(this.value,byN(${i.n}).rid)`,true)+((i.work||{}).kind?`<span class="hint" style="margin:0">类型：${esc(i.work.kind)} · 规格：${esc(i.work.spec||"")}</span>`:"")]]:[]),
+    ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="hint" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
+    ...(i.version?[["版本",`<a href="#" class="quiet-link" style="margin:0" onclick="go('mem');return false">${esc(i.version.name)}</a><span class="hint" style="margin:0">${esc(i.version.status)}</span>`]]:[]),
+    ...(i.status!=="取消"&&!dvs.length?[["交付",`<a href="#" class="quiet-link" style="margin:0" onclick="dvOpen(${i.n},0);return false">${i.url?"换交付链接":"填交付链接"}</a>`]]:[]),
+    ["自己接着做",`<a href="#" class="quiet-link" style="margin:0" onclick="pickUp(${i.n});return false">在 ${esc(pickupName())} 里接着做</a>`],
+    ["更新",esc(ago(i.updated))]];
+  return `<div class="d-more">${rows.map(([k,v])=>`<div class="mr"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("")}${chainView(i)}</div>`;
+}
+function dvTags(i){
+  const w=i.work||{}, rv=w.review||[];
+  const tags=[w.kind&&esc(w.kind),w.spec&&`规格：${esc(w.spec)}`,w.mode&&`做事方式：${esc(TERM.mode[w.mode]||"")}`].filter(Boolean).join(" · ");
+  const review=rv.length?`<details class="nc-review"><summary>自审 ${rv.length} 项${w.fixed?`，改了 ${w.fixed} 处`:"，都通过"}</summary><div class="prof-text">${rv.map(esc).join("<br>")}</div></details>`:"";
+  return (tags?`<div class="nc-tags">${tags}</div>`:"")+review;
+}
+function dvVersions(i,list){
+  const e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;
+  if(!list.length&&!e) return "";
+  const form=(v,cur)=>`<div class="dv-form"><input id="dv-url" data-draft="dv-url-${i.n}-${v}" value="${esc(cur.url||"")}" placeholder="粘贴文档链接（http 开头）" aria-label="交付链接" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
+      <input id="dv-sum" data-draft="dv-sum-${i.n}-${v}" value="${esc(cur.summary||"")}" placeholder="一句话说明这是什么（可不填）" maxlength="300" aria-label="交付说明" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
+      <div class="acts"><button class="btn pri" onclick="dvSave(${i.n},${v})">保存</button><button class="btn" onclick="dvClose()">取消</button></div></div>`;
+  const rows=[...list].reverse().map(v=>e&&e.v===v.v?form(v.v,v):`<div class="ver-row"><b>v${v.v}</b><span class="dv-sum">${linkify(v.summary||"交付")}</span><span class="at">${esc(v.at||"")}</span>
+      ${v.url?`<a href="${esc(v.url)}" target="_blank" rel="noopener">打开 ↗</a>`:`<span class="hint" style="margin:0">没有链接</span>`}<a href="#" onclick="dvOpen(${i.n},${v.v});return false">编辑</a><a href="#" onclick="toast('删掉 v${v.v} 这一版交付？','删掉',()=>dvRemove(${i.n},${v.v}));return false">删掉</a></div>`).join("");
+  return `<details class="nc-vers" ${e||S.versOpen===i.n?"open":""} ontoggle="S.versOpen=this.open?${i.n}:null"><summary>全部版本（${list.length}）</summary>${rows}${e&&e.v===0?form(0,{}):`<a href="#" class="quiet-link" style="margin:6px 0 0;display:inline-block" onclick="dvOpen(${i.n},0);return false">＋ 自己加一版</a>`}</details>`;
+}
+function nextCard(i){
+  const [what,tone]=nowText(i), list=D.deliverables[i.n]||[], last=list[list.length-1];
+  const dv=last?`<div class="nc-dv"><span class="ver">v${last.v}</span><span class="dv-sum">${linkify(last.summary||"交付")}</span>${last.url?`<a class="btn pri" href="${esc(last.url)}" target="_blank" rel="noopener">打开文档 ↗</a>`:""}</div>
+      ${dvTags(i)}${last.confirm?`<div class="nc-confirm"><b>待你确认</b>${esc(last.confirm)}</div>`:""}`:"";
+  return `<div class="next ${tone}">${dv}<div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}${dvVersions(i,list)}</div>`;
+}
 function composer(i){
-  const note=S.mode==="note", reopen=["完成","待验收"].includes(i.status), closed=["完成","取消"].includes(i.status);
-  const ph=note?"写给自己的备注，不会发给 AI。比如：已电话确认，按 B 方案"
-    :reopen?"告诉 AI 要改什么，它在原来的对话里接着改，交新版本":"继续和 AI 说这件事；也可以直接输入「标为完成」「周五」「取消」";
-  const hint=note?"只记在这件事里，AI 收不到":(i.who==="AI"||reopen)?"AI 接手后，进度会显示在对话里":"你的事：记成补充材料，AI 不回复";
-  const btns=note?`<button data-n="${i.n}" class="btn" onclick="sendNote(false)">保存备注</button>${closed?"":`<button data-n="${i.n}" class="btn pri" onclick="sendNote(true)">备注并完成</button>`}`
-    :`<button data-n="${i.n}" class="btn pri" onclick="sendSay()">发送给 AI</button>`;
-  return `<div class="composer ${note?"note":""}"><div class="seg" role="tablist"><button class="${note?"":"on"}" onclick="S.mode='ai';render();$('#saybox')?.focus()">发给 AI</button><button class="${note?"on":""}" onclick="S.mode='note';render();$('#saybox')?.focus()">写备注</button></div>
-    <textarea id="saybox" data-draft="${note?"note":"say"}-${i.n}" aria-label="${note?"写备注":"和 AI 说这件事"}" placeholder="${ph}" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();${note?"sendNote(false)":"sendSay()"}}"></textarea>
-    <div class="bot"><span>${hint}，⌘↩ ${note?"保存":"发送"}</span><span class="btns">${btns}</span></div></div>`;
+  const n=i.n, busy=pendingFor(n), cancelled=i.status==="取消", v=(D.deliverables[n]||[]).length;
+  const what=cancelled?"这件事已取消，点「恢复」后才能交给 AI"
+    :["完成","待验收"].includes(i.status)?`发给 AI：它按你说的改，交 v${v+1}`
+    :isWorking(i)?"发给 AI：作为补充交给正在做的 AI"
+    :i.who==="AI"?"发给 AI：它照着做":"发给 AI：这件事交给 AI 来做";
+  return `<div class="composer">${busy?`<div class="cmp-state">${esc(busy.message||"正在发送")}…</div>`:""}
+    <textarea id="saybox" data-draft="say-${n}" aria-label="和 AI 说这件事" placeholder="跟 AI 说要怎么做；也可以直接写「完成」「周五」「不做」" onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();sendSay()}"></textarea>
+    <div class="bot"><span>${what}，⌘↩ 发送</span><span class="btns"><button class="btn ghost" onclick="sendNote(false)" title="只记在这件事里，AI 收不到">只记备注</button><button class="btn pri" ${busy||cancelled?"disabled":""} onclick="sendSay()">发给 AI</button></span></div></div>`;
 }
 function itemView(i){
-  const [what,tone]=nowText(i), dvs=(D.deliverables[i.n]||[]).length, d=due(i), tab=S.tab||"talk";
-  const talk=(D.threads[i.n]||[]).filter(m=>m.from!=="system"&&m.kind!=="step").length, sess=(i.sessions||[]).length;
-  const pj=projOf(i.project), guessed=pj&&i.project_by==="猜";
-  const props=[["谁来做",`${avatar(i)}${esc(whoText(i))}`],
-    ...(i.who==="AI"&&!["完成","取消"].includes(i.status)?[["哪个 AI",aiOfItem(i)]]:[]),
-    ...(i.version?[["版本",`<a href="#" class="quiet-link" style="margin:0" onclick="go('mem');return false">${esc(i.version.name)}</a><span class="hint" style="margin:0 0 0 6px">${esc(i.version.status)}</span>`]]:[]),
-    ["项目",`<button class="proj-chip" onclick="S.moving=[${i.n}];render()" title="换一个项目">${projDot(pj)}${esc(pj?pj.name:"未归类")}</button>${guessed?`<span class="quiet-link" style="margin:0">系统猜的</span><a href="#" class="quiet-link" style="margin:0;color:var(--brand)" onclick="moveItems([${i.n}],${pj.id});return false">对</a>`:""}`],
-    ["截止",d?`<span class="${late(i)?"late":""}">${esc(d)}</span>${i.due_note?`，改到 ${esc(i.due_note)}`:""}`:(i.due&&!["完成","取消"].includes(i.status)?esc(i.due):"")],
-    [i.status==="取消"?"关闭":"完成",closedText(i)],
-    ["交付",`${dvs?`v${dvs}`:""}${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">打开 ↗</a>`:""}${i.status==="取消"?"":`<a href="#" class="quiet-link" onclick="dvOpen(${i.n},${dvs?(D.deliverables[i.n].at(-1).v):0});return false">${i.url?"换链接":"填链接"}</a>`}`],
-    ["来源",`${esc(i.source||"手动")}${i.source_url?`<a href="${esc(i.source_url)}" target="_blank" rel="noopener">原处 ↗</a>`:""}`],
-    ["更新",esc(ago(i.updated))]];
-  return `<div class="d-head"><div class="d-top"><span class="num">#${i.n}</span>${pill(i)}
-      <button class="btn ghost x" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
-    <div class="d-title">${esc(i.title)}</div>
-    <div class="props">${props.map(([k,v])=>`<div class="prop"><div class="k">${k}</div><div class="v ${v?"":"muted"}">${v||"—"}</div></div>`).join("")}</div></div>
-    ${aiPickView(i)}${chainView(i)}${deliverView(i)}
-    <div class="callout ${tone}"><div class="what">${what}</div><div class="acts">${detailButtons(i).map(b=>btn(i,b)).join("")}</div>${inlineForm(i)}</div>${["完成","取消"].includes(i.status)?"":workLine(i)}
-    <div class="tabs" role="tablist">${[["talk","对话",talk],["sessions","AI 会话",sess],["source","来源",0],["prompt","交给 AI 的说明",0]].map(([k,l,c])=>`<button class="tab ${tab===k?"on":""}" role="tab" aria-selected="${tab===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
-    <div class="d-body">${tab==="sessions"?sessionsTab(i):tab==="source"?sourceTab(i):tab==="prompt"?promptTab(i):thread(i)+replyState(i)+replyView(i)+noticeView(i)}</div><div class="spacer"></div>
+  const tab=S.tab||"talk", talk=(D.threads[i.n]||[]).filter(m=>m.from!=="system"&&m.kind!=="step").length, sess=(i.sessions||[]).length;
+  const tabs=[["talk","对话",talk],["source","来源",0],["prompt","AI 收到的说明",0],...(sess?[["sessions","AI 会话",sess]]:[])];
+  const cur=tabs.some(([k])=>k===tab)?tab:"talk";
+  return `<div class="d-head"><div class="d-top"><span class="num">#${i.n}</span>${pill(i)}<span style="flex:1"></span>
+      <button class="btn ghost" onclick="S.more=S.more===${i.n}?null:${i.n};render()" aria-expanded="${S.more===i.n}">${S.more===i.n?"收起":"更多"}</button>
+      <button class="btn ghost" onclick="closeItem()" aria-label="关闭详情">${wide()?"关闭":"← 返回"}</button></div>
+    <div class="d-title">${esc(i.title)}</div><div class="d-meta">${metaLine(i)}</div></div>
+    ${moreView(i)}${aiPickView(i)}${outlineCard(i)}${nextCard(i)}${replyView(i)}${noticeView(i)}
+    <div class="tabs" role="tablist">${tabs.map(([k,l,c])=>`<button class="tab ${cur===k?"on":""}" role="tab" aria-selected="${cur===k}" onclick="S.tab='${k}';render()">${l}${c?`<span class="n">${c}</span>`:""}</button>`).join("")}</div>
+    <div class="d-body">${cur==="sessions"?sessionsTab(i):cur==="source"?sourceTab(i):cur==="prompt"?promptTab(i):thread(i)+replyState(i)}</div><div class="spacer"></div>
     ${composer(i)}`;
 }
 /* 交给 AI 的说明：这件事最近一次交给 AI 时，AI 收到的完整文字（原样） */
@@ -2523,25 +2588,6 @@ function outlineCard(i){
   return `<div class="d-sec" style="padding-top:14px"><h3>${w.waiting_outline?"提纲：等你看过再写":"提纲"}${w.waiting_outline?"":`<button class="btn ghost" style="margin-left:auto;height:24px;padding:0 8px" onclick="S.outlineOpen=S.outlineOpen===${i.n}?null:${i.n};render()">${open?"收起":"展开"}</button>`}</h3>
     ${open?`<div class="outline-card md">${mdLite(w.outline)}</div>`:""}</div>`;
 }
-function dvHead(i,last){
-  const w=i.work||{}, rv=w.review||[];
-  const chips=[w.kind&&`<span class="pill">${esc(w.kind)}</span>`,w.spec&&`<span class="hint" style="margin:0">规格：${esc(w.spec)}</span>`,w.mode&&`<span class="hint" style="margin:0">做事方式：${esc(TERM.mode[w.mode]||"")}</span>`].filter(Boolean).join("");
-  const review=rv.length?`<details class="dv-review"><summary>自审 ${rv.length} 项${w.fixed?`，改了 ${w.fixed} 处`:"，都通过"}</summary><div class="prof-text">${rv.map(esc).join("<br>")}</div></details>`:"";
-  const confirm=last&&last.confirm?`<div class="dv-confirm"><b>待你确认：</b>${esc(last.confirm)}</div>`:"";
-  const acts=last&&last.url?`<div class="acts"><a class="btn pri" href="${esc(last.url)}" target="_blank" rel="noopener">打开文档</a></div>`:"";
-  return chips||review||confirm||acts?`<div class="dv-head">${chips?`<div class="dv-tags">${chips}</div>`:""}${last?`<div class="dv-title">v${last.v} · ${linkify(last.summary||"交付")}</div>`:""}${confirm}${review}${acts}</div>`:"";
-}
-function deliverView(i){
-  const list=D.deliverables[i.n]||[], e=S.dvEdit&&S.dvEdit.n===i.n?S.dvEdit:null;
-  if(!list.length&&!e) return outlineCard(i);
-  const form=(v,cur)=>`<div class="dv-form"><input id="dv-url" data-draft="dv-url-${i.n}-${v}" value="${esc(cur.url||"")}" placeholder="粘贴文档链接（http 开头）" aria-label="交付链接" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
-      <input id="dv-sum" data-draft="dv-sum-${i.n}-${v}" value="${esc(cur.summary||"")}" placeholder="一句话说明这是什么（可不填）" maxlength="300" aria-label="交付说明" onkeydown="if(event.key==='Enter')dvSave(${i.n},${v});if(event.key==='Escape')dvClose()">
-      <div class="acts"><button class="btn pri" onclick="dvSave(${i.n},${v})">保存</button><button class="btn" onclick="dvClose()">取消</button></div></div>`;
-  const rows=[...list].reverse().map((v,k)=>e&&e.v===v.v?form(v.v,v):`<div class="dv-row"><b class="${k?"":"cur"}">v${v.v}</b><div style="min-width:0"><div class="t wrap">${linkify(v.summary||"交付")}</div><div class="s">${esc(v.at||"")}${v.url?`　${esc(linkLabel(v.url))}`:"　没有链接"}</div></div>
-      <div class="acts">${v.url?`<a class="btn" href="${esc(v.url)}" target="_blank" rel="noopener">打开</a>`:""}<button class="btn ghost" onclick="dvOpen(${i.n},${v.v})">编辑</button><button class="btn ghost" onclick="toast('删掉 v${v.v} 这一版交付？','删掉',()=>dvRemove(${i.n},${v.v}))">删掉</button></div></div>`).join("");
-  return outlineCard(i)+`<div class="d-sec" style="padding-top:14px"><h3>交付<span class="n">${list.length||""}</span>${e&&e.v===0?"":`<button class="btn ghost" style="margin-left:auto;height:24px;padding:0 8px" onclick="dvOpen(${i.n},0)">＋ 加一版</button>`}</h3>
-    ${dvHead(i,list[list.length-1])}<div class="inner-list">${e&&e.v===0?form(0,{}):""}${rows}</div></div>`;
-}
 function dvOpen(n,v){ S.dvEdit={n,v}; render(); setTimeout(()=>$("#dv-url")?.focus(),30); }
 function dvClose(){ const e=S.dvEdit; if(e){ drafts.delete(`dv-url-${e.n}-${e.v}`); drafts.delete(`dv-sum-${e.n}-${e.v}`); } S.dvEdit=null; render(); }
 async function dvSend(n,body,done){
@@ -2593,15 +2639,15 @@ function pickLink(n){
 /* a suggested pair: the one created first is the earlier step */
 function linkByAge(n,other){ const a=byN(n), b=byN(other); return (a.created||"")<=(b.created||"")?setLink(n,other,true):setLink(other,n,true); }
 function sendSay(){
-  const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus();
-  if(LIVE){ if(pendingFor(S.item)) return; return submitCommand({kind:"say",n:S.item,text:t},[S.item]); }
+  const box=$("#saybox"), t=box?box.value.trim():""; if(!t){ toast("先写要跟 AI 说什么"); return box&&box.focus(); }
+  if(LIVE) return submitCommand({kind:"say",n:S.item,text:t},[S.item]);
   const i=byN(S.item); apply(S.item, ["完成","待验收"].includes(i.status)?"revise":"add", t);
 }
 function sendNote(complete){
-  const t=$("#saybox").value.trim(); if(!t) return $("#saybox").focus();
+  const box=$("#saybox"), t=box?box.value.trim():""; if(!t){ toast("先写要记的内容"); return box&&box.focus(); }
   const n=S.item;
-  if(LIVE){ if(pendingFor(n)) return; return submitCommand({kind:"note",n,text:t,complete:!!complete},[n]); }
-  say(n,"me","note",t); $("#saybox").value=""; drafts.delete("note-"+n);
+  if(LIVE) return submitCommand({kind:"note",n,text:t,complete:!!complete},[n]);
+  say(n,"me","note",t); box.value=""; drafts.delete("say-"+n);
   const i=byN(n); if(complete&&!["完成","取消"].includes(i.status)){ i.status="完成"; i.finished=TODAY; i.closed={by:"你",how:"标记完成",at:new Date().toISOString(),note:t}; }
   toast(complete?"备注已记下，标为完成（原型）":"备注已记下（原型）"); render();
 }
@@ -2757,17 +2803,16 @@ function demoBlock(on){ const i=byN(44); if(!i) return; if(on){ S.blocked={statu
 function demoWork(on){ S.working=on; S.step=0; clearInterval(demoWork.h); if(on) demoWork.h=setInterval(()=>{ S.step=(S.step+1)%4; render(); },4000); render(); }
 /* after drawing: in every list, give the status column and the button column the width of their widest entry */
 function alignRows(){
-  for(const list of document.querySelectorAll("#main .list, #detail .list")){
-    let pill=0, acts=0;
-    list.style.removeProperty("--pill"); list.style.removeProperty("--acts");
+  const lists=[...document.querySelectorAll("#main .list, #detail .list")];
+  for(const list of lists){ list.style.removeProperty("--pill"); list.style.removeProperty("--acts"); }
+  const sizes=lists.map(list=>{ let pill=0, acts=0;
     for(const row of list.querySelectorAll(":scope > .row")){
       const p=row.querySelector(":scope > .meta > .pill"), a=row.querySelector(":scope > .acts");
       if(p) pill=Math.max(pill,Math.ceil(p.getBoundingClientRect().width));
       if(a&&a.children.length) acts=Math.max(acts,Math.ceil(a.scrollWidth));
     }
-    if(pill) list.style.setProperty("--pill",pill+"px");
-    if(acts) list.style.setProperty("--acts",acts+"px");
-  }
+    return [pill,acts]; });
+  lists.forEach((list,k)=>{ const [pill,acts]=sizes[k]; if(pill) list.style.setProperty("--pill",pill+"px"); if(acts) list.style.setProperty("--acts",acts+"px"); });
 }
 function render(){
   const focused=document.activeElement, focusKey=focused?.dataset?.draft;

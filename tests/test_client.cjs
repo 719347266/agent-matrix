@@ -148,16 +148,17 @@ function reset(item) {
   // deliverables: each version can be corrected or removed, one can be added; the item follows the newest
   const keepD = evaluate("JSON.stringify([D.items,D.deliverables,D.threads])");
   evaluate('D.items=[{n:9,title:"写方案",status:"待验收",who:"AI",url:"https://x/docx/AI"}]; D.deliverables={9:[{v:1,at:"11-20 10:00",summary:"AI 写的",url:"https://x/docx/AI"}]}; D.threads={9:[]}; S.dvEdit=null');
-  let dv = evaluate("deliverView(byN(9))");
-  for (const label of ["交付","v1","AI 写的","dvOpen(9,1)","编辑","删掉","＋ 加一版"]) assert.ok(dv.includes(label), label);
-  evaluate('S.dvEdit={n:9,v:1}'); assert.match(evaluate("deliverView(byN(9))"),/id="dv-url"[^>]*value="https:\/\/x\/docx\/AI"/);
+  let dv = evaluate("nextCard(byN(9))");
+  for (const label of ["v1","AI 写的","打开文档 ↗","全部版本（1）","dvOpen(9,1)","编辑","删掉","＋ 自己加一版","验收通过"]) assert.ok(dv.includes(label), label);
+  assert.doesNotMatch(dv, /<details class="nc-vers" open/, "the versions are folded away");
+  evaluate('S.dvEdit={n:9,v:1}'); assert.match(evaluate("nextCard(byN(9))"),/<details class="nc-vers" open[\s\S]*id="dv-url"[^>]*value="https:\/\/x\/docx\/AI"/);
   await evaluate('dvSend(9,{op:"edit",v:1,url:"https://x/docx/MINE",summary:"我自己建的"},"改好了")');
   assert.deepEqual(plain("[D.deliverables[9][0].url,D.deliverables[9][0].summary,byN(9).url,S.dvEdit]"),["https://x/docx/MINE","我自己建的","https://x/docx/MINE",null]);
   await evaluate('dvSend(9,{op:"add",url:"https://x/docx/V2",summary:""},"加上了")');
   assert.deepEqual(plain("[D.deliverables[9].map(v=>v.v),byN(9).url]"),[[1,2],"https://x/docx/V2"]);
   await evaluate('dvSend(9,{op:"remove",v:2},"删掉了")'); await evaluate('dvSend(9,{op:"remove",v:1},"删掉了")');
-  assert.deepEqual(plain("[D.deliverables[9],byN(9).url]"),[[],null]); assert.equal(evaluate("deliverView(byN(9))"),"");
-  assert.match(evaluate("itemView(byN(9))"),/dvOpen\(9,0\);return false">填链接/);
+  assert.deepEqual(plain("[D.deliverables[9],byN(9).url]"),[[],null]); assert.doesNotMatch(evaluate("nextCard(byN(9))"),/nc-vers|nc-dv/);
+  evaluate("S.more=9"); assert.match(evaluate("itemView(byN(9))"),/dvOpen\(9,0\);return false">填交付链接/); evaluate("S.more=null");
   // another app for one item: offered there, and the usual one in settings is not what changes
   evaluate('D.settings={pickup_app:"cindy",apps:{cindy:true,claude:true,"terminal-codex":true,"terminal-claude":false}}; S.pickApp=null');
   assert.match(evaluate("sessionsTab(byN(9))"),/S\.pickApp=9;render\(\)">换一个 App/); assert.doesNotMatch(evaluate("sessionsTab(byN(9))"),/go\('sys'\)/);
@@ -275,8 +276,8 @@ function reset(item) {
   let all = evaluate("allPage()");
   for (const label of ["全部项目","数据看板","招人","未归类","新建项目","多选"]) assert.ok(all.includes(label), label);
   assert.match(all,/数据看板<\/span><span class="val need">1 件等你/);
-  assert.match(evaluate("itemView(byN(2))"),/系统猜的/); assert.doesNotMatch(evaluate("itemView(byN(1))"),/系统猜的/);
-  assert.match(evaluate("itemView(byN(3))"),/未归类/);
+  evaluate("S.more=2"); assert.match(evaluate("itemView(byN(2))"),/系统猜的/); evaluate("S.more=1"); assert.doesNotMatch(evaluate("itemView(byN(1))"),/系统猜的/); evaluate("S.more=null");
+  evaluate("S.more=3"); assert.match(evaluate("itemView(byN(3))"),/未归类/); evaluate("S.more=null");
   await evaluate("moveItems([2,3],2)");
   assert.deepEqual(plain("D.items.map(i=>[i.project,i.project_by])"),[[1,"本人"],[2,"本人"],[2,"本人"]]);
   evaluate('S.proj=2'); assert.doesNotMatch(evaluate("allPage()").split('class="proj-head"')[1],/写标签文档/);
@@ -455,9 +456,10 @@ function reset(item) {
   evaluate(`D.items=[{n:1,title:"标签调研",status:"完成",who:"AI",created:"2026-11-10",after:[2],before:[],related:[]},
     {n:2,title:"标签需求文档",status:"待验收",who:"AI",created:"2026-11-12",before:[1],after:[],related:[3],url:"https://x/docx/OLD"},
     {n:3,title:"标签上线排期",status:"未开始",who:"我",created:"2026-11-14",before:[],after:[],related:[2]}]; S.item=2; S.linking=null;`);
-  let view=evaluate("itemView(byN(2))");
-  assert.match(view,/前面的事[\s\S]*#1 标签调研/); assert.match(view,/可能相关[\s\S]*#3 标签上线排期[\s\S]*串起来/); assert.match(view,/换链接/);
-  assert.match(evaluate("itemView(byN(3))"),/填链接/);
+  assert.match(evaluate("itemView(byN(2))"),/关联 1 件/, "the line it is on is one tap away");
+  evaluate("S.more=2"); let view=evaluate("itemView(byN(2))");
+  assert.match(view,/前面的事[\s\S]*#1 标签调研/); assert.match(view,/可能相关[\s\S]*#3 标签上线排期[\s\S]*串起来/); assert.match(view,/换交付链接/);
+  evaluate("S.more=3"); assert.match(evaluate("itemView(byN(3))"),/填交付链接/); evaluate("S.more=null");
   await evaluate("linkByAge(2,3)");
   assert.deepEqual(plain("[byN(2).after,byN(3).before]"),[[3],[2]],"the item created first is the earlier step");
   await evaluate("setLink(1,2,false)");
@@ -494,7 +496,7 @@ function reset(item) {
   // 交给 AI 的说明: the item detail shows the words the AI got, as they were
   evaluate('D.items=[{n:61,rid:"rec61",title:"写需求",status:"待验收",who:"AI"}]; PROMPTS.rec61={text:"## 共同规矩\\n读者没参加那场会",at:"11-26 15:00"}; S.tab="prompt"');
   const sent = evaluate("itemView(byN(61))");
-  assert.match(sent, /交给 AI 的说明/); assert.match(sent, /class="prompt-text">## 共同规矩/); assert.match(sent, /11-26 15:00 交给 AI 的完整说明/);
+  assert.match(sent, /AI 收到的说明/); assert.match(sent, /class="prompt-text">## 共同规矩/); assert.match(sent, /11-26 15:00 交给 AI 的完整说明/);
   evaluate('PROMPTS.rec61={text:"",at:""}'); assert.match(evaluate("itemView(byN(61))"), /还没交给过 AI/);
   evaluate('S.tab="talk"');
   // 做事方式: one switch on 事项 for everything, one in the item for that item; the outline and the delivery are shown plainly
@@ -504,15 +506,19 @@ function reset(item) {
     D.deliverables={72:[{v:1,at:"11-26 18:00",summary:"本周周报",url:"https://x.feishu.cn/docx/a",confirm:"下周计划要不要加评审"}]}; D.inbox=[]; S.view="all"; S.all="全部"; S.dim="type"`);
   const bar = evaluate("allPage()");
   for (const label of ["做事方式","自动","快速","仔细","setGlobalMode"]) assert.ok(bar.includes(label), label);
-  const outline = evaluate("itemView(byN(71))");
+  evaluate("S.more=71"); const outline = evaluate("itemView(byN(71))");
   for (const label of ["提纲：等你看过再写","按提纲写","修改提纲…","要解决什么问题","类型：需求文档 · 规格：试用中"]) assert.ok(outline.includes(label), label);
   assert.doesNotMatch(outline, /按现有资料继续/, "an outline waits for 按提纲写, not a generic continue");
   assert.deepEqual(plain("rowButtons(byN(71)).map(b=>b[0])"), ["按提纲写"]);
-  const done = evaluate("itemView(byN(72))");
-  for (const label of ["周报","规格：草稿","做事方式：仔细","v1 · 本周周报","待你确认：","下周计划要不要加评审","自审 2 项，改了 1 处","打开文档","验收通过","让 AI 修改"]) assert.ok(done.includes(label), label);
+  evaluate("S.more=72"); const done = evaluate("itemView(byN(72))");
+  for (const label of ["周报","规格：草稿","做事方式：仔细","v1","本周周报","待你确认","下周计划要不要加评审","自审 2 项，改了 1 处","打开文档 ↗","验收通过","让 AI 修改"]) assert.ok(done.includes(label), label);
+  assert.ok(done.indexOf("打开文档 ↗") < done.indexOf(">验收通过<") && done.indexOf(">验收通过<") < done.indexOf('class="tabs"'), "the delivery and what to do with it are one card, above the conversation");
+  evaluate("S.more=null"); const plainView = evaluate("itemView(byN(72))");
+  assert.doesNotMatch(plainView, /做事方式<\/span>|跟随默认|哪个 AI/, "the rarely used settings stay in 更多");
+  assert.match(plainView, />更多</);
   assert.equal((done.match(/>验收通过</g)||[]).length, 1, "deciding on it is in one place");
   assert.match(done, /<option value="careful" selected>仔细</, "this item's own mode is shown as chosen");
-  assert.match(done, /跟随默认（自动）/); assert.match(evaluate("itemView(byN(71))"), /跟随默认/);
+  assert.match(done, /跟随默认（自动）/); evaluate("S.more=71"); assert.match(evaluate("itemView(byN(71))"), /跟随默认/); evaluate("S.more=null");
   assert.equal((outline.match(/按提纲写/g)||[]).length, 1, "one place for each button");
   assert.match(evaluate('row({n:99,title:"交付",status:"待验收",who:"AI",url:"https://x.test/d"})'), /class="doc-link" href="https:\/\/x.test\/d"[^>]*>文档 ↗</, "the deliverable opens straight from the row");
   assert.doesNotMatch(evaluate('row({n:98,title:"无",status:"未开始",who:"我"})'), /doc-link/);

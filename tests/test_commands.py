@@ -33,6 +33,16 @@ class ItemBoxTests(unittest.TestCase):
         self.assertEqual(say_text(1, "预算按 600 一天重算"), "1 + 预算按 600 一天重算")
         self.assertEqual(say_text(1, "2 完成"), "1 + 2 完成")  # another item's number is not this item's action
 
+    def test_send_to_ai_reaches_the_ai_whoever_had_the_item(self):
+        from agent_matrix.commands import say_command
+        from agent_matrix.reply import parse
+        from datetime import date
+        self.assertEqual(say_command(1, "预算按 600 重算", "进行中", "AI"), "1 + 预算按 600 重算")
+        self.assertEqual(say_command(1, "预算按 600 重算", "待验收", "AI"), "1 改 预算按 600 重算")
+        mine = say_command(1, "预算按 600 重算", "未开始", "我")
+        self.assertEqual([op.verb for op in parse(mine, date(2026, 11, 26))[0]], ["ai", "material"], "the owner's item goes to the AI with the words")
+        self.assertEqual(say_command(1, "周五", "未开始", "我"), "1 周五", "a short action is still that action")
+
 
 class CommandQueueTests(unittest.TestCase):
     def setUp(self):
