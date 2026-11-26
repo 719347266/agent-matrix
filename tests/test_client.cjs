@@ -98,10 +98,10 @@ function reset(item) {
   for (const label of ["还差 3 步才能用","复制给 AI 的话","copySetupPrompt()","不用自己动手","去填"]) assert.ok(check.includes(label), label);
   assert.doesNotMatch(check,/npm install|install-listen|class="cmd"/, "the owner is not handed commands: the AI gets them");
   assert.match(evaluate('S.setTab="check"; sysPage()').split('class="set-pane"')[0],/驱动心响的 AI<\/span><span class="val">[^<]* · 还差 3 步/);
-  assert.match(evaluate("todayPage()"),/还差 3 步才能用/);
+  assert.match(evaluate('(S.view="all",S.all="今天",S.dim="type",allPage())'),/还差 3 步才能用/);
   evaluate('D.system.here.client=true'); assert.match(evaluate("checkList()"),/从开始菜单重新打开/); evaluate('D.system.here.client=false');
   evaluate('D.settings.me={name:"王小明",aliases:[]}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"11-20 10:00"}}; D.system.engines.codex=true; D.system.listener="运行中"');
-  assert.deepEqual(plain("setupProblems()"),[]); assert.match(evaluate("checkList()"),/都配好了，可以用/); assert.doesNotMatch(evaluate("todayPage()"),/才能用/);
+  assert.deepEqual(plain("setupProblems()"),[]); assert.match(evaluate("checkList()"),/都配好了，可以用/); assert.doesNotMatch(evaluate('(S.view="all",S.all="今天",S.dim="type",allPage())'),/才能用/);
   evaluate('D.settings.engine_tests={}'); assert.match(evaluate("checkList()"),/testEngine\('codex'\)">测试连接/);
   evaluate('D.settings.intake_mode="manual"; D.settings.me={name:""}; D.settings.engine_tests={codex:{ok:true,seconds:3,at:"x"}}; D.system.record.feishu_ready=false');
   assert.deepEqual(plain("setupProblems()"),[], "nothing connected and manual: the name is not needed");
@@ -184,7 +184,7 @@ function reset(item) {
   evaluate('D.settings={engine:"codex",intake_mode:"all",me:{name:"王小明"},engine_tests:{codex:{ok:true,at:"x"}}}; D.system={listener:"运行中",engines:{codex:true},record:{feishu_ready:true,mode:"feishu",feishu_broken:{why:"飞书登录过期了，要重新登录一次",since:"11-20 14:36"}},store:{local:true},here:{platform:"windows",client:true}}');
   assert.deepEqual(plain("setupProblems().map(x=>x.key)"),["feishu"]);
   for (const label of ["还差 1 步才能用","飞书登录过期了","11-20 14:36","都收不进来"]) assert.ok(evaluate("checkList()").includes(label), label);
-  assert.match(pane("tool"),/现在读不到/); assert.match(evaluate("todayPage()"),/还差 1 步才能用/);
+  assert.match(pane("tool"),/现在读不到/); assert.match(evaluate('(S.view="all",S.all="今天",S.dim="type",allPage())'),/还差 1 步才能用/);
   assert.match(evaluate('S.setTab="tool"; sysPage()').split('class="set-pane"')[0],/飞书（读不到）/);
   evaluate('D.system.record.feishu_broken=null'); assert.deepEqual(plain("setupProblems()"),[]); assert.doesNotMatch(pane("tool"),/现在读不到/);
   // any AI the message was sent to: it says who it is, shows up by name, and is missed when it stops asking
@@ -265,10 +265,11 @@ function reset(item) {
   let later = evaluate("allPage()");
   for (const label of ["年卡要不要打折","ruleOp({waiting_done:7})","投流方案怎么定","以后要确认的 2<"]) assert.ok(later.includes(label), label);
   assert.doesNotMatch(later,/先做周视图/, "what is decided is not something to confirm later");
-  evaluate('S.all="进行中"'); assert.match(evaluate("allPage()"),/S\.all='以后要确认的';S\.picking=false;render\(\)">以后要确认的 2</);
+  evaluate('S.all="全部"'); assert.match(evaluate("allPage()"),/S\.all='以后要确认的';S\.picking=false;render\(\)">以后要确认的 2</);
   assert.doesNotMatch(evaluate("allPage()"),/会上的结论/);
   evaluate('D.memory=null; D.settings={}; D.system={}; S.memTab=null');
   // projects: the owner's own sorting; a guess is marked, and moving is one call
+  evaluate('S.dim="proj"; S.all="全部"');
   const keep = evaluate("JSON.stringify(D.items)");
   evaluate('D.projects=[{id:1,name:"数据看板",color:"#5856d6"},{id:2,name:"招人",color:"#ff9500"}]; D.items=[{n:1,title:"写标签文档",status:"进行中",who:"AI",project:1,project_by:"本人"},{n:2,title:"标签更新",status:"待验收",who:"AI",project:1,project_by:"猜"},{n:3,title:"发招聘",status:"进行中",who:"我"}]; S.all="进行中"; S.proj="all"');
   let all = evaluate("allPage()");
@@ -289,20 +290,23 @@ function reset(item) {
   assert.doesNotMatch(evaluate("allPage()"),/未归类|多选|全部项目|proj-grid/, "no projects yet: a plain list, nothing standing alone beside it");
   assert.match(evaluate("allPage()"),/openNewProject\(\)">＋ 新建项目/);
   evaluate("S.newProj=true"); assert.match(evaluate("allPage()"),/id="proj-name"/); evaluate("S.newProj=false");
-  // 今天: only what the owner acts on today, each with why; new items wait in 新进来, the AI's work is one line
+  // 事项 is the one page: 今天 is a filter, and by type: 要你看, 等你定 (grouped by where it came from), 看起来已经办完, 你来做, AI 做, 别人做
   const keepAll = evaluate("JSON.stringify([D.items,D.inbox])");
-  evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"}];
-    D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"brief",title:"旧早报",text:"旧\\n第二行",read:true}]; S.view=null; S.openMsg=null; S.working=false; render()`);
-  assert.equal(evaluate("S.view"),"today");
-  const today = evaluate("todayPage()");
-  for (const label of ["要你定","等验收的事","问你的事","今天要做的","今天要交的事","AI 在做 0 件，排队 1 件","今天还有 1 条消息（简报）"]) assert.ok(today.includes(label), label);
-  assert.doesNotMatch(today,/别人的事|旧早报/);
-  assert.equal(today.split("等验收的事").length,2,"an item listed above is not repeated as a message");
-  assert.equal(evaluate("todayCount()"),3);
+  evaluate(`D.items=[{n:1,title:"等验收的事",status:"待验收",who:"AI"},{n:2,title:"问你的事",status:"卡住",who:"AI",blocker:"按哪个口径"},{n:3,title:"今天要交的事",status:"进行中",who:"我",due:TODAY},{n:4,title:"排队的事",status:"进行中",who:"AI"},{n:5,title:"别人的事",status:"进行中",who:"别人"},{n:6,title:"下周的事",status:"进行中",who:"我",due:"2099-01-01"}];
+    D.inbox=[{id:1,at:TODAY+"T09:00:00",kind:"done",title:"#1 做完了",refs:[1],read:false},{id:2,at:TODAY+"T08:30:00",kind:"brief",title:"早报",text:"早报\\n第二行",read:false},{id:3,at:"2026-01-01T08:30:00",kind:"pending",title:"「投流方案」该定了",read:false}]; S.view=null; S.all="今天"; S.dim=null; S.openMsg=null; S.working=false; render()`);
+  assert.equal(evaluate("S.view"),"all", "事项 opens first");
+  const today = evaluate("allPage()");
+  for (const label of ["按类型","按项目","按人","今天 3","全部","已完成","不做的","要你看","等验收的事","问你的事","你来做","今天要交的事","提醒","投流方案","消息 <b>3</b>"]) assert.ok(today.includes(label), label);
+  assert.doesNotMatch(today,/别人的事|下周的事|排队的事|AI 自己判断能不能做/, "今天: only today's; the AI switch is in settings");
+  assert.deepEqual([...today.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]),["提醒","要你看：验收、AI 问你","你来做"], "what waits on you first");
+  const everything = evaluate('S.all="全部"; allPage()');
+  for (const label of ["AI 做","排队的事","别人做","别人的事","下周的事"]) assert.ok(everything.includes(label), label);
+  assert.equal(evaluate("needCount()"),2);
   const side = evaluate("sideHTML()");
-  assert.match(side,/今天<span class="c hot">3</); assert.doesNotMatch(side,/收件箱|等我处理|进行中|已完成/);
-  evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('today'\)"/);
-  // 新进来: grouped by where they came from, a group taken or dropped at once; 备材料 sits inside its item
+  assert.match(side,/事项<span class="c hot">2</); assert.doesNotMatch(side,/今天|新进来|收件箱|等我处理/);
+  evaluate('S.view="inbox"'); assert.match(evaluate("sideHTML()"),/class="nav on" onclick="go\('all'\)"/);
+  evaluate('S.view="today"; render()'); assert.equal(evaluate("S.view"),"all", "an old link to 今天 lands on 事项");
+  // 等你定: grouped by where they came from, a group taken or dropped at once; 备材料 sits inside its item
   evaluate(`D.items=[
     {n:11,title:"暂停代运营",status:"待确认",who:"我",created:"2026-11-25 10:00",origin:{kind:"会议",group:"观己日常运营沟通",person:null,client:false,at:"2026-11-25 10:00"},quote:"[00:05:13]  00:05:13   代运营先停"},
     {n:12,title:"试投搜索广告",status:"待确认",who:"我",created:"2026-11-25 10:01",origin:{kind:"会议",group:"观己日常运营沟通",person:null,client:false,at:"2026-11-25 10:00"}},
@@ -311,33 +315,32 @@ function reset(item) {
     {n:15,title:"告诉实习生安排",status:"进行中",who:"我",due:TODAY,created:"2026-11-26 09:46",origin:{kind:"聊天",group:"陈娈娇",person:"陈娈娇",client:false,at:"2026-11-26 09:45"},quote:"[陈娈娇 2026-11-26 09:45 陈娈娇] 你直接跟她说一声就行，谢谢~"},
     {n:16,title:"备材料：告诉实习生安排",status:"待验收",who:"AI",parent:15},
     {n:17,title:"让豪铭加返回按钮",status:"未开始",who:"我",done_hint:{evidence:"[11-25 14:02 李瑞轩] 返回按钮加上了",where:"和李瑞轩的私聊"}}];
-    D.inbox=[{id:9,at:TODAY+"T09:06:00",kind:"system",title:"⚠ AI 员工已经 269 分钟没检查会议和事项了。",read:false},{id:10,at:TODAY+"T09:40:00",kind:"new",title:"飞书任务 · 新增 1 件：#13",refs:[13],read:false}]; render()`);
-  const groups = plain("newGroups().map(g=>[g.label,g.tag,g.items.map(i=>i.n)])");
+    D.inbox=[{id:9,at:TODAY+"T09:06:00",kind:"system",title:"⚠ AI 员工已经 269 分钟没检查会议和事项了。",read:false}]; S.view="all"; S.all="全部"; S.dim="type"; render()`);
+  const groups = plain("freshGroupsOf(D.items.filter(i=>i.status==='待确认')).map(g=>[g.label,g.tag,g.items.map(i=>i.n)])");
   assert.deepEqual(groups,[["王客户","客户",[14]],["陈娈娇","聊天",[13]],["观己日常运营沟通","会议",[11,12]]]);
-  const fresh = evaluate('S.view="new"; newPage()');
-  for (const label of ["都我来","都交给 AI","都不要","观己日常运营沟通","2 件"]) assert.ok(fresh.includes(label), label);
-  assert.match(evaluate("sideHTML()"),/新进来<span class="c need">4</);
-  const t2 = evaluate('S.view="today"; todayPage()');
+  const t2 = evaluate("allPage()");
+  for (const label of ["等你定：新进来的","都我来","都交给 AI","都不要","观己日常运营沟通","2 件"]) assert.ok(t2.includes(label), label);
+  const heads = [...t2.matchAll(/class="sec-h">([^<]+)</g)].map(m=>m[1]);
+  assert.deepEqual(heads,["要你看：验收、AI 问你","等你定：新进来的","看起来已经办完"], "the sections in order; an item sits in the first one it fits");
   assert.ok(t2.includes("告诉实习生安排") && t2.includes("AI 备好了材料，等你看"), "the 备材料 shows inside its item");
   assert.doesNotMatch(t2,/备材料：告诉实习生安排/, "not as a row of its own");
   assert.ok(t2.includes("陈娈娇 11/26 09:45：「你直接跟她说一声就行，谢谢~」"), "why it is here: who said what, when");
-  assert.ok(t2.includes("看起来已经办完") && t2.includes("返回按钮加上了") && t2.includes("没办完"), "done, with the words that show it");
-  assert.ok(t2.includes("新进来 4 件"), "new items are one card that leads to 新进来");
-  assert.doesNotMatch(t2,/269 分钟|暂停代运营/, "no system notice and no new item in the list");
+  assert.ok(t2.includes("返回按钮加上了") && t2.includes("没办完"), "done, with the words that show it");
+  assert.doesNotMatch(t2,/269 分钟/, "no system notice in the list");
   // the status dot: the system's own trouble, handled in the background
   assert.match(evaluate("healthDot()"),/件要你来/, "what only the owner can do comes first");
   assert.match(evaluate("healthDot(0)"),/AI 在处理/);
   assert.match(evaluate("S.health=true; healthPanel()"),/269 分钟没检查[\s\S]*不用你处理/); evaluate("S.health=false");
   evaluate("D.inbox=[]"); assert.match(evaluate("healthDot(0)"),/后台正常/);
   // 事项 → 按人: clients apart, a person picked shows their items, and the guess can be corrected
-  evaluate('S.view="all"; S.dim="people"; S.all="进行中"; S.who=null');
+  evaluate('S.view="all"; S.dim="people"; S.all="全部"; S.who=null');
   const people = evaluate("allPage()");
-  for (const label of ["按项目","按人","客户","同事","会议","王客户","陈娈娇","观己日常运营沟通"]) assert.ok(people.includes(label), label);
+  for (const label of ["按类型","按项目","按人","客户","同事","会议","王客户","陈娈娇","观己日常运营沟通"]) assert.ok(people.includes(label), label);
   assert.ok(people.indexOf(">客户<") < people.indexOf(">同事<"), "clients first");
   evaluate('S.who="王客户"'); assert.match(evaluate("allPage()"),/不是客户/);
   evaluate('S.who="陈娈娇"'); assert.match(evaluate("allPage()"),/标成客户/);
   evaluate('S.dim="proj"; S.who=null');
-  evaluate(`[D.items,D.inbox]=${keepAll}; S.view="todo"`);
+  evaluate(`[D.items,D.inbox]=${keepAll}; S.view="all"; S.all="今天"; S.dim="type"`);
   assert.ok(!/62 改|输入指令|编号 \+ 动作/.test(html), "no command syntax shown to the owner");
   for (let step = 0; step < evaluate("OB.length"); step++) {  // the first-run guide: every step renders its own title
     evaluate(`S.ob={step:${step}}`);
@@ -352,9 +355,9 @@ function reset(item) {
   evaluate('D.memory.organize={}; D.memory.versions=[{id:1}]'); board = evaluate("progressBoard(setupSteps())");
   assert.match(board,/go\('mem'\)[^>]*>理出 1 个版本，去「记忆」里看/, "finished: one click to see it");
   evaluate('D.memory.versions=[]; S.organizedNow=false');
-  assert.match(evaluate("todayPage()"),/pg-card/, "today shows the progress while the AI works");
+  assert.match(evaluate('(S.view="all",S.all="今天",S.dim="type",allPage())'),/pg-card/, "today shows the progress while the AI works");
   evaluate('D.settings.setup={driver:{},asks:{},doing:{},gave_up:{}}; D.settings.want_feishu=false; D.memory.profile={text:"x"}');
-  assert.doesNotMatch(evaluate("todayPage()"),/pg-card/, "nothing going on: no progress card");
+  assert.doesNotMatch(evaluate('(S.view="all",S.all="今天",S.dim="type",allPage())'),/pg-card/, "nothing going on: no progress card");
   // who sees the guide: a new owner; an owner from an older guide who was never got to know; the rest only hear what is new
   for (const [st, known, ob, news] of [[{onboarded:false},false,true,false],[{onboarded:true,guide_version:1},false,true,false],[{onboarded:true,guide_version:1},true,false,true],[{onboarded:true,guide_version:3},true,false,false],[{onboarded:true,guide_version:2},true,false,true]]) {
     const g = plain(`guideFor(${JSON.stringify(st)}, ${known?'{text:"岗位"}':'{text:""}'})`);
